@@ -1,5 +1,3 @@
-import pathlib
-
 from compressors import CompressedDataset, Compressor
 from dataset import Dataset
 
@@ -8,28 +6,27 @@ from .metadata import MetadataSynthesizer
 from .start_time import StartTimeSynthesizer
 
 
-class GenTCompressedDataset(CompressedDataset):
-    def get_size(self) -> int:
-        return 0
-
-    def save(self, dir):
-        pass
-
-
 class GenTCompressor(Compressor):
     def __init__(self, config: GenTConfig):
         super().__init__()
         self.config = config
-        self.start_time_synthesizer = StartTimeSynthesizer(config=config)
-        self.metadata_synthesizer = MetadataSynthesizer(config=config)
 
-    def compress(self, dataset: Dataset) -> GenTCompressedDataset:
-        self.start_time_synthesizer.distill(dataset)
-        self.metadata_synthesizer.distill(dataset)
+    def compress(self, dataset: Dataset) -> CompressedDataset:
+        compressed_dataset = CompressedDataset()
+        compressed_dataset.add("gen_t_config", self.config.to_dict())
 
-    def save(self, dir: pathlib.Path):
-        self.start_time_synthesizer.save(dir / "start_time")
-        self.metadata_synthesizer.save(dir / "metadata")
+        start_time_synthesizer = StartTimeSynthesizer(config=self.config)
+        metadata_synthesizer = MetadataSynthesizer(config=self.config)
 
-    def decompress(self, compressed_dataset: GenTCompressedDataset) -> Dataset:
-        pass
+        start_time_synthesizer.distill(dataset)
+        start_time_synthesizer.save(compressed_dataset)
+
+        metadata_synthesizer.distill(dataset)
+        metadata_synthesizer.save(compressed_dataset)
+
+        return compressed_dataset
+
+    def decompress(self, compressed_dataset: CompressedDataset) -> Dataset:
+        start_time_synthesizer = StartTimeSynthesizer.load(compressed_dataset)
+        start_time = start_time_synthesizer.synthesize()
+        print("start_time", start_time)

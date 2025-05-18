@@ -3,6 +3,8 @@ import os
 import pathlib
 import sys
 
+from logger import setup_logging
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
@@ -14,6 +16,7 @@ from dataset import RCAEvalDataset  # noqa: E402
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
+setup_logging()
 
 
 if __name__ == "__main__":

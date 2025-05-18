@@ -1,9 +1,11 @@
+import logging
 import pathlib
 
 import pandas as pd
 from sdv.metadata import Metadata
 from sdv.single_table import CTGANSynthesizer
 
+from compressors import CompressedDataset, SerializationFormat
 from compressors.trace import Trace
 from dataset import Dataset
 
@@ -12,6 +14,7 @@ from .config import GenTConfig
 
 class MetadataSynthesizer:
     def __init__(self, config: GenTConfig):
+        self.logger = logging.getLogger(__name__)
         self.config = config
         self.root_synthesizer = None
         self.chain_synthesizer = None
@@ -62,6 +65,7 @@ class MetadataSynthesizer:
     def distill(self, dataset):
         metadata_dataset = self._get_metadata_dataset(dataset)
         sdv_metadata = self._get_sdv_metadata()
+        self.logger.info("Training root synthesizer")
         self.root_synthesizer = CTGANSynthesizer(
             metadata=sdv_metadata,
             epochs=self.config.epochs,
@@ -71,6 +75,7 @@ class MetadataSynthesizer:
             enforce_rounding=False,
             verbose=True,
         )
+        self.logger.info("Training chain synthesizer")
         self.root_synthesizer.fit(metadata_dataset["root"])
         self.chain_synthesizer = CTGANSynthesizer(
             metadata=sdv_metadata,
@@ -83,9 +88,17 @@ class MetadataSynthesizer:
         )
         self.chain_synthesizer.fit(metadata_dataset["chain"])
 
-    def save(self, dir: pathlib.Path):
-        self.root_synthesizer.save(dir / "root_synthesizer")
-        self.chain_synthesizer.save(dir / "chain_synthesizer")
+    def save(self, compressed_dataset: CompressedDataset):
+        compressed_dataset.add(
+            "root_synthesizer",
+            self.root_synthesizer,
+            SerializationFormat.CLOUDPICKLE,
+        )
+        compressed_dataset.add(
+            "chain_synthesizer",
+            self.chain_synthesizer,
+            SerializationFormat.CLOUDPICKLE,
+        )
 
     def load(self, dir: pathlib.Path):
         self.root_synthesizer = CTGANSynthesizer.load(dir / "root_synthesizer")

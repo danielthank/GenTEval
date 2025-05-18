@@ -1,10 +1,10 @@
-import pathlib
-import pickle
+import logging
 
 import pandas as pd
 from sdv.metadata import Metadata
 from sdv.single_table import CTGANSynthesizer
 
+from compressors import CompressedDataset, SerializationFormat
 from compressors.trace import Trace
 from dataset import Dataset
 
@@ -13,6 +13,7 @@ from .config import GenTConfig
 
 class StartTimeSynthesizer:
     def __init__(self, config: GenTConfig):
+        self.logger = logging.getLogger(__name__)
         self.config = config
         self.synthesizer = None
         self.graph_count = None
@@ -37,6 +38,7 @@ class StartTimeSynthesizer:
         metadata.add_table("transactions")
         metadata.add_column("graph", sdtype="categorical")
         metadata.add_column("startTime", sdtype="numerical")
+        self.logger.info("Training start time synthesizer")
         self.synthesizer = CTGANSynthesizer(
             metadata=metadata,
             epochs=self.config.epochs,
@@ -47,16 +49,29 @@ class StartTimeSynthesizer:
         )
         self.synthesizer.fit(start_time_dataset)
 
-    def save(self, dir: pathlib.Path):
-        self.synthesizer.save(dir / "start_time_synthesizer")
-        pickle.dump(
-            self.graph_count,
-            open(dir / "graph_count.pkl", "wb"),
+    def save(self, compressed_dataset: CompressedDataset):
+        compressed_dataset.add(
+            "start_time_synthesizer", self.synthesizer, SerializationFormat.CLOUDPICKLE
+        )
+        compressed_dataset.add(
+            "graph_count", self.graph_count, SerializationFormat.MSGPACK
         )
 
-    def load(self, dir: pathlib.Path):
-        self.synthesizer = CTGANSynthesizer.load(dir / "start_time_synthesizer")
-        self.graph_count = pickle.load(open(dir / "graph_count.pkl", "rb"))
+    @staticmethod
+    def load(compressed_dataset: CompressedDataset) -> "StartTimeSynthesizer":
+        config = GenTConfig.from_dict(compressed_dataset["gen_t_config"])
+        start_time_synthesizer = StartTimeSynthesizer(config)
+        start_time_synthesizer.synthesizer = compressed_dataset[
+            "start_time_synthesizer"
+        ]
+        start_time_synthesizer.graph_count = compressed_dataset["graph_count"]
+        return start_time_synthesizer
 
     def synthesize(self):
-        pass
+        rows = []
+        for graph, count in self.graph_count.items():
+            rows.extend([{"graph": graph} for _ in range(count)])
+        known_columns = pd.DataFrame(rows)
+        return self.synthesizer.sample_remaining_columns(
+            known_columns=known_columns, max_tries_per_batch=500
+        )
