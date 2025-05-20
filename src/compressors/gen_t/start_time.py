@@ -2,13 +2,13 @@ import logging
 
 import pandas as pd
 from sdv.metadata import Metadata
-from sdv.single_table import CTGANSynthesizer
 
 from compressors import CompressedDataset, SerializationFormat
 from compressors.trace import Trace
 from dataset import Dataset
 
 from .config import GenTConfig
+from .ctgan.gen_t_ctgan_synthesizer import GenTCTGANSynthesizer
 
 
 class StartTimeSynthesizer:
@@ -23,12 +23,16 @@ class StartTimeSynthesizer:
         start_time_dataset = []
         for trace in dataset.traces.values():
             trace = Trace(trace)
-            graph = str(trace.edges)
+            graph = trace.graph
             if graph == "[]":  # TODO: support graph with no edges
                 continue
             start_time = trace.start_time
             start_time_dataset.append([graph, start_time])
-        return pd.DataFrame(start_time_dataset, columns=column_names)
+        start_time = pd.DataFrame(start_time_dataset, columns=column_names)
+        start_time = start_time.astype(
+            {"graph": "string", "startTime": "int64"}, copy=False
+        )
+        return start_time
 
     def distill(self, dataset):
         start_time_dataset = self._get_start_time_dataset(dataset)
@@ -39,7 +43,7 @@ class StartTimeSynthesizer:
         metadata.add_column("graph", sdtype="categorical")
         metadata.add_column("startTime", sdtype="numerical")
         self.logger.info("Training start time synthesizer")
-        self.synthesizer = CTGANSynthesizer(
+        self.synthesizer = GenTCTGANSynthesizer(
             metadata=metadata,
             epochs=self.config.epochs,
             batch_size=self.config.batch_size,

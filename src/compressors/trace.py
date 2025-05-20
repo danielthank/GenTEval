@@ -32,14 +32,13 @@ class Trace:
         for span in self.trace.values():
             if span["parentSpanId"] is not None and span["parentSpanId"] in self.trace:
                 parent_span = self.trace[span["parentSpanId"]]
-                edges.append(
-                    (
-                        parent_span["nodeName"].split("@")[0],
-                        span["nodeName"].split("@")[0],
-                    )
-                )
+                edges.append((parent_span["nodeName"], span["nodeName"]))
         self._edges = sorted(edges)
         return self._edges
+
+    @property
+    def graph(self):
+        return str(self.edges)
 
     def unique_name(self, span_id):
         if self._preorder is None:
@@ -74,6 +73,8 @@ class Trace:
                 if self.trace[id]["parentSpanId"] is not None:
                     parent_span = self.trace[self.trace[id]["parentSpanId"]]
                     gap = self.trace[id]["startTime"] - parent_span["startTime"]
+                    if gap < 0:
+                        gap = 0  # gap is modeled as log normal distribution so it cannot be negative
                     self._gap_from_parent[id] = gap
                 else:
                     self._gap_from_parent[id] = 0

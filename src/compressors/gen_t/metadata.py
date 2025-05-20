@@ -1,15 +1,19 @@
+import copy
 import logging
-import pathlib
+import uuid
+from collections import Counter, defaultdict
 
 import pandas as pd
+from rdt.transformers import LogScaler
 from sdv.metadata import Metadata
-from sdv.single_table import CTGANSynthesizer
+from tqdm import tqdm
 
 from compressors import CompressedDataset, SerializationFormat
 from compressors.trace import Trace
 from dataset import Dataset
 
 from .config import GenTConfig
+from .ctgan.gen_t_ctgan_synthesizer import GenTCTGANSynthesizer
 
 
 class MetadataSynthesizer:
@@ -18,6 +22,7 @@ class MetadataSynthesizer:
         self.config = config
         self.root_synthesizer = None
         self.chain_synthesizer = None
+        self.graph_to_chain_count = None
 
     def _get_sdv_metadata(self):
         metadata = Metadata()
@@ -33,18 +38,30 @@ class MetadataSynthesizer:
         root_dataset = []
         chain_dataset = []
         columns = ["graph", "chain"]
+        dtypes = {"graph": "string", "chain": "string"}
         for i in range(self.config.chain_length):
             columns.append(f"gapFromParent_{i}")
             columns.append(f"duration_{i}")
+            dtypes[f"gapFromParent_{i}"] = "int64"
+            dtypes[f"duration_{i}"] = "int64"
 
         for trace in dataset.traces.values():
             trace = Trace(trace)
             # TODO: support graph with no edges
             if len(trace) <= 1:
                 continue
+
+            graph = trace.graph
+            if not self.graph_to_chain_count:
+                self.graph_to_chain_count = {}
+            if graph not in self.graph_to_chain_count:
+                self.graph_to_chain_count[graph] = defaultdict(int)
+
+            root_chains = set()
+            chain_chains = set()
             for chain in trace.chains(self.config.chain_length):
                 row = [
-                    str(trace.edges),
+                    trace.graph,
                     "#".join(
                         [trace.unique_name(span_id) for span_id in chain["chain"]]
                     ),
@@ -55,18 +72,40 @@ class MetadataSynthesizer:
                     )
                 if chain["is_root"]:
                     root_dataset.append(row)
+                    root_chains.add(row[1])
                 else:
                     chain_dataset.append(row)
+                    chain_chains.add(row[1])
+            root_chains = sorted(root_chains)
+            chain_chains = sorted(chain_chains)
+            chains = {"root": root_chains, "chain": chain_chains}
+            self.graph_to_chain_count[graph][str(chains)] += 1
+
+        root = pd.DataFrame(root_dataset, columns=columns)
+        chain = pd.DataFrame(chain_dataset, columns=columns)
+        root.fillna({column: 0 for column in columns[2:]}, inplace=True)
+        root = root.astype(dtypes, copy=False)
+        chain.fillna({column: 0 for column in columns[2:]}, inplace=True)
+        chain = chain.astype(dtypes, copy=False)
+
         return {
-            "root": pd.DataFrame(root_dataset, columns=columns),
-            "chain": pd.DataFrame(chain_dataset, columns=columns),
+            "root": root,
+            "chain": chain,
         }
+
+    def _get_customized_transformers(self):
+        customized_transformer = {}
+        for i in range(self.config.chain_length):
+            customized_transformer[f"gapFromParent_{i}"] = LogScaler(constant=-0.001)
+            customized_transformer[f"duration_{i}"] = LogScaler(constant=-0.001)
+        return customized_transformer
 
     def distill(self, dataset):
         metadata_dataset = self._get_metadata_dataset(dataset)
         sdv_metadata = self._get_sdv_metadata()
+
         self.logger.info("Training root synthesizer")
-        self.root_synthesizer = CTGANSynthesizer(
+        self.root_synthesizer = GenTCTGANSynthesizer(
             metadata=sdv_metadata,
             epochs=self.config.epochs,
             batch_size=self.config.batch_size,
@@ -75,9 +114,12 @@ class MetadataSynthesizer:
             enforce_rounding=False,
             verbose=True,
         )
-        self.logger.info("Training chain synthesizer")
+        self.root_synthesizer.auto_assign_transformers(metadata_dataset["root"])
+        self.root_synthesizer.update_transformers(self._get_customized_transformers())
         self.root_synthesizer.fit(metadata_dataset["root"])
-        self.chain_synthesizer = CTGANSynthesizer(
+
+        self.logger.info("Training chain synthesizer")
+        self.chain_synthesizer = GenTCTGANSynthesizer(
             metadata=sdv_metadata,
             epochs=self.config.epochs,
             batch_size=self.config.batch_size,
@@ -86,9 +128,16 @@ class MetadataSynthesizer:
             enforce_rounding=False,
             verbose=True,
         )
+        self.chain_synthesizer.auto_assign_transformers(metadata_dataset["chain"])
+        self.chain_synthesizer.update_transformers(self._get_customized_transformers())
         self.chain_synthesizer.fit(metadata_dataset["chain"])
 
     def save(self, compressed_dataset: CompressedDataset):
+        compressed_dataset.add(
+            "graph_to_chain_count",
+            self.graph_to_chain_count,
+            SerializationFormat.MSGPACK,
+        )
         compressed_dataset.add(
             "root_synthesizer",
             self.root_synthesizer,
@@ -100,9 +149,115 @@ class MetadataSynthesizer:
             SerializationFormat.CLOUDPICKLE,
         )
 
-    def load(self, dir: pathlib.Path):
-        self.root_synthesizer = CTGANSynthesizer.load(dir / "root_synthesizer")
-        self.chain_synthesizer = CTGANSynthesizer.load(dir / "chain_synthesizer")
+    @staticmethod
+    def load(compressed_dataset: CompressedDataset) -> "MetadataSynthesizer":
+        config = GenTConfig.from_dict(compressed_dataset["gen_t_config"])
+        metadata_synthesizer = MetadataSynthesizer(config)
+        metadata_synthesizer.graph_to_chain_count = compressed_dataset[
+            "graph_to_chain_count"
+        ]
+        for graph in metadata_synthesizer.graph_to_chain_count:
+            metadata_synthesizer.graph_to_chain_count[graph] = Counter(
+                metadata_synthesizer.graph_to_chain_count[graph]
+            )
+        metadata_synthesizer.root_synthesizer = compressed_dataset["root_synthesizer"]
+        metadata_synthesizer.chain_synthesizer = compressed_dataset["chain_synthesizer"]
+        return metadata_synthesizer
 
-    def synthesize(self):
-        pass
+    def synthesize(self, start_time: pd.DataFrame) -> pd.DataFrame:
+        def _get_random_trace_id():
+            return uuid.uuid4().hex
+
+        graph_to_chain_left = copy.deepcopy(self.graph_to_chain_count)
+        root_to_synthesize = {}
+        chain_to_synthesize = defaultdict(list)
+        total_chains = 0
+        for row in start_time.itertuples(index=False):
+            graph = row.graph
+            start_time = row.startTime
+            chains_chosen = graph_to_chain_left[graph].most_common(1)[0]
+            graph_to_chain_left[graph].subtract(chains_chosen)
+            chains_chosen = eval(chains_chosen[0])
+            trace_id = _get_random_trace_id()
+            root_to_synthesize[trace_id, start_time, graph] = chains_chosen["root"]
+
+            for chain in chains_chosen["chain"]:
+                trigger = chain.split("#")[0]
+                chain_to_synthesize[trace_id, start_time, graph, trigger].append(chain)
+                total_chains += 1
+
+        root_known = []
+        for (trace_id, start_time, graph), chains in root_to_synthesize.items():
+            for chain in chains:
+                row = [trace_id, start_time, graph, chain]
+                root_known.append(row)
+        root_known = pd.DataFrame(
+            root_known, columns=["traceId", "startTime", "graph", "chain"]
+        )
+        chain_sampled = self.root_synthesizer.sample_remaining_columns(
+            root_known, max_tries_per_batch=500, condition_columns=["graph", "chain"]
+        )
+        all_chains = chain_sampled.copy()
+
+        with tqdm(total=total_chains, desc="Synthesizing chains") as progress_bar:
+            while chain_to_synthesize:
+                chain_known = []
+                for trigger_chain in chain_sampled.itertuples(index=False):
+                    trace_id = trigger_chain.traceId
+                    graph = trigger_chain.graph
+                    start_time = trigger_chain.startTime
+                    for trigger_idx, trigger in enumerate(
+                        trigger_chain.chain.split("#")
+                    ):
+                        # for each trigger check if there are chains to synthesize
+                        if (
+                            trace_id,
+                            start_time,
+                            graph,
+                            trigger,
+                        ) in chain_to_synthesize:
+                            for chain in chain_to_synthesize[
+                                trace_id, start_time, graph, trigger
+                            ]:
+                                row = [trace_id, start_time, graph, chain]
+                                trigger_gap_from_parent = getattr(
+                                    trigger_chain, f"gapFromParent_{trigger_idx}"
+                                )
+
+                                trigger_duration = getattr(
+                                    trigger_chain, f"duration_{trigger_idx}"
+                                )
+                                row.extend([trigger_gap_from_parent, trigger_duration])
+                                chain_known.append(row)
+                            del chain_to_synthesize[
+                                trace_id, start_time, graph, trigger
+                            ]
+                chain_known = pd.DataFrame(
+                    chain_known,
+                    columns=[
+                        "traceId",
+                        "startTime",
+                        "graph",
+                        "chain",
+                        "gapFromParent_0",
+                        "duration_0",
+                    ],
+                )
+                chain_sampled = self.chain_synthesizer.sample_remaining_columns(
+                    chain_known,
+                    max_tries_per_batch=500,
+                    condition_columns=[
+                        "graph",
+                        "chain",
+                    ],  # TODO: condition on gapFromParent_0 and duration_0, continuous
+                    progress_bar=progress_bar,
+                )
+                if chain_sampled.empty:
+                    # no new chains sampled
+                    break
+
+                all_chains = pd.concat(
+                    [all_chains, chain_sampled.copy()], ignore_index=True, copy=False
+                )
+
+        return all_chains

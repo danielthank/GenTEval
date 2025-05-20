@@ -4,6 +4,7 @@ import os
 import pathlib
 import shutil
 from enum import Enum
+from hashlib import sha256
 from typing import Any, Dict
 
 import cloudpickle
@@ -159,9 +160,9 @@ class CompressedDataset:
             serialized = self._serialize(value, format_to_use)
             compressed = self._compress(serialized)
 
-            # Use a sanitized version of the key as filename
-            sanitized_key = str(hash(key))
-            with open(data_dir / sanitized_key, "wb") as f:
+            # Use sha256 hash of the key for filename
+            hashed_key = sha256(key.encode("utf-8")).hexdigest()
+            with open(data_dir / hashed_key, "wb") as f:
                 f.write(compressed)
 
     @classmethod
@@ -189,7 +190,7 @@ class CompressedDataset:
 
         # Map of sanitized keys to original keys
         keys = metadata["keys"]
-        key_map = {str(hash(key)): key for key in keys}
+        key_map = {sha256(key.encode("utf-8")).hexdigest(): key for key in keys}
 
         # Load data
         data_dir = dir / "data"
