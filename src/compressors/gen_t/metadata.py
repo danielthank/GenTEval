@@ -16,6 +16,60 @@ from .config import GenTConfig
 from .ctgan.gen_t_ctgan_synthesizer import GenTCTGANSynthesizer
 
 
+def _get_random_trace_id():
+    return "trace" + uuid.uuid4().hex
+
+
+def _get_random_span_id():
+    return "span" + uuid.uuid4().hex
+
+
+def _df_to_dataset(df: pd.DataFrame) -> Dataset:
+    dataset = Dataset()
+    dataset.traces = {}
+    for trace_id, chains in df.groupby("traceId"):
+        spans_dict = {}
+        for chain in chains.itertuples(index=False):
+            if chain.isRoot:
+                node_start = 0
+            else:
+                node_start = 1
+
+            nodes = chain.chain.split("#")
+            for i in range(node_start, len(nodes)):
+                node = nodes[i]
+                if i > 0:
+                    # has parent
+                    parent_node = nodes[i - 1]
+                    spans_dict[node] = {
+                        "spanId": _get_random_span_id(),
+                        "nodeName": node,
+                        "startTime": spans_dict[parent_node]["startTime"]
+                        + getattr(chain, f"gapFromParent_{i}"),
+                        "duration": getattr(chain, f"duration_{i}"),
+                        "statusCode": None,
+                        "parentSpanId": spans_dict[parent_node]["spanId"],
+                    }
+                else:
+                    # root node
+                    spans_dict[node] = {
+                        "spanId": _get_random_span_id(),
+                        "nodeName": node,
+                        "startTime": chain.startTime,
+                        "duration": getattr(chain, f"duration_{i}"),
+                        "statusCode": None,
+                        "parentSpanId": None,
+                    }
+        # change the key of spans_dict to spanId
+        # remove the spanId from the value
+        spans_dict = {
+            span["spanId"]: {k: v for k, v in span.items() if k != "spanId"}
+            for span in spans_dict.values()
+        }
+        dataset.traces[trace_id] = spans_dict
+    return dataset
+
+
 class MetadataSynthesizer:
     def __init__(self, config: GenTConfig):
         self.logger = logging.getLogger(__name__)
@@ -164,10 +218,7 @@ class MetadataSynthesizer:
         metadata_synthesizer.chain_synthesizer = compressed_dataset["chain_synthesizer"]
         return metadata_synthesizer
 
-    def synthesize(self, start_time: pd.DataFrame) -> pd.DataFrame:
-        def _get_random_trace_id():
-            return uuid.uuid4().hex
-
+    def synthesize(self, start_time: pd.DataFrame) -> Dataset:
         graph_to_chain_left = copy.deepcopy(self.graph_to_chain_count)
         root_to_synthesize = {}
         chain_to_synthesize = defaultdict(list)
@@ -197,6 +248,7 @@ class MetadataSynthesizer:
         chain_sampled = self.root_synthesizer.sample_remaining_columns(
             root_known, max_tries_per_batch=500, condition_columns=["graph", "chain"]
         )
+        chain_sampled["isRoot"] = True
         all_chains = chain_sampled.copy()
 
         with tqdm(total=total_chains, desc="Synthesizing chains") as progress_bar:
@@ -252,6 +304,7 @@ class MetadataSynthesizer:
                     ],  # TODO: condition on gapFromParent_0 and duration_0, continuous
                     progress_bar=progress_bar,
                 )
+                chain_sampled["isRoot"] = False
                 if chain_sampled.empty:
                     # no new chains sampled
                     break
@@ -260,4 +313,4 @@ class MetadataSynthesizer:
                     [all_chains, chain_sampled.copy()], ignore_index=True, copy=False
                 )
 
-        return all_chains
+        return _df_to_dataset(all_chains)

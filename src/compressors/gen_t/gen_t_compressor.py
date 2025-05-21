@@ -40,5 +40,4 @@ class GenTCompressor(Compressor):
 
         logging.info("Synthesizing metadata")
         metadata_synthesizer = MetadataSynthesizer.load(compressed_dataset)
-        metadata = metadata_synthesizer.synthesize(start_time)
-        print(metadata)
+        return metadata_synthesizer.synthesize(start_time)
