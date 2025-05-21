@@ -7,14 +7,10 @@ from logger import setup_logging
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
+setup_logging()
 
 from compressors import CompressedDataset, GenTCompressor, GenTConfig  # noqa: E402
 from dataset import RCAEvalDataset  # noqa: E402
-
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-setup_logging()
-
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Compress and decompress traces")
@@ -42,4 +38,5 @@ if __name__ == "__main__":
     # Decompress the dataset
     compressed_dataset = CompressedDataset.load(args.process_dir / "compressed")
     recovered_dataset = compressor.decompress(compressed_dataset)
+    recovered_dataset = RCAEvalDataset.from_dataset(recovered_dataset)
     recovered_dataset.save(args.process_dir / "recovered")
