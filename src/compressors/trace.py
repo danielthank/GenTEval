@@ -71,10 +71,13 @@ class Trace:
             self._gap_from_parent = {}
             for id in self.trace:
                 if self.trace[id]["parentSpanId"] is not None:
-                    parent_span = self.trace[self.trace[id]["parentSpanId"]]
-                    gap = self.trace[id]["startTime"] - parent_span["startTime"]
-                    if gap < 0:
-                        gap = 0  # gap is modeled as log normal distribution so it cannot be negative
+                    if self.trace[id]["parentSpanId"] not in self.trace:
+                        gap = 0
+                    else:
+                        parent_span = self.trace[self.trace[id]["parentSpanId"]]
+                        gap = self.trace[id]["startTime"] - parent_span["startTime"]
+                        if gap < 0:
+                            gap = 0  # gap is modeled as log normal distribution so it cannot be negative
                     self._gap_from_parent[id] = gap
                 else:
                     self._gap_from_parent[id] = 0

@@ -22,7 +22,7 @@ class RCAEvalDataset(Dataset):
 
     @property
     def spans(self):
-        if self._spans is None and self.traces is not None:
+        if self._spans is None and self._traces is not None:
             self._traces_to_spans()
         if self._spans is None and self.run_dir is not None:
             self._load_spans_from_run_dir()

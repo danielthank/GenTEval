@@ -9,6 +9,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 setup_logging()
 
+from dataset import RCAEvalDataset  # noqa: E402
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -29,3 +30,5 @@ if __name__ == "__main__":
 
     args.process_dir = pathlib.Path(args.process_dir)
     args.evaluation_dir = pathlib.Path(args.evaluation_dir)
+
+    recovered_dataset = RCAEvalDataset().load(args.process_dir / "recovered")

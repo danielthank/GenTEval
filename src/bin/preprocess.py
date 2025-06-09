@@ -95,7 +95,7 @@ async def main():
     for app_name, service, fault, run in run_dirs():
         run_dir = root_dir.joinpath(app_name, f"{service}_{fault}", str(run))
         output_path = output_dir.joinpath(
-            app_name, f"{service}_{fault}", str(run), "traces.pkl"
+            app_name, f"{service}_{fault}", str(run)
         )
         tasks.append(process(run_dir, output_path, semaphore))
 

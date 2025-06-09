@@ -129,6 +129,7 @@ name = "genteval"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "colorama" },
     { name = "msgpack" },
     { name = "sdv" },
 ]
@@ -140,6 +141,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "colorama", specifier = ">=0.4.6" },
     { name = "msgpack", specifier = ">=1.1.0" },
     { name = "sdv", specifier = ">=1.21.0" },
 ]

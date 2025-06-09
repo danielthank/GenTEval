@@ -17,6 +17,7 @@ if __name__ == "__main__":
     )
     argparser.add_argument(
         "--dataset_dir",
+        "-o",
         type=str,
     )
     args = argparser.parse_args()

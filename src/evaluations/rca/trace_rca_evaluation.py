@@ -106,7 +106,7 @@ def tracerca(data, inject_time=None):
 class TraceRCAEvaluation(Evaluation):
     def execute(self, dataset: Dataset):
         dataset = RCAEvalDataset.from_dataset(dataset)
-        return tracerca(dataset.spans, dataset.inject_time)
+        return tracerca(dataset.spans, dataset.labels["inject_time"])
 
     def merge(self, t1, t2) -> TraceRCAReport:
         pass
