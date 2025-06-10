@@ -12,7 +12,6 @@ class RCAEvalDataset(Dataset):
         super().__init__()
         self.run_dir = run_dir
         self._spans = None
-        self._labels = None
 
     @staticmethod
     def from_dataset(dataset: Dataset) -> "RCAEvalDataset":
@@ -27,12 +26,6 @@ class RCAEvalDataset(Dataset):
         if self._spans is None and self.run_dir is not None:
             self._load_spans_from_run_dir()
         return self._spans
-
-    @property
-    def labels(self):
-        if self._labels is None and self.run_dir is not None:
-            self._load_labels_from_run_dir()
-        return self._labels
 
     @property
     def traces(self):
@@ -50,28 +43,17 @@ class RCAEvalDataset(Dataset):
         if spans is not None:
             spans.to_pickle(dir.joinpath("spans.pkl"))
 
-        labels = self.labels
-        if labels is not None:
-            pickle.dump(labels, open(dir.joinpath("labels.pkl"), "wb"))
-
         traces = self.traces
         if traces is not None:
             pickle.dump(traces, open(dir.joinpath("traces.pkl"), "wb"))
 
-    def load(self, dir: pathlib.Path):
-        self._spans = pd.read_pickle(dir.joinpath("spans.pkl"))
-        self._labels = pickle.load(open(dir.joinpath("labels.pkl"), "rb"))
-        self.traces = pickle.load(open(dir.joinpath("traces.pkl"), "rb"))
+    def load(self, dataset_dir: pathlib.Path):
+        self._spans = pd.read_pickle(dataset_dir.joinpath("spans.pkl"))
+        self.traces = pickle.load(open(dataset_dir.joinpath("traces.pkl"), "rb"))
         return self
 
     def _load_spans_from_run_dir(self):
         self._spans = pd.read_csv(self.run_dir.joinpath("traces.csv"))
-        return self
-
-    def _load_labels_from_run_dir(self):
-        self._labels = {}
-        with open(self.run_dir.joinpath("inject_time.txt")) as f:
-            self._labels["inject_time"] = int(f.read().strip())
         return self
 
     def _spans_to_traces(self):

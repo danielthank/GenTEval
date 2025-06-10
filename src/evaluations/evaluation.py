@@ -1,12 +1,12 @@
-from report import Report
-
 from dataset import Dataset
+
+from .report import Report
 
 
 class Evaluation:
-    def evaluate(self, original: Dataset, restored: Dataset) -> Report:
-        t1 = self.execute(original)
-        t2 = self.execute(restored)
+    def evaluate(self, original: Dataset, restored: Dataset, labels) -> Report:
+        t1 = self.execute(original, labels)
+        t2 = self.execute(restored, labels)
         return self.merge(t1, t2)
 
     def execute(self, dataset: Dataset):

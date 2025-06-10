@@ -1,7 +1,10 @@
 import numpy as np
-from evaluation import Dataset, Evaluation
+import pandas as pd
 
-from dataset import RCAEvalDataset
+from dataset import Dataset, RCAEvalDataset
+from evaluations import Evaluation
+
+pd.options.mode.copy_on_write = True
 
 
 class TraceRCAReport:
@@ -40,7 +43,7 @@ def tracerca(data, inject_time=None):
     span_df["methodName"] = span_df["methodName"].fillna(span_df["operationName"])
     span_df["operation"] = span_df["serviceName"] + "_" + span_df["methodName"]
 
-    # inject_time = int(inject_time) * 1_000_000  # convert from seconds to microseconds
+    inject_time = int(inject_time) * 1_000_000  # convert from seconds to microseconds
 
     normal_df = span_df[span_df["startTime"] + span_df["duration"] < inject_time]
     anomal_df = span_df[span_df["startTime"] + span_df["duration"] >= inject_time]
@@ -75,10 +78,11 @@ def tracerca(data, inject_time=None):
             anomal_df[anomal_df["operation"] == op]["abnormal"].sum()
             / anomal_df[anomal_df["operation"] == op]["operation"].count()
         )
-
     ji_dict = {op: 0 for op in operations}
     # ji = 2 *s * c / (s + c)
     for op in operations:
+        if support_dict[op] + confidence_dict[op] == 0:
+            continue
         ji_dict[op] = (
             2
             * support_dict[op]
@@ -104,9 +108,12 @@ def tracerca(data, inject_time=None):
 
 
 class TraceRCAEvaluation(Evaluation):
-    def execute(self, dataset: Dataset):
+    def execute(self, dataset: Dataset, labels):
         dataset = RCAEvalDataset.from_dataset(dataset)
-        return tracerca(dataset.spans, dataset.labels["inject_time"])
+        return tracerca(dataset.spans, labels["inject_time"])
 
-    def merge(self, t1, t2) -> TraceRCAReport:
-        pass
+    def merge(self, original, restored) -> TraceRCAReport:
+        return {
+            "original": original,
+            "restored": restored,
+        }

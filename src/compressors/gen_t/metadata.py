@@ -81,6 +81,7 @@ class MetadataSynthesizer:
     def _get_sdv_metadata(self):
         metadata = Metadata()
         metadata.add_table("metadata")
+        metadata.add_column("startTimeInMinutes", sdtype="categorical")
         metadata.add_column("graph", sdtype="categorical")
         metadata.add_column("chain", sdtype="categorical")
         for i in range(self.config.chain_length):
@@ -91,8 +92,8 @@ class MetadataSynthesizer:
     def _get_metadata_dataset(self, dataset: Dataset):
         root_dataset = []
         chain_dataset = []
-        columns = ["graph", "chain"]
-        dtypes = {"graph": "string", "chain": "string"}
+        columns = ["startTimeInMinutes", "graph", "chain"]
+        dtypes = {"startTimeInMinutes": "int64", "graph": "string", "chain": "string"}
         for i in range(self.config.chain_length):
             columns.append(f"gapFromParent_{i}")
             columns.append(f"duration_{i}")
@@ -115,6 +116,7 @@ class MetadataSynthesizer:
             chain_chains = set()
             for chain in trace.chains(self.config.chain_length):
                 row = [
+                    trace.start_time // (1000000 * 60),  # convert to minutes
                     trace.graph,
                     "#".join(
                         [trace.unique_name(span_id) for span_id in chain["chain"]]
@@ -126,10 +128,10 @@ class MetadataSynthesizer:
                     )
                 if chain["is_root"]:
                     root_dataset.append(row)
-                    root_chains.add(row[1])
+                    root_chains.add(row[2])
                 else:
                     chain_dataset.append(row)
-                    chain_chains.add(row[1])
+                    chain_chains.add(row[2])
             root_chains = sorted(root_chains)
             chain_chains = sorted(chain_chains)
             chains = {"root": root_chains, "chain": chain_chains}
@@ -137,9 +139,9 @@ class MetadataSynthesizer:
 
         root = pd.DataFrame(root_dataset, columns=columns)
         chain = pd.DataFrame(chain_dataset, columns=columns)
-        root.fillna({column: 0 for column in columns[2:]}, inplace=True)
+        root.fillna({column: 0 for column in columns[3:]}, inplace=True)
         root = root.astype(dtypes, copy=False)
-        chain.fillna({column: 0 for column in columns[2:]}, inplace=True)
+        chain.fillna({column: 0 for column in columns[3:]}, inplace=True)
         chain = chain.astype(dtypes, copy=False)
 
         return {
@@ -240,13 +242,16 @@ class MetadataSynthesizer:
         root_known = []
         for (trace_id, start_time, graph), chains in root_to_synthesize.items():
             for chain in chains:
-                row = [trace_id, start_time, graph, chain]
+                row = [trace_id, start_time, start_time // (1000000 * 60), graph, chain]
                 root_known.append(row)
         root_known = pd.DataFrame(
-            root_known, columns=["traceId", "startTime", "graph", "chain"]
+            root_known,
+            columns=["traceId", "startTime", "startTimeInMinutes", "graph", "chain"],
         )
         chain_sampled = self.root_synthesizer.sample_remaining_columns(
-            root_known, max_tries_per_batch=500, condition_columns=["graph", "chain"]
+            root_known,
+            max_tries_per_batch=500,
+            condition_columns=["startTimeInMinutes", "graph", "chain"],
         )
         chain_sampled["isRoot"] = True
         all_chains = chain_sampled.copy()
@@ -271,7 +276,13 @@ class MetadataSynthesizer:
                             for chain in chain_to_synthesize[
                                 trace_id, start_time, graph, trigger
                             ]:
-                                row = [trace_id, start_time, graph, chain]
+                                row = [
+                                    trace_id,
+                                    start_time,
+                                    start_time // (1000000 * 60),
+                                    graph,
+                                    chain,
+                                ]
                                 trigger_gap_from_parent = getattr(
                                     trigger_chain, f"gapFromParent_{trigger_idx}"
                                 )
@@ -289,6 +300,7 @@ class MetadataSynthesizer:
                     columns=[
                         "traceId",
                         "startTime",
+                        "startTimeInMinutes",
                         "graph",
                         "chain",
                         "gapFromParent_0",
@@ -299,6 +311,7 @@ class MetadataSynthesizer:
                     chain_known,
                     max_tries_per_batch=500,
                     condition_columns=[
+                        "startTimeInMinutes",
                         "graph",
                         "chain",
                     ],  # TODO: condition on gapFromParent_0 and duration_0, continuous

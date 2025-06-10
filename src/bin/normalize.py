@@ -1,6 +1,7 @@
 import argparse
 import os
 import pathlib
+import pickle
 import sys
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,5 +23,11 @@ if __name__ == "__main__":
     )
     args = argparser.parse_args()
 
-    dataset = RCAEvalDataset(pathlib.Path(args.run_dir))
-    dataset.save(pathlib.Path(args.dataset_dir))
+    run_dir = pathlib.Path(args.run_dir)
+    dataset_dir = pathlib.Path(args.dataset_dir)
+    dataset = RCAEvalDataset(run_dir)
+    dataset.save(dataset_dir)
+    labels = {}
+    with open(run_dir.joinpath("inject_time.txt")) as f:
+        labels["inject_time"] = int(f.read().strip())
+    pickle.dump(labels, open(dataset_dir.joinpath("labels.pkl"), "wb"))
