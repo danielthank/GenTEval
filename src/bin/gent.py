@@ -18,25 +18,25 @@ if __name__ == "__main__":
         "--dataset_dir", type=str, help="Directory containing the preprocessed traces"
     )
     argparser.add_argument(
-        "--process_dir",
+        "--gent_dir",
         "-o",
         type=str,
-        help="Output file to save the compressed traces and recovered traces",
+        help="Output file to save the compressed traces and recovered traces using GenT",
     )
     args = argparser.parse_args()
 
-    args.dataset_dir = pathlib.Path(args.dataset_dir)
-    args.process_dir = pathlib.Path(args.process_dir)
-    dataset = RCAEvalDataset().load(args.dataset_dir)
+    dataset_dir = pathlib.Path(args.dataset_dir)
+    gent_dir = pathlib.Path(args.gent_dir)
+    dataset = RCAEvalDataset().load(dataset_dir)
 
     # Compress the dataset
     config = GenTConfig()
     compressor = GenTCompressor(config)
     compressed_dataset = compressor.compress(dataset)
-    compressed_dataset.save(args.process_dir / "compressed")
+    compressed_dataset.save(gent_dir / "compressed")
 
     # Decompress the dataset
-    compressed_dataset = CompressedDataset.load(args.process_dir / "compressed")
+    compressed_dataset = CompressedDataset.load(gent_dir / "compressed")
     recovered_dataset = compressor.decompress(compressed_dataset)
     recovered_dataset = RCAEvalDataset.from_dataset(recovered_dataset)
-    recovered_dataset.save(args.process_dir / "recovered")
+    recovered_dataset.save(gent_dir / "dataset")

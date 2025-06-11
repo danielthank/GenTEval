@@ -7,10 +7,6 @@ from evaluations import Evaluation
 pd.options.mode.copy_on_write = True
 
 
-class TraceRCAReport:
-    pass
-
-
 # Adapted from https://github.com/phamquiluan/RCAEval/blob/30e40bb356a3c0a20fd4373e0d5015d005f460cc/RCAEval/e2e/tracerca.py
 def get_operation_slo(span_df):
     """Calculate the mean of duration and variance of each operation
@@ -26,8 +22,8 @@ def get_operation_slo(span_df):
     operation_slo = {}
     for op in span_df["operation"].dropna().unique():
         # get mean and std of Duration column of the corresponding operation
-        mean = round(span_df[span_df["operation"] == op]["duration"].mean() / 1_000, 2)
-        std = round(span_df[span_df["operation"] == op]["duration"].std() / 1_000, 2)
+        mean = round(span_df[span_df["operation"] == op]["duration"].mean(), 2)
+        std = round(span_df[span_df["operation"] == op]["duration"].std(), 2)
 
         # operation_slo[op] = [mean, std]
         operation_slo[op] = {"mean": mean, "std": std}
@@ -51,10 +47,14 @@ def tracerca(data, inject_time=None):
     # 1. TRACE ANOMALY DETECTION
     normal_slo = get_operation_slo(normal_df)
 
-    anomal_df["mean"] = anomal_df["operation"].apply(lambda op: normal_slo[op]["mean"])
-    anomal_df["std"] = anomal_df["operation"].apply(lambda op: normal_slo[op]["std"])
+    anomal_df["mean"] = anomal_df["operation"].apply(
+        lambda op: normal_slo.get(op, {"mean": 1000000000})["mean"]
+    )
+    anomal_df["std"] = anomal_df["operation"].apply(
+        lambda op: normal_slo.get(op, {"std": 1000000000})["std"]
+    )
     anomal_df["abnormal"] = (
-        anomal_df["duration"] / 1_000 >= anomal_df["mean"] + 3 * anomal_df["std"]
+        anomal_df["duration"] >= anomal_df["mean"] + 3 * anomal_df["std"]
     )
 
     # 2. SUSPICIOUS MICROSERVICE SET MINING
@@ -108,12 +108,6 @@ def tracerca(data, inject_time=None):
 
 
 class TraceRCAEvaluation(Evaluation):
-    def execute(self, dataset: Dataset, labels):
+    def evaluate(self, dataset: Dataset, labels):
         dataset = RCAEvalDataset.from_dataset(dataset)
         return tracerca(dataset.spans, labels["inject_time"])
-
-    def merge(self, original, restored) -> TraceRCAReport:
-        return {
-            "original": original,
-            "restored": restored,
-        }

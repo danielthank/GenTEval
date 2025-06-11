@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import pathlib
 import pickle
@@ -23,11 +24,6 @@ if __name__ == "__main__":
         help="Directory containing the dataset traces",
     )
     argparser.add_argument(
-        "--recovered_dir",
-        type=str,
-        help="Directory containing the compressed traces and recovered traces",
-    )
-    argparser.add_argument(
         "--labels_path",
         type=str,
         help="Path to the labels file containing the ground truth labels",
@@ -41,13 +37,12 @@ if __name__ == "__main__":
     args = argparser.parse_args()
 
     args.dataset_dir = pathlib.Path(args.dataset_dir)
-    args.recovered_dir = pathlib.Path(args.recovered_dir)
     args.labels_path = pathlib.Path(args.labels_path)
-    args.evaluation_dir = pathlib.Path(args.evaluated_dir)
+    args.evaluated_dir = pathlib.Path(args.evaluated_dir)
 
     original_dataset = RCAEvalDataset().load(args.dataset_dir)
-    recovered_dataset = RCAEvalDataset().load(args.recovered_dir)
     labels = pickle.load(open(args.labels_path, "rb"))
 
-    results = TraceRCAEvaluation().evaluate(original_dataset, recovered_dataset, labels)
-    print("Evaluation results:", results)
+    results = TraceRCAEvaluation().evaluate(original_dataset, labels)
+    args.evaluated_dir.mkdir(parents=True, exist_ok=True)
+    json.dump(results, open(args.evaluated_dir / "results.json", "w"), indent=4)
