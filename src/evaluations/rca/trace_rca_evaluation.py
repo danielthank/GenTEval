@@ -36,8 +36,8 @@ def get_operation_slo(span_df):
 def tracerca(data, inject_time=None):
     # span_df = pd.read_csv("./data/mm-ob/checkoutservice_delay/1/traces.csv")
     span_df = data
-    span_df["methodName"] = span_df["methodName"].fillna(span_df["operationName"])
-    span_df["operation"] = span_df["serviceName"] + "_" + span_df["methodName"]
+    # span_df["methodName"] = span_df["methodName"].fillna(span_df["operationName"])
+    span_df["operation"] = span_df["serviceName"]
 
     inject_time = int(inject_time) * 1_000_000  # convert from seconds to microseconds
 
