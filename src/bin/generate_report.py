@@ -62,14 +62,31 @@ if __name__ == "__main__":
                 services.add(rank)
             for k in range(1, 6):
                 report[f"{compressor}"][f"ac{k}"].append(ac_at_k(service, ranks, k))
+
+            compressed_dir = root_dir.joinpath(
+                app_name,
+                f"{service}_{fault}",
+                str(run),
+                compressor,
+                "compressed",
+                "data",
+            )
+            total_size = 0
+            for file in compressed_dir.glob("**/*"):
+                if file.is_file():
+                    total_size += file.stat().st_size
+            report[f"{compressor}"]["size"].append(total_size)
+
     for fault in report:
         for k in range(1, 6):
             report[fault][f"ac{k}"] = sum(report[fault][f"ac{k}"]) / len(
                 report[fault][f"ac{k}"]
             )
         report[fault]["avg5"] = sum(report[fault][f"ac{k}"] for k in range(1, 6)) / 5
+        report[fault]["size"] = sum(report[fault]["size"]) / len(report[fault]["size"])
 
     for k in range(1, 6):
         report["random"][f"ac{k}"] = k / 7
     report["random"]["avg5"] = sum(report["random"][f"ac{k}"] for k in range(1, 6)) / 5
+
     print(json.dumps(report, indent=4))
