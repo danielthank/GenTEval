@@ -54,6 +54,7 @@ class StartTimeSynthesizer:
         self.synthesizer.fit(start_time_dataset)
 
     def save(self, compressed_dataset: CompressedDataset):
+        self.synthesizer._data_processor._transformers_by_sdtype = None
         compressed_dataset.add(
             "start_time_synthesizer", self.synthesizer, SerializationFormat.CLOUDPICKLE
         )

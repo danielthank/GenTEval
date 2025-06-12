@@ -121,10 +121,17 @@ class MetadataSynthesizer:
                     trace.graph,
                     chain_str,
                 ]
-                for span_id in chain["chain"]:
-                    row.extend(
-                        [trace.gap_from_parent(span_id), trace.duration(span_id)]
-                    )
+                for idx in range(self.config.chain_length):
+                    if idx < len(chain["chain"]):
+                        span_id = chain["chain"][idx]
+                        row.extend(
+                            [
+                                trace.gap_from_parent(span_id),
+                                trace.duration(span_id),
+                            ]
+                        )
+                    else:
+                        row.extend([0, 0])  # TODO: NaN or 0?
                 if chain["is_root"]:
                     root_dataset.append(row)
                     root_chains.add(chain_str)
@@ -193,11 +200,13 @@ class MetadataSynthesizer:
             self.graph_to_chain_count,
             SerializationFormat.MSGPACK,
         )
+        self.root_synthesizer._data_processor._transformers_by_sdtype = None
         compressed_dataset.add(
             "root_synthesizer",
             self.root_synthesizer,
             SerializationFormat.CLOUDPICKLE,
         )
+        self.chain_synthesizer._data_processor._transformers_by_sdtype = None
         compressed_dataset.add(
             "chain_synthesizer",
             self.chain_synthesizer,

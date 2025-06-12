@@ -4,7 +4,6 @@ import os
 import pathlib
 import shutil
 from enum import Enum
-from hashlib import sha256
 from typing import Any, Dict
 
 import cloudpickle
@@ -160,9 +159,7 @@ class CompressedDataset:
             serialized = self._serialize(value, format_to_use)
             compressed = self._compress(serialized)
 
-            # Use sha256 hash of the key for filename
-            hashed_key = sha256(key.encode("utf-8")).hexdigest()
-            with open(data_dir / hashed_key, "wb") as f:
+            with open(data_dir / key, "wb") as f:
                 f.write(compressed)
 
     @classmethod
@@ -188,21 +185,18 @@ class CompressedDataset:
         formats_enum = {k: SerializationFormat(v) for k, v in formats_str.items()}
         dataset.formats = formats_enum
 
-        # Map of sanitized keys to original keys
         keys = metadata["keys"]
-        key_map = {sha256(key.encode("utf-8")).hexdigest(): key for key in keys}
 
         # Load data
         data_dir = dir / "data"
         for filename in os.listdir(data_dir):
-            if filename in key_map:
-                original_key = key_map[filename]
+            if filename in keys:
                 with open(data_dir / filename, "rb") as f:
                     compressed = f.read()
 
                 decompressed = dataset._decompress(compressed)
-                format_to_use = dataset.formats[original_key]
+                format_to_use = dataset.formats[filename]
                 value = dataset._deserialize(decompressed, format_to_use)
-                dataset.data[original_key] = value
+                dataset.data[filename] = value
 
         return dataset
