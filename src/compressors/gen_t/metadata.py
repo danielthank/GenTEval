@@ -99,10 +99,10 @@ class MetadataSynthesizer:
             dtypes[f"gapFromParent_{i}"] = "int64"
             dtypes[f"duration_{i}"] = "int64"
 
-        for trace in dataset.traces.values():
+        for trace_id, trace in dataset.traces.items():
             trace = Trace(trace)
-            # TODO: support graph with no edges
-            if len(trace) <= 1:
+            # Skip traces that have no edges or too many edges (Out of Memory)
+            if len(trace) <= 1 or len(trace) > 10:
                 continue
 
             graph = trace.graph

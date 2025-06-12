@@ -23,9 +23,9 @@ class StartTimeSynthesizer:
         start_time_dataset = []
         for trace in dataset.traces.values():
             trace = Trace(trace)
-            graph = trace.graph
-            if graph == "[]":  # TODO: support graph with no edges
+            if len(trace) <= 1 or len(trace) > 10:
                 continue
+            graph = trace.graph
             start_time = trace.start_time
             start_time_dataset.append([graph, start_time])
         start_time = pd.DataFrame(start_time_dataset, columns=column_names)

@@ -67,6 +67,8 @@ def tracerca(data, inject_time=None):
     # support = |abnormal_traces of operation A| / |total abnormal traces|
     # abnormal traces of operation A is when "abnormal" col is True
     for op in operations:
+        if anomal_df["abnormal"].sum() == 0:
+            continue
         support_dict[op] = (
             anomal_df[anomal_df["operation"] == op]["abnormal"].sum()
             / anomal_df["abnormal"].sum()
@@ -74,6 +76,8 @@ def tracerca(data, inject_time=None):
 
     # confidence = |abnormal traces of operation A| / |total traces of operation A|
     for op in operations:
+        if anomal_df[anomal_df["operation"] == op]["operation"].count() == 0:
+            continue
         confidence_dict[op] = (
             anomal_df[anomal_df["operation"] == op]["abnormal"].sum()
             / anomal_df[anomal_df["operation"] == op]["operation"].count()

@@ -20,6 +20,8 @@ class GenTCompressor(Compressor):
             "gen_t_config", self.config.as_dict(), SerializationFormat.MSGPACK
         )
 
+        # TODO: split dataset into 2 parts: one for spans <= 10 and one for spans > 10
+
         start_time_synthesizer = StartTimeSynthesizer(config=self.config)
         metadata_synthesizer = MetadataSynthesizer(config=self.config)
 

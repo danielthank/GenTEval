@@ -10,8 +10,14 @@ async def evaluate(
     dataset_dir: pathlib.Path,
     labels_path: pathlib.Path,
     output_dir: pathlib.Path,
+    force: bool,
     semaphore: asyncio.Semaphore,
 ):
+    # if both compressed and dataset directories already exist, skip processing
+    if not force and output_dir.exists():
+        print(f"Skipping {dataset_dir} as it is already processed.")
+        return True
+
     async with semaphore:
         try:
             print(f"Processing {dataset_dir}...")
@@ -68,6 +74,12 @@ async def main():
         default=12,
         help="Maximum number of parallel processes (default: 12)",
     )
+    argparser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Force re-evaluation of all datasets, even if output directories already exist",
+    )
     args = argparser.parse_args()
 
     root_dir = pathlib.Path(args.root_dir)
@@ -95,7 +107,9 @@ async def main():
             evaluated_dir = root_dir.joinpath(
                 app_name, f"{service}_{fault}", str(run), compressor, "evaluated"
             )
-            tasks.append(evaluate(dataset_dir, labels_path, evaluated_dir, semaphore))
+            tasks.append(
+                evaluate(dataset_dir, labels_path, evaluated_dir, args.force, semaphore)
+            )
 
     successful = 0
     failed = 0

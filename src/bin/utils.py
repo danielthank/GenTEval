@@ -10,10 +10,6 @@ def run_dirs():
                 ],
                 ["cpu", "delay", "disk", "loss", "mem", "socket"],
             ),
-        }
-    ]
-
-    """
             "RE2-TT": (
                 [
                     "ts-auth-service",
@@ -24,7 +20,8 @@ def run_dirs():
                 ],
                 ["cpu", "delay", "disk", "loss", "mem", "socket"],
             ),
-    """
+        }
+    ]
 
     for app in applications:
         for app_name, (service, fault) in app.items():

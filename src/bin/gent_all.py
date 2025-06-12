@@ -7,10 +7,16 @@ from utils import run_dirs
 
 
 async def gent(
-    dataset_dir: pathlib.Path, output_dir: pathlib.Path, semaphore: asyncio.Semaphore
+    dataset_dir: pathlib.Path,
+    output_dir: pathlib.Path,
+    force: bool,
+    semaphore: asyncio.Semaphore,
 ):
-    # if both compressed and dataset directories already exist, skip processing
-    if (output_dir / "compressed").exists() and (output_dir / "dataset").exists():
+    if (
+        not force
+        and (output_dir / "compressed").exists()
+        and (output_dir / "dataset").exists()
+    ):
         print(f"Skipping {dataset_dir} as it is already processed.")
         return True
 
@@ -58,8 +64,14 @@ async def main():
     argparser.add_argument(
         "--max_workers",
         type=int,
-        default=1,
+        default=4,
         help="Maximum number of parallel processes (default: 12)",
+    )
+    argparser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Force reprocessing even if output directories already exist",
     )
     args = argparser.parse_args()
 
@@ -73,7 +85,7 @@ async def main():
             app_name, f"{service}_{fault}", str(run), "original", "dataset"
         )
         output_dir = root_dir.joinpath(app_name, f"{service}_{fault}", str(run), "gent")
-        tasks.append(gent(dataset_dir, output_dir, semaphore))
+        tasks.append(gent(dataset_dir, output_dir, args.force, semaphore))
 
     successful = 0
     failed = 0

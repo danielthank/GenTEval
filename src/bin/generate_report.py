@@ -44,6 +44,8 @@ if __name__ == "__main__":
             ):
                 continue
 
+            report_group = f"{app_name}_{compressor}"
+
             results_path = root_dir.joinpath(
                 app_name,
                 f"{service}_{fault}",
@@ -61,7 +63,7 @@ if __name__ == "__main__":
             for rank in ranks:
                 services.add(rank)
             for k in range(1, 6):
-                report[f"{compressor}"][f"ac{k}"].append(ac_at_k(service, ranks, k))
+                report[report_group][f"ac{k}"].append(ac_at_k(service, ranks, k))
 
             compressed_dir = root_dir.joinpath(
                 app_name,
@@ -75,7 +77,7 @@ if __name__ == "__main__":
             for file in compressed_dir.glob("**/*"):
                 if file.is_file():
                     total_size += file.stat().st_size
-            report[f"{compressor}"]["size"].append(total_size)
+            report[report_group]["size"].append(total_size)
 
     for fault in report:
         for k in range(1, 6):
