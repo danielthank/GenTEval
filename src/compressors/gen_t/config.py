@@ -5,10 +5,11 @@ from typing import Any, Dict, Tuple
 @dataclass
 class GenTConfig:
     chain_length: int = 3
-    epochs: int = 100
+    epochs: int = 10
     batch_size: int = 500
     discriminator_dim: Tuple[int, ...] = (128,)
     generator_dim: Tuple[int, ...] = (128,)
+    span_cnt_threshold: int = 10
 
     def as_dict(self) -> Dict[str, Any]:
         """

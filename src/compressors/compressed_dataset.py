@@ -90,6 +90,21 @@ class CompressedDataset:
 
         return total_size
 
+    def extend(self, other: "CompressedDataset") -> None:
+        """
+        Extend the current dataset with another CompressedDataset.
+
+        Args:
+            other: Another CompressedDataset instance to merge
+        """
+        if not isinstance(other, CompressedDataset):
+            raise TypeError("other must be a CompressedDataset instance")
+
+        for key, value in other.data.items():
+            if key in self.data:
+                raise KeyError(f"Key '{key}' already exists in the dataset")
+            self.add(key, value, other.formats[key])
+
     def _serialize(self, obj: Any, format: SerializationFormat) -> bytes:
         """Serialize an object based on the selected format."""
         if format == SerializationFormat.MSGPACK:

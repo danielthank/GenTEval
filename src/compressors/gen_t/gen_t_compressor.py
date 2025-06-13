@@ -1,45 +1,37 @@
 import logging
 
-from compressors import CompressedDataset, Compressor, SerializationFormat
+from compressors import CompressedDataset
 from dataset import Dataset
 
 from .config import GenTConfig
-from .metadata import MetadataSynthesizer
-from .start_time import StartTimeSynthesizer
+from .graph_gen_t_compressor import GraphGenTCompressor
+from .naive_gen_t_compressor import NaiveGenTCompressor
 
 
-class GenTCompressor(Compressor):
+class GenTCompressor:
     def __init__(self, config: GenTConfig):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.config = config
+        self.gen_t_compressor = GraphGenTCompressor(config)
+        self.naive_gen_t_compressor = NaiveGenTCompressor(config)
 
     def compress(self, dataset: Dataset) -> CompressedDataset:
-        compressed_dataset = CompressedDataset()
-        compressed_dataset.add(
-            "gen_t_config", self.config.as_dict(), SerializationFormat.MSGPACK
-        )
+        large_dataset = Dataset()
+        large_dataset.traces = {}
+        small_dataset = Dataset()
+        small_dataset.traces = {}
+        for traceId, trace in dataset.traces.items():
+            if len(trace) > self.config.span_cnt_threshold:
+                large_dataset.traces[traceId] = trace
+            else:
+                small_dataset.traces[traceId] = trace
 
-        # TODO: split dataset into 2 parts: one for spans <= 10 and one for spans > 10
-
-        start_time_synthesizer = StartTimeSynthesizer(config=self.config)
-        metadata_synthesizer = MetadataSynthesizer(config=self.config)
-
-        logging.info("Distilling start_time")
-        start_time_synthesizer.distill(dataset)
-        start_time_synthesizer.save(compressed_dataset)
-
-        logging.info("Distilling metadata")
-        metadata_synthesizer.distill(dataset)
-        metadata_synthesizer.save(compressed_dataset)
-
+        compressed_dataset = self.naive_gen_t_compressor.compress(large_dataset)
+        compressed_dataset.extend(self.gen_t_compressor.compress(small_dataset))
         return compressed_dataset
 
     def decompress(self, compressed_dataset: CompressedDataset) -> Dataset:
-        logging.info("Synthesizing start_time")
-        start_time_synthesizer = StartTimeSynthesizer.load(compressed_dataset)
-        start_time = start_time_synthesizer.synthesize()
-
-        logging.info("Synthesizing metadata")
-        metadata_synthesizer = MetadataSynthesizer.load(compressed_dataset)
-        return metadata_synthesizer.synthesize(start_time)
+        dataset = self.naive_gen_t_compressor.decompress(compressed_dataset)
+        dataset.extend(self.gen_t_compressor.decompress(compressed_dataset))
+        return dataset

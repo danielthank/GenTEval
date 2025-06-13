@@ -204,3 +204,7 @@ class GenTCTGANSynthesizer(CTGANSynthesizer):
             handle_sampling_error(output_file_path, error)
 
         return sampled
+
+    def trim(self):
+        self._data_processor._transformers_by_sdtype = None
+        self._model._data_sampler._rid_by_cat_cols = None

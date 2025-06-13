@@ -98,16 +98,24 @@ class RCAEvalDataset(Dataset):
         return self
 
     def _traces_to_spans(self):
+        def parse_node_name(node_name):
+            parts = node_name.split("@")
+            return [None if part == "nan" else part for part in parts]
+
         rows = []
+
         for trace_id, trace in self.traces.items():
             for span_id, span in trace.items():
+                service_name, method_name, operation_name = parse_node_name(
+                    span["nodeName"]
+                )
                 rows.append(
                     {
                         "traceID": trace_id,
                         "spanID": span_id,
-                        "serviceName": span["nodeName"].split("@")[0],
-                        "methodName": span["nodeName"].split("@")[1],
-                        "operationName": span["nodeName"].split("@")[2],
+                        "serviceName": service_name,
+                        "methodName": method_name,
+                        "operationName": operation_name,
                         "startTime": span["startTime"],
                         "duration": span["duration"],
                         "parentSpanID": span["parentSpanId"],

@@ -200,13 +200,14 @@ class MetadataSynthesizer:
             self.graph_to_chain_count,
             SerializationFormat.MSGPACK,
         )
-        self.root_synthesizer._data_processor._transformers_by_sdtype = None
+        self.root_synthesizer.trim()
         compressed_dataset.add(
             "root_synthesizer",
             self.root_synthesizer,
             SerializationFormat.CLOUDPICKLE,
         )
         self.chain_synthesizer._data_processor._transformers_by_sdtype = None
+        self.chain_synthesizer.trim()
         compressed_dataset.add(
             "chain_synthesizer",
             self.chain_synthesizer,
