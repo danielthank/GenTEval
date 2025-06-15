@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from dataset import Dataset, RCAEvalDataset
-from evaluations import Evaluation
+from evaluators import Evaluator
 
 pd.options.mode.copy_on_write = True
 
@@ -111,7 +111,7 @@ def tracerca(data, inject_time=None):
     }
 
 
-class TraceRCAEvaluation(Evaluation):
+class TraceRCAEvaluator(Evaluator):
     def evaluate(self, dataset: Dataset, labels):
         dataset = RCAEvalDataset.from_dataset(dataset)
         return tracerca(dataset.spans, labels["inject_time"])

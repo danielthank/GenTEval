@@ -12,7 +12,7 @@ sys.path.insert(0, project_root)
 setup_logging()
 
 from dataset import RCAEvalDataset  # noqa: E402
-from evaluations import TraceRCAEvaluation  # noqa: E402
+from evaluators import DurationEvaluator, TraceRCAEvaluator  # noqa: E402
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -29,6 +29,11 @@ if __name__ == "__main__":
         help="Path to the labels file containing the ground truth labels",
     )
     argparser.add_argument(
+        "--evaluators",
+        type=str,
+        nargs="+",
+    )
+    argparser.add_argument(
         "--evaluated_dir",
         "-o",
         type=str,
@@ -36,13 +41,22 @@ if __name__ == "__main__":
     )
     args = argparser.parse_args()
 
-    args.dataset_dir = pathlib.Path(args.dataset_dir)
-    args.labels_path = pathlib.Path(args.labels_path)
-    args.evaluated_dir = pathlib.Path(args.evaluated_dir)
+    dataset_dir = pathlib.Path(args.dataset_dir)
+    labels_path = pathlib.Path(args.labels_path)
+    evaluated_dir = pathlib.Path(args.evaluated_dir)
 
-    original_dataset = RCAEvalDataset().load(args.dataset_dir)
-    labels = pickle.load(open(args.labels_path, "rb"))
+    dataset = RCAEvalDataset().load(dataset_dir)
+    labels = pickle.load(open(labels_path, "rb"))
 
-    results = TraceRCAEvaluation().evaluate(original_dataset, labels)
-    args.evaluated_dir.mkdir(parents=True, exist_ok=True)
-    json.dump(results, open(args.evaluated_dir / "results.json", "w"), indent=4)
+    if "trace_rca" in args.evaluators:
+        results = TraceRCAEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "trace_rca_results.json", "w"),
+        )
+    if "duration" in args.evaluators:
+        results = DurationEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "duration_results.json", "w"),
+        )

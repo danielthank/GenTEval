@@ -9,11 +9,11 @@ from utils import run_dirs
 async def evaluate(
     dataset_dir: pathlib.Path,
     labels_path: pathlib.Path,
+    evaluators: list[str],
     output_dir: pathlib.Path,
     force: bool,
     semaphore: asyncio.Semaphore,
 ):
-    # if both compressed and dataset directories already exist, skip processing
     if not force and output_dir.exists():
         print(f"Skipping {dataset_dir} as it is already processed.")
         return True
@@ -30,6 +30,8 @@ async def evaluate(
                 str(dataset_dir),
                 "--labels_path",
                 str(labels_path),
+                "--evaluators",
+                *evaluators,
                 "-o",
                 str(output_dir),
                 stdout=asyncio.subprocess.PIPE,
@@ -67,6 +69,11 @@ async def main():
         type=str,
         nargs="+",
         help="List of compressors to evaluate",
+    )
+    argparser.add_argument(
+        "--evaluators",
+        type=str,
+        nargs="+",
     )
     argparser.add_argument(
         "--max_workers",
@@ -108,7 +115,14 @@ async def main():
                 app_name, f"{service}_{fault}", str(run), compressor, "evaluated"
             )
             tasks.append(
-                evaluate(dataset_dir, labels_path, evaluated_dir, args.force, semaphore)
+                evaluate(
+                    dataset_dir,
+                    labels_path,
+                    args.evaluators,
+                    evaluated_dir,
+                    args.force,
+                    semaphore,
+                )
             )
 
     successful = 0

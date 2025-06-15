@@ -1,7 +1,7 @@
 from dataset import Dataset
 
 
-class Evaluation:
+class Evaluator:
     def evaluate(self, dataset: Dataset, labels):
         raise NotImplementedError("This method should be implemented by subclasses.")
 
