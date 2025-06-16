@@ -96,8 +96,10 @@ async def main():
     tasks = []
     for app_name, service, fault, run in run_dirs():
         for compressor in args.compressors:
-            if compressor not in ["original", "gent"] and not compressor.startswith(
-                "head_sampling"
+            if (
+                compressor not in ["original"]
+                and not compressor.startswith("head_sampling")
+                and not compressor.startswith("gent")
             ):
                 continue
             dataset_dir = root_dir.joinpath(

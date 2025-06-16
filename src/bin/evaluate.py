@@ -12,7 +12,11 @@ sys.path.insert(0, project_root)
 setup_logging()
 
 from dataset import RCAEvalDataset  # noqa: E402
-from evaluators import DurationEvaluator, TraceRCAEvaluator  # noqa: E402
+from evaluators import (  # noqa: E402
+    DurationEvaluator,
+    OperationEvaluator,
+    TraceRCAEvaluator,
+)
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -48,6 +52,7 @@ if __name__ == "__main__":
     dataset = RCAEvalDataset().load(dataset_dir)
     labels = pickle.load(open(labels_path, "rb"))
 
+    evaluated_dir.mkdir(parents=True, exist_ok=True)
     if "trace_rca" in args.evaluators:
         results = TraceRCAEvaluator().evaluate(dataset, labels)
         json.dump(
@@ -59,4 +64,10 @@ if __name__ == "__main__":
         json.dump(
             results,
             open(evaluated_dir / "duration_results.json", "w"),
+        )
+    if "operation" in args.evaluators:
+        results = OperationEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "operation_results.json", "w"),
         )
