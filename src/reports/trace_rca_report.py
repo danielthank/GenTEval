@@ -20,7 +20,7 @@ class TraceRCAReport(BaseReport):
         Returns:
             True if answer is in top k ranks, False otherwise
         """
-        return answer in ranks[:k] if k <= len(ranks) else False
+        return answer in ranks[:k]
 
     def generate(self, run_dirs) -> Dict[str, Any]:
         """Generate trace RCA report."""

@@ -50,7 +50,7 @@ class DurationReport(BaseReport):
             color="red",
             linewidth=2,
         )
-        ax.set_xlabel("Duration")
+        ax.set_xlabel("Duration" if not is_duration_pair else "Duration Pair Ratio")
         ax.set_ylabel("Cumulative Probability")
         ax.set_title(f"Cumulative Distribution Functions - {group_name}")
         ax.legend()
@@ -59,6 +59,8 @@ class DurationReport(BaseReport):
         # Set bounds for duration_pair data
         if is_duration_pair:
             ax.set_xlim(0, 1)
+        else:
+            ax.set_xlim(0, 500000)
 
         # Calculate and display Wasserstein distance
         wdist = wasserstein_distance(original_data, compressed_data)
@@ -128,12 +130,18 @@ class DurationReport(BaseReport):
                         continue
 
                     # Visualize and calculate Wasserstein distance
+                    """
                     wdist = self.visualize_wasserstein_distributions(
                         original["duration"][group],
                         results["duration"][group],
                         f"duration_{group}",
                         compressor,
                         f"{app_name}_{service}_{fault}_{run}",
+                    )
+                    """
+                    wdist = wasserstein_distance(
+                        original["duration"][group],
+                        results["duration"][group],
                     )
 
                     report_group = f"{app_name}_{compressor}"

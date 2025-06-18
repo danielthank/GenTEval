@@ -42,6 +42,7 @@ class RCAEvalDataset(Dataset):
         spans = self.spans
         if spans is not None:
             spans.to_pickle(dir.joinpath("spans.pkl"))
+            spans.to_csv(dir.joinpath("spans.csv"), index=False)
 
         traces = self.traces
         if traces is not None:

@@ -62,6 +62,12 @@ async def main():
         "--root_dir", type=str, help="Directory containing the normalized dataset"
     )
     argparser.add_argument(
+        "--output_dir_name",
+        type=str,
+        default="gent",
+        help="Output directory name (default: gent)",
+    )
+    argparser.add_argument(
         "--max_workers",
         type=int,
         default=4,
@@ -84,7 +90,9 @@ async def main():
         dataset_dir = root_dir.joinpath(
             app_name, f"{service}_{fault}", str(run), "original", "dataset"
         )
-        output_dir = root_dir.joinpath(app_name, f"{service}_{fault}", str(run), "gent")
+        output_dir = root_dir.joinpath(
+            app_name, f"{service}_{fault}", str(run), args.output_dir_name
+        )
         tasks.append(gent(dataset_dir, output_dir, args.force, semaphore))
 
     successful = 0

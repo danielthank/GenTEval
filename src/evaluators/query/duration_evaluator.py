@@ -19,9 +19,13 @@ class DurationEvaluator(Evaluator):
                     parent_span = trace.get(span["parentSpanId"])
                     if parent_span:
                         parent_duration = parent_span["duration"]
-                        duration_pair_distribution["all"].append(
-                            duration / parent_duration
-                        )
+                        if parent_duration > 0:
+                            # TODO: consider not cliping the duration
+                            duration_pair_distribution["all"].append(
+                                duration / parent_duration
+                                if duration <= parent_duration
+                                else 1
+                            )
         return {
             "duration": duration_distribution,
             "duration_pair": duration_pair_distribution,
