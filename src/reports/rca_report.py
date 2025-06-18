@@ -1,12 +1,24 @@
-"""Trace RCA report generator."""
+"""Unified RCA report generator."""
 
 from typing import Any, Dict
 
 from .base_report import BaseReport
 
 
-class TraceRCAReport(BaseReport):
-    """Report generator for trace RCA evaluation."""
+class RCAReport(BaseReport):
+    """Report generator for RCA evaluation (supports multiple algorithms)."""
+
+    def __init__(self, compressors, root_dir, results_filename):
+        """
+        Initialize the RCA report generator.
+
+        Args:
+            compressors: List of compressor names to evaluate
+            root_dir: Root directory containing the output data
+            results_filename: Name of the results JSON file (e.g., "trace_rca_results.json", "micro_rank_results.json")
+        """
+        super().__init__(compressors, root_dir)
+        self.results_filename = results_filename
 
     def ac_at_k(self, answer: str, ranks: list, k: int) -> bool:
         """
@@ -23,7 +35,7 @@ class TraceRCAReport(BaseReport):
         return answer in ranks[:k]
 
     def generate(self, run_dirs) -> Dict[str, Any]:
-        """Generate trace RCA report."""
+        """Generate RCA report."""
         services = set()
 
         for app_name, service, fault, run in run_dirs():
@@ -36,7 +48,7 @@ class TraceRCAReport(BaseReport):
                     str(run),
                     compressor,
                     "evaluated",
-                    "trace_rca_results.json",
+                    self.results_filename,
                 )
 
                 if not self.file_exists(results_path):
@@ -56,21 +68,6 @@ class TraceRCAReport(BaseReport):
                         self.ac_at_k(service, ranks, k)
                     )
 
-                # Calculate compressed size
-                compressed_dir = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    compressor,
-                    "compressed",
-                    "data",
-                )
-                total_size = 0
-                for file in compressed_dir.glob("**/*"):
-                    if file.is_file():
-                        total_size += file.stat().st_size
-                self.report[report_group]["size"].append(total_size)
-
         # Calculate averages
         for fault in self.report:
             for k in range(1, 6):
@@ -79,9 +76,6 @@ class TraceRCAReport(BaseReport):
                 )
             self.report[fault]["avg5"] = (
                 sum(self.report[fault][f"ac{k}"] for k in range(1, 6)) / 5
-            )
-            self.report[fault]["size"] = sum(self.report[fault]["size"]) / len(
-                self.report[fault]["size"]
             )
 
         return dict(self.report)

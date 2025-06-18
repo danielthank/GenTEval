@@ -14,6 +14,7 @@ setup_logging()
 from dataset import RCAEvalDataset  # noqa: E402
 from evaluators import (  # noqa: E402
     DurationEvaluator,
+    MicroRankEvaluator,
     OperationEvaluator,
     TraceRCAEvaluator,
 )
@@ -33,9 +34,9 @@ if __name__ == "__main__":
         help="Path to the labels file containing the ground truth labels",
     )
     argparser.add_argument(
-        "--evaluators",
+        "--evaluator",
         type=str,
-        nargs="+",
+        help="Single evaluator to run (duration, operation, trace_rca, micro_rank)",
     )
     argparser.add_argument(
         "--evaluated_dir",
@@ -53,21 +54,29 @@ if __name__ == "__main__":
     labels = pickle.load(open(labels_path, "rb"))
 
     evaluated_dir.mkdir(parents=True, exist_ok=True)
-    if "trace_rca" in args.evaluators:
-        results = TraceRCAEvaluator().evaluate(dataset, labels)
-        json.dump(
-            results,
-            open(evaluated_dir / "trace_rca_results.json", "w"),
-        )
-    if "duration" in args.evaluators:
+    if args.evaluator == "duration":
         results = DurationEvaluator().evaluate(dataset, labels)
         json.dump(
             results,
             open(evaluated_dir / "duration_results.json", "w"),
         )
-    if "operation" in args.evaluators:
+    elif args.evaluator == "operation":
         results = OperationEvaluator().evaluate(dataset, labels)
         json.dump(
             results,
             open(evaluated_dir / "operation_results.json", "w"),
         )
+    elif args.evaluator == "trace_rca":
+        results = TraceRCAEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "trace_rca_results.json", "w"),
+        )
+    elif args.evaluator == "micro_rank":
+        results = MicroRankEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "micro_rank_results.json", "w"),
+        )
+    else:
+        raise ValueError(f"Unknown evaluator: {args.evaluator}")

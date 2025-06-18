@@ -3,6 +3,7 @@
 from .base_report import BaseReport
 from .duration_report import DurationReport
 from .operation_report import OperationReport
-from .trace_rca_report import TraceRCAReport
+from .rca_report import RCAReport
+from .size_report import SizeReport
 
-__all__ = ["BaseReport", "TraceRCAReport", "DurationReport", "OperationReport"]
+__all__ = ["BaseReport", "RCAReport", "SizeReport", "DurationReport", "OperationReport"]

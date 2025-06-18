@@ -9,18 +9,19 @@ from utils import run_dirs
 async def evaluate(
     dataset_dir: pathlib.Path,
     labels_path: pathlib.Path,
-    evaluators: list[str],
+    evaluator: str,
     output_dir: pathlib.Path,
     force: bool,
     semaphore: asyncio.Semaphore,
 ):
-    if not force and output_dir.exists():
-        print(f"Skipping {dataset_dir} as it is already processed.")
+    result_file = output_dir / f"{evaluator}_results.json"
+    if not force and result_file.exists():
+        print(f"Skipping {dataset_dir} - {evaluator} as it is already processed.")
         return True
 
     async with semaphore:
         try:
-            print(f"Processing {dataset_dir}...")
+            print(f"Processing {dataset_dir} with {evaluator} evaluator...")
             current_dir = pathlib.Path(__file__).parent
             script = current_dir / "evaluate.py"
             process = await asyncio.create_subprocess_exec(
@@ -30,8 +31,8 @@ async def evaluate(
                 str(dataset_dir),
                 "--labels_path",
                 str(labels_path),
-                "--evaluators",
-                *evaluators,
+                "--evaluator",
+                evaluator,
                 "-o",
                 str(output_dir),
                 stdout=asyncio.subprocess.PIPE,
@@ -60,6 +61,12 @@ async def evaluate(
 
 async def main():
     argparser = argparse.ArgumentParser(description="Evaluate all datasets")
+    argparser.add_argument(
+        "--app",
+        type=str,
+        default=None,
+        help="Application to run",
+    )
     argparser.add_argument(
         "--root_dir", type=str, help="Directory containing the normalized dataset"
     )
@@ -94,7 +101,7 @@ async def main():
     semaphore = asyncio.Semaphore(args.max_workers)
 
     tasks = []
-    for app_name, service, fault, run in run_dirs():
+    for app_name, service, fault, run in run_dirs(args.app):
         for compressor in args.compressors:
             if (
                 compressor not in ["original"]
@@ -116,22 +123,24 @@ async def main():
             evaluated_dir = root_dir.joinpath(
                 app_name, f"{service}_{fault}", str(run), compressor, "evaluated"
             )
-            tasks.append(
-                evaluate(
-                    dataset_dir,
-                    labels_path,
-                    args.evaluators,
-                    evaluated_dir,
-                    args.force,
-                    semaphore,
+
+            for evaluator in args.evaluators:
+                tasks.append(
+                    evaluate(
+                        dataset_dir,
+                        labels_path,
+                        evaluator,
+                        evaluated_dir,
+                        args.force,
+                        semaphore,
+                    )
                 )
-            )
 
     successful = 0
     failed = 0
 
     for task in tqdm(
-        asyncio.as_completed(tasks), total=len(tasks), desc="GenT Processing"
+        asyncio.as_completed(tasks), total=len(tasks), desc="Evaluation Processing"
     ):
         try:
             success = await task

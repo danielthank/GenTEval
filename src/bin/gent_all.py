@@ -59,6 +59,12 @@ async def gent(
 async def main():
     argparser = argparse.ArgumentParser(description="Normalize all traces")
     argparser.add_argument(
+        "--app",
+        type=str,
+        default=None,
+        help="Application to run",
+    )
+    argparser.add_argument(
         "--root_dir", type=str, help="Directory containing the normalized dataset"
     )
     argparser.add_argument(
@@ -86,7 +92,7 @@ async def main():
     semaphore = asyncio.Semaphore(args.max_workers)
 
     tasks = []
-    for app_name, service, fault, run in run_dirs():
+    for app_name, service, fault, run in run_dirs(args.app):
         dataset_dir = root_dir.joinpath(
             app_name, f"{service}_{fault}", str(run), "original", "dataset"
         )

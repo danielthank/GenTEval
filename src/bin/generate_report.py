@@ -9,10 +9,21 @@ sys.path.insert(0, project_root)
 
 from utils import run_dirs  # noqa: E402
 
-from reports import DurationReport, OperationReport, TraceRCAReport  # noqa: E402
+from reports import (  # noqa: E402
+    DurationReport,
+    OperationReport,
+    RCAReport,
+    SizeReport,
+)
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Generate report")
+    argparser.add_argument(
+        "--app",
+        type=str,
+        default=None,
+        help="Application to run",
+    )
     argparser.add_argument(
         "--root_dir",
         type=str,
@@ -32,20 +43,39 @@ if __name__ == "__main__":
 
     root_dir = pathlib.Path(args.root_dir)
 
-    if "trace_rca" in args.evaluators:
-        report_generator = TraceRCAReport(args.compressors, root_dir)
-        report = report_generator.generate(run_dirs)
-        print("trace_rca")
-        print(json.dumps(report, indent=4))
+    def run_dirs_func():
+        return run_dirs(args.app)
 
     if "duration" in args.evaluators:
         report_generator = DurationReport(args.compressors, root_dir)
-        report = report_generator.generate(run_dirs)
+        report = report_generator.generate(run_dirs_func)
         print("duration")
         print(json.dumps(report, indent=4))
 
     if "operation" in args.evaluators:
         report_generator = OperationReport(args.compressors, root_dir)
-        report = report_generator.generate(run_dirs)
+        report = report_generator.generate(run_dirs_func)
         print("operation")
+        print(json.dumps(report, indent=4))
+
+    if "trace_rca" in args.evaluators:
+        report_generator = RCAReport(
+            args.compressors, root_dir, "trace_rca_results.json"
+        )
+        report = report_generator.generate(run_dirs_func)
+        print("trace_rca")
+        print(json.dumps(report, indent=4))
+
+    if "micro_rank" in args.evaluators:
+        report_generator = RCAReport(
+            args.compressors, root_dir, "micro_rank_results.json"
+        )
+        report = report_generator.generate(run_dirs_func)
+        print("micro_rank")
+        print(json.dumps(report, indent=4))
+
+    if "size" in args.evaluators:
+        report_generator = SizeReport(args.compressors, root_dir)
+        report = report_generator.generate(run_dirs_func)
+        print("size")
         print(json.dumps(report, indent=4))
