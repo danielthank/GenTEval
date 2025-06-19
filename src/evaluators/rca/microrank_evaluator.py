@@ -189,7 +189,6 @@ def calculate_spectrum_without_delay_list(
     normal_result,
     anomaly_list_len,
     normal_list_len,
-    top_max,
     normal_num_list,
     anomaly_num_list,
     spectrum_method,
@@ -335,9 +334,8 @@ def calculate_spectrum_without_delay_list(
     for index, score in enumerate(
         sorted(result.items(), key=lambda x: x[1], reverse=True)
     ):
-        if index < top_max + 6:
-            top_list.append(score[0])
-            score_list.append(score[1])
+        top_list.append(score[0])
+        score_list.append(score[1])
     return top_list, score_list
 
 
@@ -426,28 +424,42 @@ def get_operation_slo(span_df):
     return operation_slo
 
 
+def operation_list_to_service_list(operation_list):
+    """Convert operation list to service list"""
+    service_list = []
+    for operation in operation_list:
+        service_name = operation.split("#")[0]
+        if service_name not in service_list:
+            service_list.append(service_name)
+    return service_list
+
+
 def microrank(data, inject_time=None, dataset=None, **kwargs):
     span_df = data
     # span_df["methodName"] = span_df["methodName"].fillna(span_df["operationName"])
     # span_df["operation"] = span_df["serviceName"] + "_" + span_df["methodName"]
-    span_df["operation"] = span_df["serviceName"]
+    # do something like this
+    """
+    span_df["operation"] = "#".join(
+        [span_df["serviceName"], span_df["methodName"], span_df["operationName"]]
+    )
+    """
+    span_df["operation"] = (
+        span_df["serviceName"].fillna("nan")
+        + "#"
+        + span_df["methodName"].fillna("nan")
+        + "#"
+        + span_df["operationName"].fillna("nan")
+    )
 
     inject_time = int(inject_time) * 1_000_000  # convert from seconds to microseconds
 
     normal_df = span_df[span_df["startTime"] + span_df["duration"] < inject_time]
-    normal_slo = get_operation_slo(normal_df)
-    normal_traceid = normal_df["traceID"].unique()
-
     anomal_df = span_df[span_df["startTime"] + span_df["duration"] >= inject_time]
 
-    # TODO: default as 1000000000?
-    normal_df["mean"] = normal_df["operation"].apply(
-        lambda op: normal_slo.get(op, {"mean": 1000000000})["mean"]
-    )
-    normal_df["std"] = normal_df["operation"].apply(
-        lambda op: normal_slo.get(op, {"std": 1000000000})["std"]
-    )
+    normal_slo = get_operation_slo(normal_df)
 
+    # TODO: default as 1000000000?
     anomal_df["mean"] = anomal_df["operation"].apply(
         lambda op: normal_slo.get(op, {"mean": 1000000000})["mean"]
     )
@@ -486,13 +498,12 @@ def microrank(data, inject_time=None, dataset=None, **kwargs):
         normal_result=normal_trace_result,
         anomaly_list_len=len(anomal_traceid),
         normal_list_len=len(normal_traceid),
-        top_max=5,
         anomaly_num_list=anomaly_num_list,
         normal_num_list=normal_num_list,
         spectrum_method="dstar2",
     )
     return {
-        "ranks": top_list,
+        "ranks": operation_list_to_service_list(top_list),
     }
 
 

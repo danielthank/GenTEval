@@ -32,12 +32,29 @@ def get_operation_slo(span_df):
     return operation_slo
 
 
+def operation_list_to_service_list(operation_list):
+    """Convert operation list to service list"""
+    service_list = []
+    for operation in operation_list:
+        service_name = operation.split("#")[0]
+        if service_name not in service_list:
+            service_list.append(service_name)
+    return service_list
+
+
 # Adapted from https://github.com/phamquiluan/RCAEval/blob/30e40bb356a3c0a20fd4373e0d5015d005f460cc/RCAEval/e2e/tracerca.py
 def tracerca(data, inject_time=None):
     # span_df = pd.read_csv("./data/mm-ob/checkoutservice_delay/1/traces.csv")
     span_df = data
     # span_df["methodName"] = span_df["methodName"].fillna(span_df["operationName"])
-    span_df["operation"] = span_df["serviceName"]
+    # span_df["operation"] = span_df["serviceName"]
+    span_df["operation"] = (
+        span_df["serviceName"].fillna("nan")
+        + "#"
+        + span_df["methodName"].fillna("nan")
+        + "#"
+        + span_df["operationName"].fillna("nan")
+    )
 
     inject_time = int(inject_time) * 1_000_000  # convert from seconds to microseconds
 
@@ -107,7 +124,7 @@ def tracerca(data, inject_time=None):
 
     # print(top_list, score_list)
     return {
-        "ranks": ranks,
+        "ranks": operation_list_to_service_list(ranks),
     }
 
 
