@@ -6,7 +6,6 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 from dataset import Dataset, RCAEvalDataset
 from evaluators import Evaluator
@@ -34,16 +33,35 @@ def pageRank(p_ss, p_sr, p_rs, v, operation_length, trace_length, d=0.85, alpha=
         updated_request_ranking_vector = (
             d * np.dot(p_rs, service_ranking_vector) + (1.0 - d) * v
         )
-        service_ranking_vector = updated_service_ranking_vector / np.amax(
-            updated_service_ranking_vector
-        )
-        request_ranking_vector = updated_request_ranking_vector / np.amax(
-            updated_request_ranking_vector
-        )
 
-    normalized_service_ranking_vector = service_ranking_vector / np.amax(
-        service_ranking_vector
-    )
+        # Handle empty arrays or zero max values to avoid errors
+        if (
+            updated_service_ranking_vector.size == 0
+            or np.amax(updated_service_ranking_vector) == 0
+        ):
+            service_ranking_vector = updated_service_ranking_vector
+        else:
+            service_ranking_vector = updated_service_ranking_vector / np.amax(
+                updated_service_ranking_vector
+            )
+
+        if (
+            updated_request_ranking_vector.size == 0
+            or np.amax(updated_request_ranking_vector) == 0
+        ):
+            request_ranking_vector = updated_request_ranking_vector
+        else:
+            request_ranking_vector = updated_request_ranking_vector / np.amax(
+                updated_request_ranking_vector
+            )
+
+    # Handle empty arrays or zero max values for final normalization
+    if service_ranking_vector.size == 0 or np.amax(service_ranking_vector) == 0:
+        normalized_service_ranking_vector = service_ranking_vector
+    else:
+        normalized_service_ranking_vector = service_ranking_vector / np.amax(
+            service_ranking_vector
+        )
     return normalized_service_ranking_vector
 
 
@@ -68,93 +86,99 @@ def trace_pagerank(
     pr = np.zeros((trace_length, 1), dtype=np.float32)
 
     node_list = []
-    for key in operation_operation.keys():
+    node_to_index = {}
+    for i, key in enumerate(operation_operation.keys()):
         node_list.append(key)
+        node_to_index[key] = i
 
     trace_list = []
-    for key in operation_trace.keys():
+    trace_to_index = {}
+    for i, key in enumerate(operation_trace.keys()):
         trace_list.append(key)
+        trace_to_index[key] = i
 
     # matrix node*node
     for operation in operation_operation:
         child_num = len(operation_operation[operation])
 
         for child in operation_operation[operation]:
-            p_ss[node_list.index(child)][node_list.index(operation)] = 1.0 / child_num
+            p_ss[node_to_index[child]][node_to_index[operation]] = 1.0 / child_num
 
     # matrix node*request
     for trace_id in operation_trace:
         child_num = len(operation_trace[trace_id])
         for child in operation_trace[trace_id]:
-            p_sr[node_list.index(child)][trace_list.index(trace_id)] = 1.0 / child_num
+            p_sr[node_to_index[child]][trace_to_index[trace_id]] = 1.0 / child_num
 
     # matrix request*node
     for operation in trace_operation:
         child_num = len(trace_operation[operation])
 
         for child in trace_operation[operation]:
-            p_rs[trace_list.index(child)][node_list.index(operation)] = 1.0 / child_num
+            p_rs[trace_to_index[child]][node_to_index[operation]] = 1.0 / child_num
 
     kind_list = np.zeros(len(trace_list))
     p_srt = p_sr.T
-    for i in range(len(trace_list)):
-        index_list = [i]
-        if kind_list[i] != 0:
-            continue
-        n = 0
-        for j in range(i, len(trace_list)):
-            if (p_srt[i] == p_srt[j]).all():
-                index_list.append(j)
-                n += 1
-        for index in index_list:
-            kind_list[index] = n
+
+    # More efficient approach using dictionary to group identical rows
+    row_to_indices = {}
+
+    # Group indices by their row patterns
+    for i, row in enumerate(p_srt):
+        # Convert row to tuple for hashing
+        row_tuple = tuple(row)
+        if row_tuple not in row_to_indices:
+            row_to_indices[row_tuple] = []
+        row_to_indices[row_tuple].append(i)
+
+    # Assign group sizes to kind_list
+    for indices in row_to_indices.values():
+        group_size = len(indices)
+        for idx in indices:
+            kind_list[idx] = group_size
 
     num_sum_trace = 0
     kind_sum_trace = 0
     if not anomaly:
         for trace_id in pr_trace:
-            num_sum_trace += 1.0 / kind_list[trace_list.index(trace_id)]
+            num_sum_trace += 1.0 / kind_list[trace_to_index[trace_id]]
         for trace_id in pr_trace:
-            pr[trace_list.index(trace_id)] = (
-                1.0 / kind_list[trace_list.index(trace_id)] / num_sum_trace
+            pr[trace_to_index[trace_id]] = (
+                1.0 / kind_list[trace_to_index[trace_id]] / num_sum_trace
             )
     else:
         for trace_id in pr_trace:
-            kind_sum_trace += 1.0 / kind_list[trace_list.index(trace_id)]
+            kind_sum_trace += 1.0 / kind_list[trace_to_index[trace_id]]
             num_sum_trace += 1.0 / len(pr_trace[trace_id])
         for trace_id in pr_trace:
-            pr[trace_list.index(trace_id)] = (
+            pr[trace_to_index[trace_id]] = (
                 1.0
                 / (
-                    kind_list[trace_list.index(trace_id)] / kind_sum_trace * 0.5
+                    kind_list[trace_to_index[trace_id]] / kind_sum_trace * 0.5
                     + 1.0 / len(pr_trace[trace_id])
                 )
                 / num_sum_trace
                 * 0.5
             )
 
-    if anomaly:
-        print("\nAnomaly_PageRank:")
-    else:
-        print("\nNormal_PageRank:")
     result = pageRank(p_ss, p_sr, p_rs, pr, operation_length, trace_length)
 
     weight = {}
     sum = 0
     for operation in operation_operation:
-        sum += result[node_list.index(operation)][0]
+        sum += result[node_to_index[operation]][0]
 
     trace_num_list = {}
     for operation in operation_operation:
         trace_num_list[operation] = 0
-        i = node_list.index(operation)
+        i = node_to_index[operation]
         for j in range(len(trace_list)):
             if p_sr[i][j] != 0:
                 trace_num_list[operation] += 1
 
     for operation in operation_operation:
         weight[operation] = (
-            result[node_list.index(operation)][0] * sum / len(operation_operation)
+            result[node_to_index[operation]][0] * sum / len(operation_operation)
         )
 
     return weight, trace_num_list
@@ -305,7 +329,7 @@ def calculate_spectrum_without_delay_list(
                 + 2 * spectrum[node]["ep"]
             )
 
-    # Top-n节点列表
+    # Top-n node list
     top_list = []
     score_list = []
     for index, score in enumerate(
@@ -322,16 +346,16 @@ def get_pagerank_graph(df):
     Query the pagerank graph
 
     :return
-        operation_operation 存储子节点 Call graph
+        operation_operation: Stores child nodes - Call graph
         operation_operation[operation_name] = [operation_name1 , operation_name1 ]
 
-        operation_trace 存储trace经过了哪些operation, 右上角 coverage graph
+        operation_trace: Stores which operations each trace goes through - upper right coverage graph
         operation_trace[traceid] = [operation_name1 , operation_name2]
 
-        trace_operation 存储 operation被哪些trace 访问过, 左下角 coverage graph
+        trace_operation: Stores which traces access each operation - lower left coverage graph
         trace_operation[operation_name] = [traceid1, traceid2]
 
-        pr_trace: 存储trace id 经过了哪些operation，不去重
+        pr_trace: Stores which operations each trace id goes through, without deduplication
         pr_trace[traceid] = [operation_name1 , operation_name2]
     """
     operation_operation = {}
@@ -339,44 +363,32 @@ def get_pagerank_graph(df):
     trace_operation = {}
     pr_trace = {}
 
-    # loop df
-    op_dict = {}  # spanid -> ops
-    par_dict = {}  # spanid -> parent_spanid
-    child_dict = {}  # spanid -> child_spanids
-    for idx, row in tqdm(df.iterrows()):
-        traceid = row["traceID"]
-        spanid = row["spanID"]
-        op = row["operation"]
-        parent_span_id = row["parentSpanID"]
+    op_dict = dict(zip(df["spanID"], df["operation"]))
 
-        op_dict[spanid] = op
-        par_dict[spanid] = parent_span_id
-        if parent_span_id not in child_dict:
-            child_dict[parent_span_id] = []
-        child_dict[parent_span_id].append(spanid)
+    parent_child_groups = df.groupby("parentSpanID")["spanID"].apply(list).to_dict()
+    child_dict = parent_child_groups
 
-        # operation_trace[traceid] = []
-        if traceid not in operation_trace:
-            operation_trace[traceid] = []
-        operation_trace[traceid].append(op)
+    trace_op_groups = df.groupby("traceID")["operation"].apply(list).to_dict()
+    operation_trace = trace_op_groups
 
-        if op not in trace_operation:
-            trace_operation[op] = []
-        trace_operation[op].append(traceid)
+    op_trace_groups = df.groupby("operation")["traceID"].apply(list).to_dict()
+    trace_operation = op_trace_groups
 
-    for idx, row in tqdm(df.iterrows()):
-        spanid = row["spanID"]
-        op = row["operation"]
-        parent_span_id = row["parentSpanID"]
+    for op in df["operation"].unique():
+        operation_operation[op] = []
 
-        if op not in operation_operation:
-            operation_operation[op] = []
+        # Get all spans for this operation
+        op_spans = df[df["operation"] == op]["spanID"].tolist()
 
-        # append child operation
-        if spanid in child_dict and len(child_dict[spanid]) > 0:
-            operation_operation[op].extend(
-                [op_dict[child_spanid] for child_spanid in child_dict[spanid]]
-            )
+        # For each span of this operation, find its children
+        for span_id in op_spans:
+            if span_id in child_dict:
+                child_operations = [
+                    op_dict[child_span]
+                    for child_span in child_dict[span_id]
+                    if child_span in op_dict
+                ]
+                operation_operation[op].extend(child_operations)
 
     pr_trace = deepcopy(operation_trace)
 
@@ -390,7 +402,6 @@ def get_pagerank_graph(df):
     return operation_operation, operation_trace, trace_operation, pr_trace
 
 
-# Adapted from https://github.com/phamquiluan/RCAEval/blob/30e40bb356a3c0a20fd4373e0d5015d005f460cc/RCAEval/e2e/tracerca.py
 def get_operation_slo(span_df):
     """Calculate the mean of duration and variance of each operation
     :arg
@@ -429,6 +440,7 @@ def microrank(data, inject_time=None, dataset=None, **kwargs):
 
     anomal_df = span_df[span_df["startTime"] + span_df["duration"] >= inject_time]
 
+    # TODO: default as 1000000000?
     normal_df["mean"] = normal_df["operation"].apply(
         lambda op: normal_slo.get(op, {"mean": 1000000000})["mean"]
     )
@@ -444,10 +456,10 @@ def microrank(data, inject_time=None, dataset=None, **kwargs):
     )
 
     normal_traces_df = anomal_df[
-        anomal_df["duration"] / 1_000 < anomal_df["mean"] + 3 * anomal_df["std"]
+        anomal_df["duration"] < anomal_df["mean"] + 3 * anomal_df["std"]
     ]
     anomal_traces_df = anomal_df[
-        anomal_df["duration"] / 1_000 >= anomal_df["mean"] + 3 * anomal_df["std"]
+        anomal_df["duration"] >= anomal_df["mean"] + 3 * anomal_df["std"]
     ]
 
     normal_traceid = normal_traces_df["traceID"].unique()
@@ -479,7 +491,6 @@ def microrank(data, inject_time=None, dataset=None, **kwargs):
         normal_num_list=normal_num_list,
         spectrum_method="dstar2",
     )
-
     return {
         "ranks": top_list,
     }
