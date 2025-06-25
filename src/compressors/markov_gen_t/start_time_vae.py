@@ -123,7 +123,11 @@ class StartTimeSynthesizer:
 
                 self.optimizer.zero_grad()
                 recon, mu, logvar = self.model(batch)
-                loss = self.model.loss_function(recon, batch, mu, logvar)
+
+                # Ensure consistent shapes for loss computation
+                recon_flat = recon.view(-1)
+                batch_flat = batch.view(-1)
+                loss = self.model.loss_function(recon_flat, batch_flat, mu, logvar)
                 loss.backward()
                 self.optimizer.step()
 

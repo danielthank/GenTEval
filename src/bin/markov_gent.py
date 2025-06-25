@@ -77,6 +77,12 @@ if __name__ == "__main__":
         default=0.001,
         help="Learning rate for neural networks (default: 0.001)",
     )
+    argparser.add_argument(
+        "--num_processes",
+        type=int,
+        default=8,
+        help="Number of processes for parallel processing (default: 8)",
+    )
     args = argparser.parse_args()
 
     dataset_dir = pathlib.Path(args.dataset_dir)
@@ -107,7 +113,7 @@ if __name__ == "__main__":
 
     # Compress the dataset
     print("Initializing MarkovGenT compressor...")
-    compressor = MarkovGenTCompressor(config)
+    compressor = MarkovGenTCompressor(config, num_processes=args.num_processes)
 
     print("Compressing dataset...")
     compressed_dataset = compressor.compress(dataset)

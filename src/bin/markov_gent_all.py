@@ -19,6 +19,7 @@ async def markov_gent(
     metadata_hidden_dim: int = 128,
     batch_size: int = 32,
     learning_rate: float = 0.001,
+    num_processes: int = 1,
 ):
     if (
         not force
@@ -56,6 +57,8 @@ async def markov_gent(
                 str(batch_size),
                 "--learning_rate",
                 str(learning_rate),
+                "--num_processes",
+                str(num_processes),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -185,6 +188,7 @@ async def main():
                 args.metadata_hidden_dim,
                 args.batch_size,
                 args.learning_rate,
+                num_processes=1,
             )
         )
 

@@ -256,9 +256,11 @@ class RootDurationSynthesizer:
                 # Forward pass
                 recon_duration, mu, logvar = self.model(batch_start_times, batch_nodes)
 
-                # Compute loss
+                # Compute loss - ensure shapes match
+                recon_duration_flat = recon_duration.view(-1)
+                batch_durations_flat = batch_durations.view(-1)
                 loss = self.model.loss_function(
-                    recon_duration.squeeze(), batch_durations, mu, logvar
+                    recon_duration_flat, batch_durations_flat, mu, logvar
                 )
 
                 loss.backward()

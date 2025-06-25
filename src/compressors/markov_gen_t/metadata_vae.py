@@ -357,7 +357,13 @@ class MetadataSynthesizer:
                 recon, mu, logvar = self.model(
                     parent_start_time, parent_duration, parent_node_idx, child_node_idx
                 )
-                loss = self.model.loss_function(recon, batch_targets, mu, logvar)
+
+                # Ensure consistent shapes for loss computation
+                recon_flat = recon.view(-1)
+                batch_targets_flat = batch_targets.view(-1)
+                loss = self.model.loss_function(
+                    recon_flat, batch_targets_flat, mu, logvar
+                )
                 loss.backward()
                 self.optimizer.step()
 
