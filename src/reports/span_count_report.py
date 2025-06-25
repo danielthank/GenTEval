@@ -1,4 +1,4 @@
-"""Duration report generator with Wasserstein distance visualization."""
+"""Span count report generator with Wasserstein distance visualization."""
 
 from typing import Any, Dict
 
@@ -9,14 +9,14 @@ from scipy.stats import wasserstein_distance
 from .base_report import BaseReport
 
 
-class DurationReport(BaseReport):
-    """Report generator for duration evaluation with Wasserstein distance visualization."""
+class SpanCountReport(BaseReport):
+    """Report generator for span count evaluation with Wasserstein distance visualization."""
 
     def __init__(self, compressors, root_dir):
-        """Initialize the duration report generator."""
+        """Initialize the span count report generator."""
         super().__init__(compressors, root_dir)
         # Create output directory for visualizations
-        self.viz_output_dir = root_dir / "visualizations" / "duration"
+        self.viz_output_dir = root_dir / "visualizations" / "span_count"
         self.viz_output_dir.mkdir(parents=True, exist_ok=True)
 
     def visualize_wasserstein_distributions(
@@ -24,9 +24,6 @@ class DurationReport(BaseReport):
     ):
         """Visualize the distributions used in Wasserstein distance calculation."""
         fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-
-        # Check if this is duration_pair data to apply bounds
-        is_duration_pair = "duration_pair" in group_name
 
         # Plot CDFs for better visualization of Wasserstein distance
         original_sorted = np.sort(original_data)
@@ -50,17 +47,15 @@ class DurationReport(BaseReport):
             color="red",
             linewidth=2,
         )
-        ax.set_xlabel("Duration" if not is_duration_pair else "Duration Pair Ratio")
+        ax.set_xlabel("Number of Spans per Trace")
         ax.set_ylabel("Cumulative Probability")
         ax.set_title(f"Cumulative Distribution Functions - {group_name}")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # Set bounds for duration_pair data
-        if is_duration_pair:
-            ax.set_xlim(0, 1)
-        else:
-            ax.set_xlim(0, 500000)
+        # Set reasonable bounds for span count data
+        max_spans = max(max(original_data, default=0), max(compressed_data, default=0))
+        ax.set_xlim(0, max_spans)  # Add some padding for better visualization
 
         # Calculate and display Wasserstein distance
         wdist = wasserstein_distance(original_data, compressed_data)
@@ -81,12 +76,12 @@ class DurationReport(BaseReport):
         return wdist
 
     def generate(self, run_dirs) -> Dict[str, Any]:
-        """Generate duration report with Wasserstein distance calculations and visualizations."""
+        """Generate span count report with Wasserstein distance calculations and visualizations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
                 if compressor == "original" or compressor == "head_sampling_1":
                     self.print_skip_message(
-                        f"Compressor {compressor} is not supported for duration evaluation, "
+                        f"Compressor {compressor} is not supported for span count evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."
                     )
                     continue
@@ -97,7 +92,7 @@ class DurationReport(BaseReport):
                     str(run),
                     "head_sampling_1",
                     "evaluated",
-                    "duration_results.json",
+                    "span_count_results.json",
                 )
 
                 if not self.file_exists(original_results_path):
@@ -112,7 +107,7 @@ class DurationReport(BaseReport):
                     str(run),
                     compressor,
                     "evaluated",
-                    "duration_results.json",
+                    "span_count_results.json",
                 )
 
                 if not self.file_exists(results_path):
@@ -124,58 +119,29 @@ class DurationReport(BaseReport):
                 original = self.load_json_file(original_results_path)
                 results = self.load_json_file(results_path)
 
-                # Process duration data
-                for group in original["duration"]:
-                    if group not in results["duration"]:
+                # Process span_count data
+                for group in original["span_count"]:
+                    if group not in results["span_count"]:
                         continue
 
                     # Visualize and calculate Wasserstein distance
                     wdist = self.visualize_wasserstein_distributions(
-                        original["duration"][group],
-                        results["duration"][group],
-                        f"duration_{group}",
-                        compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
-                    )
-                    """
-                    wdist = wasserstein_distance(
-                        original["duration"][group],
-                        results["duration"][group],
-                    )
-                    """
-
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_wdis"].append(wdist)
-
-                # Process duration_pair data
-                for group in original["duration_pair"]:
-                    if group not in results["duration_pair"]:
-                        continue
-
-                    # Visualize and calculate Wasserstein distance
-                    wdist = self.visualize_wasserstein_distributions(
-                        original["duration_pair"][group],
-                        results["duration_pair"][group],
-                        f"duration_pair_{group}",
+                        original["span_count"][group],
+                        results["span_count"][group],
+                        f"span_count_{group}",
                         compressor,
                         f"{app_name}_{service}_{fault}_{run}",
                     )
 
                     report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_pair_wdis"].append(wdist)
+                    self.report[report_group]["span_count_wdis"].append(wdist)
 
         # Calculate averages and clean up
         for group in self.report:
-            if "duration_wdis" in self.report[group]:
-                self.report[group]["duration_wdis_avg"] = sum(
-                    self.report[group]["duration_wdis"]
-                ) / len(self.report[group]["duration_wdis"])
-                del self.report[group]["duration_wdis"]
-
-            if "duration_pair_wdis" in self.report[group]:
-                self.report[group]["duration_pair_wdis_avg"] = sum(
-                    self.report[group]["duration_pair_wdis"]
-                ) / len(self.report[group]["duration_pair_wdis"])
-                del self.report[group]["duration_pair_wdis"]
+            if "span_count_wdis" in self.report[group]:
+                self.report[group]["span_count_wdis_avg"] = sum(
+                    self.report[group]["span_count_wdis"]
+                ) / len(self.report[group]["span_count_wdis"])
+                del self.report[group]["span_count_wdis"]
 
         return dict(self.report)

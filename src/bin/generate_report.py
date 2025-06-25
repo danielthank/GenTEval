@@ -14,6 +14,7 @@ from reports import (  # noqa: E402
     OperationReport,
     RCAReport,
     SizeReport,
+    SpanCountReport,
 )
 
 if __name__ == "__main__":
@@ -78,4 +79,10 @@ if __name__ == "__main__":
         report_generator = SizeReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         print("size")
+        print(json.dumps(report, indent=4))
+
+    if "span_count" in args.evaluators:
+        report_generator = SpanCountReport(args.compressors, root_dir)
+        report = report_generator.generate(run_dirs_func)
+        print("span_count")
         print(json.dumps(report, indent=4))

@@ -2,8 +2,8 @@ import copy
 
 
 class Trace:
-    def __init__(self, trace):
-        self.trace = trace
+    def __init__(self, spans):
+        self._spans = spans
         self._start_time = None
         self._edges = None
         self._preorder = None
@@ -11,14 +11,14 @@ class Trace:
         self._gap_from_parent = None
 
     def __len__(self):
-        return len(self.trace)
+        return len(self._spans)
 
     @property
     def start_time(self):
         if self._start_time is not None:
             return self._start_time
         start_time = None
-        for span in self.trace.values():
+        for span in self._spans.values():
             if start_time is None or span["startTime"] < start_time:
                 start_time = span["startTime"]
         self._start_time = start_time
@@ -29,9 +29,9 @@ class Trace:
         if self._edges is not None:
             return self._edges
         edges = []
-        for span in self.trace.values():
-            if span["parentSpanId"] is not None and span["parentSpanId"] in self.trace:
-                parent_span = self.trace[span["parentSpanId"]]
+        for span in self._spans.values():
+            if span["parentSpanId"] is not None and span["parentSpanId"] in self._spans:
+                parent_span = self._spans[span["parentSpanId"]]
                 edges.append((parent_span["nodeName"], span["nodeName"]))
         self._edges = sorted(edges)
         return self._edges
@@ -39,6 +39,10 @@ class Trace:
     @property
     def graph(self):
         return str(self.edges)
+
+    @property
+    def spans(self):
+        return self._spans
 
     def unique_name(self, span_id):
         if self._preorder is None:
@@ -52,7 +56,7 @@ class Trace:
         self._span_id_to_unique_name = {}
         node_name_to_span_ids = {}
         for id in self._preorder:
-            node_name = self.trace[id]["nodeName"]
+            node_name = self._spans[id]["nodeName"]
             if node_name not in node_name_to_span_ids:
                 node_name_to_span_ids[node_name] = []
             node_name_to_span_ids[node_name].append(id)
@@ -69,13 +73,13 @@ class Trace:
     def gap_from_parent(self, span_id):
         if self._gap_from_parent is None:
             self._gap_from_parent = {}
-            for id in self.trace:
-                if self.trace[id]["parentSpanId"] is not None:
-                    if self.trace[id]["parentSpanId"] not in self.trace:
+            for id in self._spans:
+                if self._spans[id]["parentSpanId"] is not None:
+                    if self._spans[id]["parentSpanId"] not in self._spans:
                         gap = 0
                     else:
-                        parent_span = self.trace[self.trace[id]["parentSpanId"]]
-                        gap = self.trace[id]["startTime"] - parent_span["startTime"]
+                        parent_span = self._spans[self._spans[id]["parentSpanId"]]
+                        gap = self._spans[id]["startTime"] - parent_span["startTime"]
                         if gap < 0:
                             gap = 0  # gap is modeled as log normal distribution so it cannot be negative
                     self._gap_from_parent[id] = gap
@@ -84,29 +88,29 @@ class Trace:
         return self._gap_from_parent[span_id]
 
     def duration(self, span_id):
-        span = self.trace[span_id]
+        span = self._spans[span_id]
         return span["duration"]
 
     def chains(self, chain_length):
         graph = {}
-        for span_id in self.trace:
+        for span_id in self._spans:
             graph[span_id] = []
 
-        for child_id, child_span in self.trace.items():
+        for child_id, child_span in self._spans.items():
             parent_id = child_span["parentSpanId"]
-            if parent_id is not None and parent_id in self.trace:
+            if parent_id is not None and parent_id in self._spans:
                 graph[parent_id].append(child_id)
 
         for span_id in graph:
-            graph[span_id].sort(key=lambda child_id: self.trace[child_id]["nodeName"])
+            graph[span_id].sort(key=lambda child_id: self._spans[child_id]["nodeName"])
 
         all_root_nodes = sorted(
             [
                 span_id
-                for span_id in self.trace.keys()
-                if self.trace[span_id]["parentSpanId"] is None
+                for span_id in self._spans.keys()
+                if self._spans[span_id]["parentSpanId"] is None
             ],
-            key=lambda span_id: self.trace[span_id]["nodeName"],
+            key=lambda span_id: self._spans[span_id]["nodeName"],
         )
 
         all = []

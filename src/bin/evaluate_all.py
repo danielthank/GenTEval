@@ -107,6 +107,7 @@ async def main():
                 compressor not in ["original"]
                 and not compressor.startswith("head_sampling")
                 and not compressor.startswith("gent")
+                and not compressor.startswith("markov_gent")
             ):
                 continue
             dataset_dir = root_dir.joinpath(

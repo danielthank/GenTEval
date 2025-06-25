@@ -16,6 +16,7 @@ from evaluators import (  # noqa: E402
     DurationEvaluator,
     MicroRankEvaluator,
     OperationEvaluator,
+    SpanCountEvaluator,
     TraceRCAEvaluator,
 )
 
@@ -36,7 +37,7 @@ if __name__ == "__main__":
     argparser.add_argument(
         "--evaluator",
         type=str,
-        help="Single evaluator to run (duration, operation, trace_rca, micro_rank)",
+        help="Single evaluator to run (duration, operation, trace_rca, micro_rank, span_count)",
     )
     argparser.add_argument(
         "--evaluated_dir",
@@ -77,6 +78,12 @@ if __name__ == "__main__":
         json.dump(
             results,
             open(evaluated_dir / "micro_rank_results.json", "w"),
+        )
+    elif args.evaluator == "span_count":
+        results = SpanCountEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "span_count_results.json", "w"),
         )
     else:
         raise ValueError(f"Unknown evaluator: {args.evaluator}")
