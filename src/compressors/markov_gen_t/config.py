@@ -22,6 +22,9 @@ class MarkovGenTConfig:
     batch_size: int = 32
     learning_rate: float = 0.001
 
+    # Compression options
+    save_decoders_only: bool = True
+
     @classmethod
     def from_dict(cls, config_dict):
         return cls(**config_dict)

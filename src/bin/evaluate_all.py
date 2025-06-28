@@ -1,20 +1,39 @@
-import argparse
+"""
+Template for scripts that need custom processing logic.
+This shows how to use all_utils for scripts that don't fit the standard pattern.
+"""
+
 import asyncio
 import pathlib
 
+from all_utils import (
+    create_standard_parser,
+    display_configuration,
+)
 from tqdm import tqdm
-from utils import run_dirs
 
 
-async def evaluate(
-    dataset_dir: pathlib.Path,
-    labels_path: pathlib.Path,
+async def evaluate_task(
+    app_name: str,
+    service: str,
+    fault: str,
+    run: int,
+    compressor: str,
     evaluator: str,
-    output_dir: pathlib.Path,
+    labels_path: pathlib.Path,
+    root_dir: pathlib.Path,
     force: bool,
     semaphore: asyncio.Semaphore,
 ):
-    result_file = output_dir / f"{evaluator}_results.json"
+    """Evaluate a single dataset with a specific compressor and evaluator."""
+    dataset_dir = (
+        root_dir / app_name / f"{service}_{fault}" / str(run) / compressor / "dataset"
+    )
+    evaluated_dir = (
+        root_dir / app_name / f"{service}_{fault}" / str(run) / compressor / "evaluated"
+    )
+    result_file = evaluated_dir / f"{evaluator}_results.json"
+
     if not force and result_file.exists():
         print(f"Skipping {dataset_dir} - {evaluator} as it is already processed.")
         return True
@@ -34,11 +53,12 @@ async def evaluate(
                 "--evaluator",
                 evaluator,
                 "-o",
-                str(output_dir),
+                str(evaluated_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
+            # Stream output
             async def stream_output(stream):
                 async for line in stream:
                     print(line.decode().strip(), flush=True)
@@ -54,55 +74,61 @@ async def evaluate(
                 )
                 return False
             return True
+
         except Exception as e:
             print(f"Error processing {dataset_dir}: {e}")
             return False
 
 
 async def main():
-    argparser = argparse.ArgumentParser(description="Evaluate all datasets")
-    argparser.add_argument(
-        "--app",
-        type=str,
-        default=None,
-        help="Application to run",
-    )
-    argparser.add_argument(
-        "--root_dir", type=str, help="Directory containing the normalized dataset"
-    )
-    # array of compressors to use
-    argparser.add_argument(
+    # Custom argument parsing for evaluate_all
+    parser = create_standard_parser("Evaluate all datasets")
+    parser.add_argument(
         "--compressors",
         type=str,
         nargs="+",
+        required=True,
         help="List of compressors to evaluate",
     )
-    argparser.add_argument(
+    parser.add_argument(
         "--evaluators",
         type=str,
-        nargs="+",
+        nargs="*",
+        default=[
+            "duration",
+            "operation",
+            "trace_rca",
+            "micro_rank",
+            "size",
+            "span_count",
+        ],
+        help="Evaluators to run (default: all evaluators)",
     )
-    argparser.add_argument(
-        "--max_workers",
-        type=int,
-        default=12,
-        help="Maximum number of parallel processes (default: 12)",
-    )
-    argparser.add_argument(
-        "--force",
-        "-f",
-        action="store_true",
-        help="Force re-evaluation of all datasets, even if output directories already exist",
-    )
-    args = argparser.parse_args()
+    args = parser.parse_args()
 
+    # Parse filtering arguments
+    applications, services, faults, runs = (
+        args.apps,
+        args.services,
+        args.faults,
+        args.runs,
+    )
+
+    # Display configuration with custom fields
+    extra_config = {"Compressors": args.compressors, "Evaluators": args.evaluators}
+    display_configuration(applications, services, faults, runs, extra_config)
+
+    # Custom processing logic
     root_dir = pathlib.Path(args.root_dir)
-
     semaphore = asyncio.Semaphore(args.max_workers)
-
     tasks = []
-    for app_name, service, fault, run in run_dirs(args.app):
+
+    # Generate all combinations including compressors and evaluators
+    from utils import run_dirs
+
+    for app_name, service, fault, run in run_dirs(applications, services, faults, runs):
         for compressor in args.compressors:
+            # Filter valid compressors
             if (
                 compressor not in ["original"]
                 and not compressor.startswith("head_sampling")
@@ -110,32 +136,38 @@ async def main():
                 and not compressor.startswith("markov_gent")
             ):
                 continue
-            dataset_dir = root_dir.joinpath(
-                app_name, f"{service}_{fault}", str(run), compressor, "dataset"
-            )
-            labels_path = root_dir.joinpath(
-                app_name,
-                f"{service}_{fault}",
-                str(run),
-                "original",
-                "dataset",
-                "labels.pkl",
-            )
-            evaluated_dir = root_dir.joinpath(
-                app_name, f"{service}_{fault}", str(run), compressor, "evaluated"
+
+            labels_path = (
+                root_dir
+                / app_name
+                / f"{service}_{fault}"
+                / str(run)
+                / "original"
+                / "dataset"
+                / "labels.pkl"
             )
 
             for evaluator in args.evaluators:
-                tasks.append(
-                    evaluate(
-                        dataset_dir,
-                        labels_path,
-                        evaluator,
-                        evaluated_dir,
-                        args.force,
-                        semaphore,
-                    )
+                task = evaluate_task(
+                    app_name,
+                    service,
+                    fault,
+                    run,
+                    compressor,
+                    evaluator,
+                    labels_path,
+                    root_dir,
+                    args.force,
+                    semaphore,
                 )
+                tasks.append(task)
+
+    # Process all tasks
+    if not tasks:
+        print("No combinations found to process.")
+        return
+
+    print(f"Processing {len(tasks)} combinations...")
 
     successful = 0
     failed = 0

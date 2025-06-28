@@ -2,122 +2,85 @@ import argparse
 import asyncio
 import pathlib
 
-from tqdm import tqdm
-from utils import run_dirs
+from all_utils import ScriptProcessor, run_standard_processing
 
 
-async def gent(
-    dataset_dir: pathlib.Path,
-    output_dir: pathlib.Path,
-    force: bool,
-    semaphore: asyncio.Semaphore,
-):
-    if (
-        not force
-        and (output_dir / "compressed").exists()
-        and (output_dir / "dataset").exists()
-    ):
-        print(f"Skipping {dataset_dir} as it is already processed.")
-        return True
+class GentProcessor(ScriptProcessor):
+    """Processor for GenT operations."""
 
-    async with semaphore:
-        try:
-            print(f"Processing {dataset_dir}...")
-            current_dir = pathlib.Path(__file__).parent
-            script = current_dir / "gent.py"
-            process = await asyncio.create_subprocess_exec(
-                "python3",
-                str(script),
-                "--dataset_dir",
-                str(dataset_dir),
-                "-o",
-                str(output_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+    def __init__(self, root_dir: pathlib.Path, output_dir_name: str = "gent"):
+        super().__init__("gent.py", root_dir)
+        self.output_dir_name = output_dir_name
 
-            async def stream_output(stream):
-                async for line in stream:
-                    print(line.decode().strip(), flush=True)
+    async def process_combination(
+        self,
+        app_name: str,
+        service: str,
+        fault: str,
+        run: int,
+        semaphore: asyncio.Semaphore,
+        args,
+    ) -> bool:
+        """Process a single app/service/fault/run combination."""
+        dataset_dir = self.get_dataset_dir(app_name, service, fault, run)
+        output_dir = self.get_output_dir(
+            app_name, service, fault, run, args.output_dir_name
+        )
 
-            stdout_task = asyncio.create_task(stream_output(process.stdout))
-            stderr_task = asyncio.create_task(stream_output(process.stderr))
-
-            await asyncio.gather(process.wait(), stdout_task, stderr_task)
-
-            if process.returncode != 0:
-                print(
-                    f"Error processing {dataset_dir}: Process returned {process.returncode}"
-                )
-                return False
+        # Skip if already processed (unless forced)
+        if (
+            not args.force
+            and (output_dir / "compressed").exists()
+            and (output_dir / "dataset").exists()
+        ):
+            print(f"Skipping {dataset_dir} as it is already processed.")
             return True
-        except Exception as e:
-            print(f"Error processing {dataset_dir}: {e}")
-            return False
+
+        # Prepare script arguments
+        script_args = ["--dataset_dir", str(dataset_dir), "-o", str(output_dir)]
+
+        print(f"Processing {dataset_dir}...")
+        return await self.run_script(script_args, semaphore)
 
 
-async def main():
-    argparser = argparse.ArgumentParser(description="Normalize all traces")
-    argparser.add_argument(
-        "--app",
-        type=str,
-        default=None,
-        help="Application to run",
-    )
-    argparser.add_argument(
-        "--root_dir", type=str, help="Directory containing the normalized dataset"
-    )
-    argparser.add_argument(
+def add_gent_arguments(parser: argparse.ArgumentParser):
+    """Add GenT-specific arguments."""
+    parser.add_argument(
         "--output_dir_name",
         type=str,
         default="gent",
         help="Output directory name (default: gent)",
     )
-    argparser.add_argument(
-        "--max_workers",
-        type=int,
-        default=4,
-        help="Maximum number of parallel processes (default: 12)",
+
+
+def get_gent_config(args):
+    """Get GenT-specific configuration for display."""
+    return {"Output Directory": args.output_dir_name}
+
+
+async def gent_task_factory(
+    app_name: str,
+    service: str,
+    fault: str,
+    run: int,
+    semaphore: asyncio.Semaphore,
+    args,
+):
+    """Factory function to create GenT processing tasks."""
+    processor = GentProcessor(pathlib.Path(args.root_dir), args.output_dir_name)
+    return await processor.process_combination(
+        app_name, service, fault, run, semaphore, args
     )
-    argparser.add_argument(
-        "--force",
-        "-f",
-        action="store_true",
-        help="Force reprocessing even if output directories already exist",
+
+
+async def main():
+    await run_standard_processing(
+        description="Run GenT compression on all traces",
+        task_factory=gent_task_factory,
+        additional_args_parser=add_gent_arguments,
+        extra_config_display=get_gent_config,
+        progress_description="GenT Processing",
     )
-    args = argparser.parse_args()
-
-    root_dir = pathlib.Path(args.root_dir)
-
-    semaphore = asyncio.Semaphore(args.max_workers)
-
-    tasks = []
-    for app_name, service, fault, run in run_dirs(args.app):
-        dataset_dir = root_dir.joinpath(
-            app_name, f"{service}_{fault}", str(run), "original", "dataset"
-        )
-        output_dir = root_dir.joinpath(
-            app_name, f"{service}_{fault}", str(run), args.output_dir_name
-        )
-        tasks.append(gent(dataset_dir, output_dir, args.force, semaphore))
-
-    successful = 0
-    failed = 0
-
-    for task in tqdm(
-        asyncio.as_completed(tasks), total=len(tasks), desc="GenT Processing"
-    ):
-        try:
-            success = await task
-            if success:
-                successful += 1
-            else:
-                failed += 1
-        except Exception as e:
-            failed += 1
-            print(f"Error during processing: {e}")
-
-    print(f"Processing complete. Successful: {successful}, Failed: {failed}")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,16 @@
 import argparse
-import json
 import os
 import pathlib
 import sys
 
+from utils import run_dirs
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from utils import run_dirs  # noqa: E402
-
 from reports import (  # noqa: E402
     DurationReport,
+    EnhancedReportGenerator,
     OperationReport,
     RCAReport,
     SizeReport,
@@ -18,17 +18,43 @@ from reports import (  # noqa: E402
 )
 
 if __name__ == "__main__":
-    argparser = argparse.ArgumentParser(description="Generate report")
+    argparser = argparse.ArgumentParser(
+        description="Generate evaluation reports for GenTEval compression methods",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     argparser.add_argument(
-        "--app",
+        "--apps",
         type=str,
+        nargs="*",
         default=None,
-        help="Application to run",
+        help="Application to run (e.g., RE2-OB, RE2-TT)",
+    )
+    argparser.add_argument(
+        "--services",
+        type=str,
+        nargs="*",
+        default=None,
+        help="Specific services to include (e.g., checkoutservice, ts-auth-service)",
+    )
+    argparser.add_argument(
+        "--faults",
+        type=str,
+        nargs="*",
+        default=None,
+        help="Specific fault types to include (e.g., cpu, delay, disk, loss, mem, socket)",
+    )
+    argparser.add_argument(
+        "--runs",
+        type=int,
+        nargs="*",
+        default=None,
+        help="Specific run numbers to include (default: [1, 2, 3])",
     )
     argparser.add_argument(
         "--root_dir",
         type=str,
-        help="Directory containing the output",
+        default="../output",
+        help="Directory containing the output (default: ../output)",
     )
     argparser.add_argument(
         "--compressors",
@@ -38,51 +64,80 @@ if __name__ == "__main__":
     argparser.add_argument(
         "--evaluators",
         type=str,
-        nargs="+",
+        nargs="*",
+        default=[
+            "duration",
+            "operation",
+            "trace_rca",
+            "micro_rank",
+            "size",
+            "span_count",
+        ],
+        help="Evaluators to run (default: all evaluators)",
+    )
+    argparser.add_argument(
+        "--output",
+        type=str,
+        help="Output file for enhanced JSON report",
     )
     args = argparser.parse_args()
 
     root_dir = pathlib.Path(args.root_dir)
 
     def run_dirs_func():
-        return run_dirs(args.app)
+        return run_dirs(
+            applications=args.apps,
+            services=args.services,
+            faults=args.faults,
+            runs=args.runs,
+        )
+
+    # Collect all reports
+    all_reports = {}
 
     if "duration" in args.evaluators:
         report_generator = DurationReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
-        print("duration")
-        print(json.dumps(report, indent=4))
+        all_reports["duration"] = report
 
     if "operation" in args.evaluators:
         report_generator = OperationReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
-        print("operation")
-        print(json.dumps(report, indent=4))
+        all_reports["operation"] = report
 
     if "trace_rca" in args.evaluators:
         report_generator = RCAReport(
             args.compressors, root_dir, "trace_rca_results.json"
         )
         report = report_generator.generate(run_dirs_func)
-        print("trace_rca")
-        print(json.dumps(report, indent=4))
+        all_reports["trace_rca"] = report
 
     if "micro_rank" in args.evaluators:
         report_generator = RCAReport(
             args.compressors, root_dir, "micro_rank_results.json"
         )
         report = report_generator.generate(run_dirs_func)
-        print("micro_rank")
-        print(json.dumps(report, indent=4))
+        all_reports["micro_rank"] = report
 
     if "size" in args.evaluators:
         report_generator = SizeReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
-        print("size")
-        print(json.dumps(report, indent=4))
+        all_reports["size"] = report
 
     if "span_count" in args.evaluators:
         report_generator = SpanCountReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
-        print("span_count")
-        print(json.dumps(report, indent=4))
+        all_reports["span_count"] = report
+
+    # Always use enhanced formatting
+    if all_reports:
+        enhanced_generator = EnhancedReportGenerator()
+        enhanced_generator.print_enhanced_report(all_reports)
+
+        # Save enhanced JSON report if output file is specified
+        if args.output:
+            output_path = pathlib.Path(args.output)
+            enhanced_generator.save_enhanced_json_report(all_reports, output_path)
+            print(f"\n📄 Enhanced JSON report saved to: {output_path}")
+    else:
+        print("No reports generated to display.")

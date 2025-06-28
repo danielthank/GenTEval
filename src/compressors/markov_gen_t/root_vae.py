@@ -1,5 +1,4 @@
 import logging
-import pickle
 from typing import List, Tuple
 
 import numpy as np
@@ -8,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
+
+from compressors import CompressedDataset, SerializationFormat
 
 
 class RootVAE(nn.Module):
@@ -339,37 +340,91 @@ class RootDurationSynthesizer:
 
             return results
 
-    def get_state_dict(self):
-        """Get state dictionary for saving."""
-        return {
-            "model_state_dict": self.model.state_dict() if self.model else None,
-            "node_encoder": pickle.dumps(self.node_encoder),
-            "start_time_scaler_mean": self.start_time_scaler_mean,
-            "start_time_scaler_std": self.start_time_scaler_std,
-            "duration_scaler_mean": self.duration_scaler_mean,
-            "duration_scaler_std": self.duration_scaler_std,
-        }
+    def save_state_dict(
+        self, compressed_data: CompressedDataset, decoder_only: bool = False
+    ):
+        """Save state dictionary with optional decoder-only mode."""
 
-    def load_state_dict(self, state_dict):
+        compressed_data.add(
+            "root_synthesizer",
+            CompressedDataset(
+                data={
+                    "node_encoder": (
+                        self.node_encoder,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "start_time_scaler_mean": (
+                        self.start_time_scaler_mean,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "start_time_scaler_std": (
+                        self.start_time_scaler_std,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "duration_scaler_mean": (
+                        self.duration_scaler_mean,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "duration_scaler_std": (
+                        self.duration_scaler_std,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "vocab_size": (
+                        len(self.node_encoder.classes_)
+                        if hasattr(self.node_encoder, "classes_")
+                        else 0,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                }
+            ),
+            SerializationFormat.CLOUDPICKLE,
+        )
+
+        if decoder_only:
+            root_vae = {
+                k: v
+                for k, v in self.model.state_dict().items()
+                if k.startswith("decoder")
+                or k.startswith("node_embedding")  # Keep embeddings for conditioning
+            }
+        else:
+            root_vae = self.model.state_dict()
+
+        compressed_data["root_synthesizer"].add(
+            "state_dict",
+            root_vae,
+            SerializationFormat.CLOUDPICKLE,
+        )
+
+    def load_state_dict(self, compressed_dataset):
         """Load state dictionary."""
-        # Load node encoder first to get vocab size
-        self.node_encoder = pickle.loads(state_dict["node_encoder"])
+        if "root_synthesizer" not in compressed_dataset:
+            raise ValueError("No root_synthesizer found in compressed dataset")
 
-        # Initialize model with correct vocab size
-        vocab_size = len(self.node_encoder.classes_)
+        logger = logging.getLogger(__name__)
+
+        # Load root synthesizer data
+        root_synthesizer_data = compressed_dataset["root_synthesizer"]
+
+        self.node_encoder = root_synthesizer_data["node_encoder"]
+        self.start_time_scaler_mean = root_synthesizer_data["start_time_scaler_mean"]
+        self.start_time_scaler_std = root_synthesizer_data["start_time_scaler_std"]
+        self.duration_scaler_mean = root_synthesizer_data["duration_scaler_mean"]
+        self.duration_scaler_std = root_synthesizer_data["duration_scaler_std"]
+        vocab_size = root_synthesizer_data["vocab_size"]
+
+        # Initialize model
         self.model = RootVAE(
-            vocab_size=vocab_size,
-            hidden_dim=self.config.metadata_hidden_dim,
-            latent_dim=self.config.metadata_latent_dim,
+            vocab_size,
+            self.config.metadata_hidden_dim,
+            self.config.metadata_latent_dim,
         )
         self.model.to(self.device)
 
-        # Load model state
-        if state_dict["model_state_dict"] is not None:
-            self.model.load_state_dict(state_dict["model_state_dict"])
-
-        # Load scalers
-        self.start_time_scaler_mean = state_dict["start_time_scaler_mean"]
-        self.start_time_scaler_std = state_dict["start_time_scaler_std"]
-        self.duration_scaler_mean = state_dict["duration_scaler_mean"]
-        self.duration_scaler_std = state_dict["duration_scaler_std"]
+        # Load model state dict
+        if "state_dict" in root_synthesizer_data:
+            model_state = root_synthesizer_data["state_dict"]
+            logger.info("Loading root synthesizer model")
+            self.model.load_state_dict(model_state, strict=False)
+        else:
+            raise ValueError("No state_dict found in root_synthesizer")

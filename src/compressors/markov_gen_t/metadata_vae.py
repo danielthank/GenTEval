@@ -1,5 +1,4 @@
 import logging
-import pickle
 from typing import List, Tuple
 
 import numpy as np
@@ -8,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
+
+from compressors import CompressedDataset, SerializationFormat
 
 
 class MetadataVAE(nn.Module):
@@ -484,34 +485,89 @@ class MetadataSynthesizer:
 
             return results
 
-    def get_state_dict(self):
-        """Get state dictionary for serialization."""
-        return {
-            "model_state": self.model.state_dict() if self.model else None,
-            "node_encoder": pickle.dumps(self.node_encoder),
-            "start_time_scaler": self.start_time_scaler,
-            "duration_scaler": self.duration_scaler,
-            "is_fitted": self.is_fitted,
-            "vocab_size": len(self.node_encoder.classes_)
-            if hasattr(self.node_encoder, "classes_")
-            else 0,
-        }
+    def save_state_dict(
+        self, compressed_data: CompressedDataset, decoder_only: bool = False
+    ):
+        """Save state dictionary with optional decoder-only mode."""
 
-    def load_state_dict(self, state_dict):
-        """Load state dictionary from serialization."""
-        self.node_encoder = pickle.loads(state_dict["node_encoder"])
-        self.start_time_scaler = state_dict["start_time_scaler"]
-        self.duration_scaler = state_dict["duration_scaler"]
-        self.is_fitted = state_dict["is_fitted"]
+        # Prepare common data to save
 
-        if state_dict["model_state"] and state_dict["vocab_size"] > 0:
-            self.model = MetadataVAE(
-                state_dict["vocab_size"],
-                self.config.metadata_hidden_dim,
-                self.config.metadata_latent_dim,
-            )
-            self.model.load_state_dict(state_dict["model_state"])
-            self.model.to(self.device)  # Move loaded model to device
-            self.optimizer = torch.optim.Adam(
-                self.model.parameters(), lr=self.config.learning_rate
-            )
+        compressed_data.add(
+            "metadata_synthesizer",
+            CompressedDataset(
+                data={
+                    "node_encoder": (
+                        self.node_encoder,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "start_time_scaler": (
+                        self.start_time_scaler,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "duration_scaler": (
+                        self.duration_scaler,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "is_fitted": (self.is_fitted, SerializationFormat.CLOUDPICKLE),
+                    "vocab_size": (
+                        len(self.node_encoder.classes_)
+                        if hasattr(self.node_encoder, "classes_")
+                        else 0,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                }
+            ),
+            SerializationFormat.CLOUDPICKLE,
+        )
+
+        if decoder_only:
+            metadata_vae = {
+                k: v
+                for k, v in self.model.state_dict().items()
+                if k.startswith("decoder")
+                or k.startswith("node_embedding")  # Keep embeddings for conditioning
+            }
+        else:
+            metadata_vae = self.model.state_dict()
+
+        compressed_data["metadata_synthesizer"].add(
+            "state_dict",
+            metadata_vae,
+            SerializationFormat.CLOUDPICKLE,
+        )
+
+    def load_state_dict(self, compressed_dataset):
+        """Load state dictionary."""
+        if "metadata_synthesizer" not in compressed_dataset:
+            raise ValueError("No metadata_synthesizer found in compressed dataset")
+
+        logger = logging.getLogger(__name__)
+
+        # Load metadata synthesizer data
+        metadata_synthesizer_data = compressed_dataset["metadata_synthesizer"]
+
+        self.node_encoder = metadata_synthesizer_data["node_encoder"]
+        self.start_time_scaler = metadata_synthesizer_data["start_time_scaler"]
+        self.duration_scaler = metadata_synthesizer_data["duration_scaler"]
+        self.is_fitted = metadata_synthesizer_data["is_fitted"]
+        vocab_size = metadata_synthesizer_data["vocab_size"]
+
+        # Initialize model
+        self.model = MetadataVAE(
+            vocab_size,
+            self.config.metadata_hidden_dim,
+            self.config.metadata_latent_dim,
+        )
+        self.model.to(self.device)
+
+        # Load model state dict
+        if "state_dict" in metadata_synthesizer_data:
+            model_state = metadata_synthesizer_data["state_dict"]
+            logger.info("Loading metadata synthesizer model")
+            self.model.load_state_dict(model_state, strict=False)
+        else:
+            raise ValueError("No state_dict found in metadata_synthesizer")
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.config.learning_rate
+        )

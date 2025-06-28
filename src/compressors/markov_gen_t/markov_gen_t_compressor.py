@@ -25,6 +25,22 @@ def _get_random_span_id():
     return "span" + uuid.uuid4().hex
 
 
+def _print_tree_dfs(node, depth=0, prefix=""):
+    """Print tree structure using DFS with indentation to show depth."""
+    if node is None:
+        return
+
+    # Print current node with indentation, depth, and child count
+    indent = "  " * depth
+    child_count = len(node.children)
+    print(f"{indent}{prefix}{node.node_name} [depth={depth}, children={child_count}]")
+
+    # Print children
+    for i, child in enumerate(node.children):
+        child_prefix = "├─ " if i < len(node.children) - 1 else "└─ "
+        _print_tree_dfs(child, depth + 1, child_prefix)
+
+
 def _generate_traces_worker(args):
     """Worker function for parallel trace generation."""
     (
@@ -60,6 +76,16 @@ def _generate_traces_worker(args):
                 root_node = compressor.depth_markov_chain.generate_tree_structure(
                     max_nodes=10000
                 )
+
+                """
+                # Print the generated tree structure
+                if root_node:
+                    print(
+                        f"\n=== Generated Tree Structure for Trace {trace_idx + 1} ==="
+                    )
+                    _print_tree_dfs(root_node)
+                    print("=" * 50)
+                """
 
                 if root_node:
                     trace_id = _get_random_trace_id()
@@ -274,21 +300,6 @@ class MarkovGenTCompressor:
             "markov_gen_t_config", self.config.to_dict(), SerializationFormat.MSGPACK
         )
 
-        # Save start time synthesizer
-        compressed_data.add(
-            "start_time_model_state",
-            self.start_time_synthesizer.model.state_dict(),
-            SerializationFormat.CLOUDPICKLE,
-        )
-        compressed_data.add(
-            "start_time_scaler",
-            {
-                "mean": self.start_time_synthesizer.scaler_mean,
-                "std": self.start_time_synthesizer.scaler_std,
-            },
-            SerializationFormat.MSGPACK,
-        )
-
         # Save Markov chain
         compressed_data.add(
             "depth_markov_state",
@@ -296,18 +307,21 @@ class MarkovGenTCompressor:
             SerializationFormat.CLOUDPICKLE,
         )
 
-        # Save metadata synthesizer
-        compressed_data.add(
-            "metadata_synthesizer_state",
-            self.metadata_synthesizer.get_state_dict(),
-            SerializationFormat.CLOUDPICKLE,
+        # Conditionally save model states based on save_decoders_only setting
+        decoder_only = self.config.save_decoders_only
+        self.logger.info(
+            f"Saving {'decoder-only' if decoder_only else 'full'} model states"
         )
 
-        # Save root duration synthesizer
-        compressed_data.add(
-            "root_duration_synthesizer_state",
-            self.root_duration_synthesizer.get_state_dict(),
-            SerializationFormat.CLOUDPICKLE,
+        # Save states using each synthesizer's save_state_dict method
+        self.start_time_synthesizer.save_state_dict(
+            compressed_data, decoder_only=decoder_only
+        )
+        self.metadata_synthesizer.save_state_dict(
+            compressed_data, decoder_only=decoder_only
+        )
+        self.root_duration_synthesizer.save_state_dict(
+            compressed_data, decoder_only=decoder_only
         )
 
         # Save number of traces for reconstruction
@@ -343,14 +357,15 @@ class MarkovGenTCompressor:
 
     def _load_models(self, compressed_dataset: CompressedDataset):
         """Load all models from compressed dataset."""
-        # Load start time synthesizer
+        # Load synthesizers (they will auto-detect loading mode)
         self.start_time_synthesizer = StartTimeSynthesizer(self.config)
-        self.start_time_synthesizer.model.load_state_dict(
-            compressed_dataset["start_time_model_state"]
-        )
-        scaler_data = compressed_dataset["start_time_scaler"]
-        self.start_time_synthesizer.scaler_mean = scaler_data["mean"]
-        self.start_time_synthesizer.scaler_std = scaler_data["std"]
+        self.start_time_synthesizer.load_state_dict(compressed_dataset)
+
+        self.metadata_synthesizer = MetadataSynthesizer(self.config)
+        self.metadata_synthesizer.load_state_dict(compressed_dataset)
+
+        self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
+        self.root_duration_synthesizer.load_state_dict(compressed_dataset)
 
         # Load depth Markov chain
         self.depth_markov_chain = DepthMarkovChain(
@@ -360,18 +375,6 @@ class MarkovGenTCompressor:
         )
         self.depth_markov_chain.load_state_dict(
             compressed_dataset["depth_markov_state"]
-        )
-
-        # Load metadata synthesizer
-        self.metadata_synthesizer = MetadataSynthesizer(self.config)
-        self.metadata_synthesizer.load_state_dict(
-            compressed_dataset["metadata_synthesizer_state"]
-        )
-
-        # Load root duration synthesizer
-        self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
-        self.root_duration_synthesizer.load_state_dict(
-            compressed_dataset["root_duration_synthesizer_state"]
         )
 
     def _generate_traces(

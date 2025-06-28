@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from compressors import CompressedDataset, SerializationFormat
+
 
 class StartTimeVAE(nn.Module):
     def __init__(self, latent_dim: int = 16, hidden_dim: int = 64):
@@ -137,6 +139,64 @@ class StartTimeSynthesizer:
             # Update progress bar with current loss
             avg_loss = total_loss / max(num_batches, 1)
             pbar.set_postfix({"Loss": f"{avg_loss:.4f}"})
+
+    def save_state_dict(
+        self, compressed_data: CompressedDataset, decoder_only: bool = False
+    ):
+        """Save state dictionary with optional decoder-only mode."""
+
+        compressed_data.add(
+            "start_time_synthesizer",
+            CompressedDataset(
+                data={
+                    "scaler_mean": (
+                        self.scaler_mean,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                    "scaler_std": (
+                        self.scaler_std,
+                        SerializationFormat.CLOUDPICKLE,
+                    ),
+                }
+            ),
+            SerializationFormat.CLOUDPICKLE,
+        )
+
+        if decoder_only:
+            start_time_vae = {
+                k: v
+                for k, v in self.model.state_dict().items()
+                if k.startswith("decoder")
+            }
+        else:
+            start_time_vae = self.model.state_dict()
+
+        compressed_data["start_time_synthesizer"].add(
+            "state_dict",
+            start_time_vae,
+            SerializationFormat.CLOUDPICKLE,
+        )
+
+    def load_state_dict(self, compressed_dataset):
+        """Load state dictionary."""
+        if "start_time_synthesizer" not in compressed_dataset:
+            raise ValueError("No start_time_synthesizer found in compressed dataset")
+
+        logger = logging.getLogger(__name__)
+
+        # Load start time synthesizer data
+        start_time_synthesizer_data = compressed_dataset["start_time_synthesizer"]
+
+        self.scaler_mean = start_time_synthesizer_data["scaler_mean"]
+        self.scaler_std = start_time_synthesizer_data["scaler_std"]
+
+        # Load model state dict
+        if "state_dict" in start_time_synthesizer_data:
+            model_state = start_time_synthesizer_data["state_dict"]
+            logger.info("Loading start time synthesizer model")
+            self.model.load_state_dict(model_state, strict=False)
+        else:
+            raise ValueError("No state_dict found in start_time_synthesizer")
 
     def sample(self, num_samples: int) -> np.ndarray:
         """Generate new start times."""

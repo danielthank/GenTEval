@@ -2,119 +2,88 @@ import argparse
 import asyncio
 import pathlib
 
-from tqdm import tqdm
-from utils import run_dirs
+from all_utils import ScriptProcessor, run_standard_processing
 
 
-async def head_sampling(
-    dataset_dir: pathlib.Path,
-    sampling_rate: int,
-    output_dir: pathlib.Path,
-    semaphore: asyncio.Semaphore,
-):
-    # if both compressed and dataset directories already exist, skip processing
-    if (output_dir / "compressed").exists() and (output_dir / "dataset").exists():
-        print(f"Skipping {dataset_dir} as it is already processed.")
-        return True
+class HeadSamplingProcessor(ScriptProcessor):
+    """Processor for head sampling operations."""
 
-    async with semaphore:
-        try:
-            print(f"Processing {dataset_dir}...")
-            current_dir = pathlib.Path(__file__).parent
-            script = current_dir / "head_sampling.py"
-            process = await asyncio.create_subprocess_exec(
-                "python3",
-                str(script),
-                "--dataset_dir",
-                str(dataset_dir),
-                "--sampling_rate",
-                str(sampling_rate),
-                "-o",
-                str(output_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+    def __init__(self, root_dir: pathlib.Path, sampling_rate: int):
+        super().__init__("head_sampling.py", root_dir)
+        self.sampling_rate = sampling_rate
 
-            async def stream_output(stream):
-                async for line in stream:
-                    print(line.decode().strip(), flush=True)
+    async def process_combination(
+        self,
+        app_name: str,
+        service: str,
+        fault: str,
+        run: int,
+        semaphore: asyncio.Semaphore,
+        args,
+    ) -> bool:
+        """Process a single app/service/fault/run combination."""
+        dataset_dir = self.get_dataset_dir(app_name, service, fault, run)
+        output_dir = self.get_output_dir(
+            app_name, service, fault, run, f"head_sampling_{args.sampling_rate}"
+        )
 
-            stdout_task = asyncio.create_task(stream_output(process.stdout))
-            stderr_task = asyncio.create_task(stream_output(process.stderr))
-
-            await asyncio.gather(process.wait(), stdout_task, stderr_task)
-
-            if process.returncode != 0:
-                print(
-                    f"Error processing {dataset_dir}: Process returned {process.returncode}"
-                )
-                return False
+        # Skip if already processed
+        if (output_dir / "compressed").exists() and (output_dir / "dataset").exists():
+            print(f"Skipping {dataset_dir} as it is already processed.")
             return True
-        except Exception as e:
-            print(f"Error processing {dataset_dir}: {e}")
-            return False
+
+        # Prepare script arguments
+        script_args = [
+            "--dataset_dir",
+            str(dataset_dir),
+            "--sampling_rate",
+            str(args.sampling_rate),
+            "-o",
+            str(output_dir),
+        ]
+
+        print(f"Processing {dataset_dir}...")
+        return await self.run_script(script_args, semaphore)
+
+
+def add_head_sampling_arguments(parser: argparse.ArgumentParser):
+    """Add head sampling-specific arguments."""
+    parser.add_argument(
+        "--sampling_rate",
+        type=int,
+        required=True,
+        help="Sampling rate for head sampling",
+    )
+
+
+def get_head_sampling_config(args):
+    """Get head sampling-specific configuration for display."""
+    return {"Sampling Rate": args.sampling_rate}
+
+
+async def head_sampling_task_factory(
+    app_name: str,
+    service: str,
+    fault: str,
+    run: int,
+    semaphore: asyncio.Semaphore,
+    args,
+):
+    """Factory function to create head sampling processing tasks."""
+    processor = HeadSamplingProcessor(pathlib.Path(args.root_dir), args.sampling_rate)
+    return await processor.process_combination(
+        app_name, service, fault, run, semaphore, args
+    )
 
 
 async def main():
-    argparser = argparse.ArgumentParser(description="Head sampling all dataset")
-    argparser.add_argument(
-        "--app",
-        type=str,
-        default=None,
-        help="Application to run",
+    await run_standard_processing(
+        description="Run head sampling on all datasets",
+        task_factory=head_sampling_task_factory,
+        additional_args_parser=add_head_sampling_arguments,
+        extra_config_display=get_head_sampling_config,
+        progress_description="Head Sampling Processing",
     )
-    argparser.add_argument(
-        "--root_dir", type=str, help="Directory containing the normalized dataset"
-    )
-    argparser.add_argument(
-        "--sampling_rate",
-        type=int,
-        help="Sampling rate for head sampling",
-    )
-    argparser.add_argument(
-        "--max_workers",
-        type=int,
-        default=12,
-        help="Maximum number of parallel processes (default: 12)",
-    )
-    args = argparser.parse_args()
-
-    root_dir = pathlib.Path(args.root_dir)
-
-    semaphore = asyncio.Semaphore(args.max_workers)
-
-    tasks = []
-    for app_name, service, fault, run in run_dirs(args.app):
-        dataset_dir = root_dir.joinpath(
-            app_name, f"{service}_{fault}", str(run), "original", "dataset"
-        )
-        output_dir = root_dir.joinpath(
-            app_name,
-            f"{service}_{fault}",
-            str(run),
-            f"head_sampling_{args.sampling_rate}",
-        )
-        tasks.append(
-            head_sampling(dataset_dir, args.sampling_rate, output_dir, semaphore)
-        )
-
-    successful = 0
-    failed = 0
-
-    for task in tqdm(
-        asyncio.as_completed(tasks), total=len(tasks), desc="Head Sampling Processing"
-    ):
-        try:
-            success = await task
-            if success:
-                successful += 1
-            else:
-                failed += 1
-        except Exception as e:
-            failed += 1
-            print(f"Error during processing: {e}")
-
-    print(f"Processing complete. Successful: {successful}, Failed: {failed}")
 
 
 if __name__ == "__main__":

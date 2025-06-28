@@ -23,18 +23,31 @@ class CompressedDataset:
     Users must specify the format when adding data.
     """
 
-    def __init__(self, compression_level: int = 9):
+    def __init__(self, compression_level: int = 9, data: Dict[str, tuple] = None):
         """
         Initialize a new CompressedDataset.
 
         Args:
             compression_level: Compression level (0-9, 9 being highest)
+            data: Optional dictionary for batch initialization where keys are dataset keys
+                  and values are tuples of (data, format) where format is a SerializationFormat enum
+
+        Example:
+            dataset = CompressedDataset(data={
+                "model_weights": (model.state_dict(), SerializationFormat.CLOUDPICKLE),
+                "config": (config_data, SerializationFormat.MSGPACK),
+                "metadata": (meta_info, SerializationFormat.CLOUDPICKLE)
+            })
         """
         self.data: Dict[str, Any] = {}
         self.formats: Dict[
             str, SerializationFormat
         ] = {}  # Track format used for each key
         self.compression_level = compression_level
+
+        # Initialize with batch data if provided
+        if data is not None:
+            self.add_batch(data)
 
     def __len__(self):
         return len(self.data)
@@ -59,6 +72,41 @@ class CompressedDataset:
 
         self.data[key] = value
         self.formats[key] = format
+
+    def add_batch(self, data_dict: Dict[str, tuple]) -> None:
+        """
+        Add multiple items to the dataset at once using a dictionary.
+
+        Args:
+            data_dict: Dictionary where keys are the dataset keys and values are tuples
+                      of (data, format) where format is a SerializationFormat enum
+
+        Example:
+            dataset.add_batch({
+                "model_weights": (model.state_dict(), SerializationFormat.CLOUDPICKLE),
+                "config": (config_data, SerializationFormat.MSGPACK),
+                "metadata": (meta_info, SerializationFormat.CLOUDPICKLE)
+            })
+        """
+        if not isinstance(data_dict, dict):
+            raise TypeError("data_dict must be a dictionary")
+
+        # Validate all entries first before adding any
+        for key, value in data_dict.items():
+            if not isinstance(value, tuple) or len(value) != 2:
+                raise ValueError(
+                    f"Value for key '{key}' must be a tuple of (data, format)"
+                )
+
+            data, format = value
+            if not isinstance(format, SerializationFormat):
+                raise TypeError(
+                    f"Format for key '{key}' must be a SerializationFormat enum value"
+                )
+
+        # Add all items
+        for key, (data, format) in data_dict.items():
+            self.add(key, data, format)
 
     def remove(self, key: str) -> None:
         """Remove an item from the dataset."""

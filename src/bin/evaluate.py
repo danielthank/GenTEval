@@ -85,5 +85,8 @@ if __name__ == "__main__":
             results,
             open(evaluated_dir / "span_count_results.json", "w"),
         )
+    elif args.evaluator == "size":
+        # Size does not require a specific evaluator. It just needs reporting.
+        pass
     else:
         raise ValueError(f"Unknown evaluator: {args.evaluator}")
