@@ -5,6 +5,7 @@ from typing import List, Tuple
 import networkx as nx
 import numpy as np
 
+from compressors import CompressedDataset, SerializationFormat
 from compressors.trace import Trace
 
 
@@ -284,22 +285,48 @@ class DepthMarkovChain:
         except Exception:
             return next_states[0] if next_states else None
 
-    def get_state_dict(self):
-        """Get state dictionary for serialization."""
-        return {
-            "transition_matrix": dict(self.transition_matrix),
-            "start_states": dict(self.start_states),
-            "node_names": list(self.node_names),
-            "order": self.order,
-            "max_depth": self.max_depth,
-            "max_children": self.max_children,
-        }
+    def save_state_dict(self, compressed_data: CompressedDataset):
+        compressed_data.add(
+            "depth_markov_chain",
+            CompressedDataset(
+                data={
+                    "transition_matrix": (
+                        dict(self.transition_matrix),
+                        SerializationFormat.MSGPACK,
+                    ),
+                    "start_states": (
+                        dict(self.start_states),
+                        SerializationFormat.MSGPACK,
+                    ),
+                    "node_names": (
+                        list(self.node_names),
+                        SerializationFormat.MSGPACK,
+                    ),
+                    "order": (self.order, SerializationFormat.MSGPACK),
+                    "max_depth": (self.max_depth, SerializationFormat.MSGPACK),
+                    "max_children": (self.max_children, SerializationFormat.MSGPACK),
+                }
+            ),
+            SerializationFormat.CLOUDPICKLE,
+        )
 
-    def load_state_dict(self, state_dict):
-        """Load state dictionary from serialization."""
-        self.transition_matrix = defaultdict(Counter, state_dict["transition_matrix"])
-        self.start_states = Counter(state_dict["start_states"])
-        self.node_names = set(state_dict["node_names"])
-        self.order = state_dict["order"]
-        self.max_depth = state_dict["max_depth"]
-        self.max_children = state_dict["max_children"]
+    def load_state_dict(self, compressed_dataset: CompressedDataset):
+        """Load state dictionary from compressed dataset."""
+        if "depth_markov_chain" not in compressed_dataset:
+            raise ValueError("No depth_markov_chain found in compressed dataset")
+        depth_markov_data = compressed_dataset["depth_markov_chain"]
+
+        # Convert back to appropriate data structures
+        self.transition_matrix = defaultdict(
+            Counter,
+            {
+                state: Counter(transitions)
+                for state, transitions in depth_markov_data["transition_matrix"].items()
+            },
+        )
+
+        self.start_states = Counter(depth_markov_data["start_states"])
+        self.node_names = set(depth_markov_data["node_names"])
+        self.order = depth_markov_data["order"]
+        self.max_depth = depth_markov_data["max_depth"]
+        self.max_children = depth_markov_data["max_children"]

@@ -502,18 +502,18 @@ class MetadataSynthesizer:
                     ),
                     "start_time_scaler": (
                         self.start_time_scaler,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                     "duration_scaler": (
                         self.duration_scaler,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
-                    "is_fitted": (self.is_fitted, SerializationFormat.CLOUDPICKLE),
+                    "is_fitted": (self.is_fitted, SerializationFormat.MSGPACK),
                     "vocab_size": (
                         len(self.node_encoder.classes_)
                         if hasattr(self.node_encoder, "classes_")
                         else 0,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                 }
             ),

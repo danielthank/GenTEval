@@ -300,12 +300,7 @@ class MarkovGenTCompressor:
             "markov_gen_t_config", self.config.to_dict(), SerializationFormat.MSGPACK
         )
 
-        # Save Markov chain
-        compressed_data.add(
-            "depth_markov_state",
-            self.depth_markov_chain.get_state_dict(),
-            SerializationFormat.CLOUDPICKLE,
-        )
+        self.depth_markov_chain.save_state_dict(compressed_data)
 
         # Conditionally save model states based on save_decoders_only setting
         decoder_only = self.config.save_decoders_only
@@ -373,9 +368,7 @@ class MarkovGenTCompressor:
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,
         )
-        self.depth_markov_chain.load_state_dict(
-            compressed_dataset["depth_markov_state"]
-        )
+        self.depth_markov_chain.load_state_dict(compressed_dataset)
 
     def _generate_traces(
         self, num_traces: int, compressed_dataset: CompressedDataset

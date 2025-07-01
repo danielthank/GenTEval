@@ -355,25 +355,25 @@ class RootDurationSynthesizer:
                     ),
                     "start_time_scaler_mean": (
                         self.start_time_scaler_mean,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                     "start_time_scaler_std": (
                         self.start_time_scaler_std,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                     "duration_scaler_mean": (
                         self.duration_scaler_mean,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                     "duration_scaler_std": (
                         self.duration_scaler_std,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                     "vocab_size": (
                         len(self.node_encoder.classes_)
                         if hasattr(self.node_encoder, "classes_")
                         else 0,
-                        SerializationFormat.CLOUDPICKLE,
+                        SerializationFormat.MSGPACK,
                     ),
                 }
             ),

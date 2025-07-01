@@ -150,12 +150,12 @@ class StartTimeSynthesizer:
             CompressedDataset(
                 data={
                     "scaler_mean": (
-                        self.scaler_mean,
-                        SerializationFormat.CLOUDPICKLE,
+                        float(self.scaler_mean),
+                        SerializationFormat.MSGPACK,
                     ),
                     "scaler_std": (
-                        self.scaler_std,
-                        SerializationFormat.CLOUDPICKLE,
+                        float(self.scaler_std),
+                        SerializationFormat.MSGPACK,
                     ),
                 }
             ),
