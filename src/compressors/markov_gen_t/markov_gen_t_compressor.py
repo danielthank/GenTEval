@@ -11,10 +11,10 @@ from compressors.trace import Trace
 from dataset import Dataset
 
 from .config import MarkovGenTConfig
-from .depth_markov import DepthMarkovChain
 from .metadata_vae import MetadataSynthesizer
+from .mrf_graph import MarkovRandomField
 from .root_vae import RootDurationSynthesizer
-from .start_time_vae import StartTimeSynthesizer
+from .start_time_count import StartTimeCountSynthesizer
 
 
 def _get_random_trace_id():
@@ -239,8 +239,8 @@ class MarkovGenTCompressor:
         self.logger = logging.getLogger(__name__)
 
         # Initialize components
-        self.start_time_synthesizer = StartTimeSynthesizer(self.config)
-        self.depth_markov_chain = DepthMarkovChain(
+        self.start_time_synthesizer = StartTimeCountSynthesizer(self.config)
+        self.depth_markov_chain = MarkovRandomField(
             order=self.config.markov_order,
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,
@@ -279,7 +279,7 @@ class MarkovGenTCompressor:
 
         self.logger.info(f"Processing {len(traces)} valid traces")
 
-        # Train start time VAE
+        # Train start time count synthesizer
         start_times_array = np.array(start_times)
         self.start_time_synthesizer.fit(start_times_array)
 
@@ -353,7 +353,7 @@ class MarkovGenTCompressor:
     def _load_models(self, compressed_dataset: CompressedDataset):
         """Load all models from compressed dataset."""
         # Load synthesizers (they will auto-detect loading mode)
-        self.start_time_synthesizer = StartTimeSynthesizer(self.config)
+        self.start_time_synthesizer = StartTimeCountSynthesizer(self.config)
         self.start_time_synthesizer.load_state_dict(compressed_dataset)
 
         self.metadata_synthesizer = MetadataSynthesizer(self.config)
@@ -363,7 +363,7 @@ class MarkovGenTCompressor:
         self.root_duration_synthesizer.load_state_dict(compressed_dataset)
 
         # Load depth Markov chain
-        self.depth_markov_chain = DepthMarkovChain(
+        self.depth_markov_chain = MarkovRandomField(
             order=self.config.markov_order,
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,

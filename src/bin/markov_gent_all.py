@@ -59,7 +59,7 @@ class MarkovGentProcessor(ScriptProcessor):
             "--learning_rate",
             str(args.learning_rate),
             "--num_processes",
-            "8",
+            "1",
         ]
 
         print(f"Processing {dataset_dir}...")

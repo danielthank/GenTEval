@@ -79,6 +79,14 @@ class EnhancedReportGenerator:
                 return Text(f"{value:.4f}", style="yellow")
             else:
                 return Text(f"{value:.4f}", style="red")
+        elif metric_type == "mape":
+            # Lower is better (percentage error)
+            if value <= 5.0:
+                return Text(f"{value:.2f}%", style="bold green")
+            elif value <= 15.0:
+                return Text(f"{value:.2f}%", style="yellow")
+            else:
+                return Text(f"{value:.2f}%", style="red")
         elif metric_type == "size":
             # Format file sizes nicely
             if value >= 1024 * 1024 * 1024:  # GB
@@ -124,6 +132,7 @@ class EnhancedReportGenerator:
                 or metric.endswith("_precision_avg")
                 or metric.endswith("_recall_avg")
                 or metric.endswith("_wdis_avg")
+                or metric.endswith("_mape_avg")
                 or metric == "size"
             ):
                 available_metrics.append(metric)
@@ -149,6 +158,8 @@ class EnhancedReportGenerator:
                     formatted_value = self.format_metric_value(value, "accuracy")
                 elif "wdis" in metric:
                     formatted_value = self.format_metric_value(value, "wasserstein")
+                elif "mape" in metric:
+                    formatted_value = self.format_metric_value(value, "mape")
                 elif "size" in metric:
                     formatted_value = self.format_metric_value(value, "size")
                 else:
