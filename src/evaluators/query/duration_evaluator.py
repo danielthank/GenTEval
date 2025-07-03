@@ -14,7 +14,19 @@ class DurationEvaluator(Evaluator):
         # duration by service and time bucket for p90 calculation
         service_time_durations = defaultdict(lambda: defaultdict(list))
 
+        # NEW: Root span durations before and after incident injection
+        root_duration_before_incident = defaultdict(list)
+        root_duration_after_incident = defaultdict(list)
+
+        # Get inject_time from labels (convert from seconds to microseconds)
+        inject_time_us = int(labels.get("inject_time", 0)) * 1000000
+
         for trace in dataset.traces.values():
+            # Find root spans (spans with no parent)
+            root_spans = [
+                span for span in trace.values() if span["parentSpanId"] is None
+            ]
+
             for span in trace.values():
                 service = span["nodeName"].split("@")[0]
                 start_time = span["startTime"] // (60 * 1000000)  # minute bucket
@@ -36,6 +48,23 @@ class DurationEvaluator(Evaluator):
                                 else 1
                             )
 
+            # NEW: Process root spans for before/after incident analysis
+            for root_span in root_spans:
+                service = root_span["nodeName"].split("@")[0]
+                span_start_time = root_span["startTime"]
+                span_duration = root_span["duration"]
+
+                # Determine if this root span is before or after incident injection
+                if span_start_time + span_duration < inject_time_us:
+                    # Span ended before incident injection
+                    root_duration_before_incident["all"].append(span_duration)
+                    root_duration_before_incident[service].append(span_duration)
+                elif span_start_time >= inject_time_us:
+                    # Span started after incident injection
+                    root_duration_after_incident["all"].append(span_duration)
+                    root_duration_after_incident[service].append(span_duration)
+                # Note: We skip spans that overlap with the injection time for cleaner analysis
+
         # calculate p90 for each service and time bucket
         duration_p90_by_service = {}
         for service, time_buckets in service_time_durations.items():
@@ -53,4 +82,6 @@ class DurationEvaluator(Evaluator):
             "duration": duration_distribution,
             "duration_pair": duration_pair_distribution,
             "duration_p90_by_service": duration_p90_by_service,
+            "root_duration_before_incident": root_duration_before_incident,
+            "root_duration_after_incident": root_duration_after_incident,
         }

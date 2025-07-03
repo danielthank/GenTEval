@@ -1,6 +1,5 @@
 """Duration report generator with Wasserstein distance visualization."""
 
-from collections import defaultdict
 from typing import Any, Dict
 
 import matplotlib.pyplot as plt
@@ -16,9 +15,22 @@ class DurationReport(BaseReport):
     def __init__(self, compressors, root_dir):
         """Initialize the duration report generator."""
         super().__init__(compressors, root_dir)
-        # Create output directory for visualizations
+        # Create output directories for visualizations
         self.viz_output_dir = root_dir / "visualizations" / "duration"
-        self.viz_output_dir.mkdir(parents=True, exist_ok=True)
+        self.duration_all_dir = self.viz_output_dir / "duration_all_wasserstein_dist"
+        self.duration_pair_dir = (
+            self.viz_output_dir / "duration_pair_all_wasserstein_dist"
+        )
+        self.duration_p90_dir = self.viz_output_dir / "duration_p90"
+        self.duration_before_after_dir = (
+            self.viz_output_dir / "duration_before_after_incident"
+        )
+
+        # Create all subdirectories
+        self.duration_all_dir.mkdir(parents=True, exist_ok=True)
+        self.duration_pair_dir.mkdir(parents=True, exist_ok=True)
+        self.duration_p90_dir.mkdir(parents=True, exist_ok=True)
+        self.duration_before_after_dir.mkdir(parents=True, exist_ok=True)
 
     def visualize_wasserstein_distributions(
         self, original_data, compressed_data, group_name, compressor, app_name
@@ -72,10 +84,16 @@ class DurationReport(BaseReport):
 
         plt.tight_layout()
 
-        # Save the plot
+        # Save the plot in appropriate subdirectory
         safe_group_name = group_name.replace("/", "_").replace(" ", "_")
         filename = f"{app_name}_{compressor}_{safe_group_name}_wasserstein_dist.png"
-        filepath = self.viz_output_dir / filename
+
+        # Choose the correct subdirectory based on the group type
+        if "duration_pair" in group_name:
+            filepath = self.duration_pair_dir / filename
+        else:
+            filepath = self.duration_all_dir / filename
+
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
         plt.close()
 
@@ -210,13 +228,152 @@ class DurationReport(BaseReport):
 
         plt.tight_layout()
 
-        # Save the plot
+        # Save the plot in duration_p90 subdirectory
         filename = f"{app_name}_{compressor}_duration_p90_comparison.png"
-        filepath = self.viz_output_dir / filename
+        filepath = self.duration_p90_dir / filename
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
         plt.close()
 
         return mape_results
+
+    def visualize_before_after_incident(
+        self,
+        original_before_data,
+        original_after_data,
+        compressed_before_data,
+        compressed_after_data,
+        compressor,
+        app_name,
+    ):
+        """Visualize root span duration CDFs before and after incident injection in a single plot."""
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+
+        # Plot original data - before incident (solid lines)
+        if original_before_data and len(original_before_data) > 0:
+            before_sorted = np.sort(original_before_data)
+            before_cdf = np.arange(1, len(before_sorted) + 1) / len(before_sorted)
+            ax.plot(
+                before_sorted,
+                before_cdf,
+                label=f"Original Before ({len(original_before_data)} spans)",
+                color="blue",
+                linewidth=2.5,
+                linestyle="-",
+                marker="o",
+                markersize=4,
+                markevery=len(before_sorted) // 10 if len(before_sorted) > 10 else 1,
+            )
+
+        # Plot original data - after incident (dashed lines)
+        if original_after_data and len(original_after_data) > 0:
+            after_sorted = np.sort(original_after_data)
+            after_cdf = np.arange(1, len(after_sorted) + 1) / len(after_sorted)
+            ax.plot(
+                after_sorted,
+                after_cdf,
+                label=f"Original After ({len(original_after_data)} spans)",
+                color="blue",
+                linewidth=2.5,
+                linestyle="--",
+                marker="s",
+                markersize=4,
+                markevery=len(after_sorted) // 10 if len(after_sorted) > 10 else 1,
+            )
+
+        # Plot compressed data - before incident (solid lines)
+        if compressed_before_data and len(compressed_before_data) > 0:
+            comp_before_sorted = np.sort(compressed_before_data)
+            comp_before_cdf = np.arange(1, len(comp_before_sorted) + 1) / len(
+                comp_before_sorted
+            )
+            ax.plot(
+                comp_before_sorted,
+                comp_before_cdf,
+                label=f"{compressor} Before ({len(compressed_before_data)} spans)",
+                color="red",
+                linewidth=2.5,
+                linestyle="-",
+                marker="^",
+                markersize=4,
+                markevery=len(comp_before_sorted) // 10
+                if len(comp_before_sorted) > 10
+                else 1,
+            )
+
+        # Plot compressed data - after incident (dashed lines)
+        if compressed_after_data and len(compressed_after_data) > 0:
+            comp_after_sorted = np.sort(compressed_after_data)
+            comp_after_cdf = np.arange(1, len(comp_after_sorted) + 1) / len(
+                comp_after_sorted
+            )
+            ax.plot(
+                comp_after_sorted,
+                comp_after_cdf,
+                label=f"{compressor} After ({len(compressed_after_data)} spans)",
+                color="red",
+                linewidth=2.5,
+                linestyle="--",
+                marker="d",
+                markersize=4,
+                markevery=len(comp_after_sorted) // 10
+                if len(comp_after_sorted) > 10
+                else 1,
+            )
+
+        ax.set_xlabel("Root Span Duration (μs)", fontsize=12)
+        ax.set_ylabel("Cumulative Probability", fontsize=12)
+        ax.set_title(
+            "Root Span Duration CDF - Before vs After Incident",
+            fontsize=14,
+            fontweight="bold",
+        )
+
+        # Enhanced legend with visual grouping
+        ax.legend(loc="best", fontsize=10, framealpha=0.9)
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(
+            0, 2000000
+        )  # Root span duration range: 0 to 1,000,000 μs (1 second)
+
+        # Calculate Wasserstein distances if both before and after data exist
+        wdist_before = wdist_after = float("inf")
+        if (
+            original_before_data
+            and compressed_before_data
+            and len(original_before_data) > 0
+            and len(compressed_before_data) > 0
+        ):
+            wdist_before = wasserstein_distance(
+                original_before_data, compressed_before_data
+            )
+
+        if (
+            original_after_data
+            and compressed_after_data
+            and len(original_after_data) > 0
+            and len(compressed_after_data) > 0
+        ):
+            wdist_after = wasserstein_distance(
+                original_after_data, compressed_after_data
+            )
+
+        # Overall title with Wasserstein distances
+        fig.suptitle(
+            f"{app_name} - {compressor}\n"
+            f"W-Distance Before: {wdist_before:.4f}, W-Distance After: {wdist_after:.4f}",
+            fontsize=16,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+
+        # Save the plot
+        filename = f"{app_name}_{compressor}_root_duration_before_after_incident.png"
+        filepath = self.duration_before_after_dir / filename
+        plt.savefig(filepath, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        return wdist_before, wdist_after
 
     def generate(self, run_dirs) -> Dict[str, Any]:
         """Generate duration report with Wasserstein distance calculations and visualizations."""
@@ -307,83 +464,67 @@ class DurationReport(BaseReport):
                     "duration_p90_by_service" in original
                     and "duration_p90_by_service" in results
                 ):
-                    # Collect p90 data for this app-compressor combination
-                    p90_data_key = f"{app_name}_{compressor}"
-
-                    # Store p90 data temporarily for aggregation
-                    if not hasattr(self, "p90_data_store"):
-                        self.p90_data_store = defaultdict(
-                            lambda: {
-                                "original": defaultdict(list),
-                                "compressed": defaultdict(list),
-                                "metadata": {"app_name": None, "compressor": None},
-                            }
-                        )
-
-                    # Store metadata for proper extraction later
-                    self.p90_data_store[p90_data_key]["metadata"]["app_name"] = app_name
-                    self.p90_data_store[p90_data_key]["metadata"]["compressor"] = (
-                        compressor
+                    # Generate p90 visualization immediately for this run
+                    mape_results = self.visualize_duration_p90_comparison(
+                        original["duration_p90_by_service"],
+                        results["duration_p90_by_service"],
+                        compressor,
+                        f"{app_name}_{service}_{fault}_{run}",
                     )
 
-                    # Aggregate p90 data across runs
-                    for service_name, service_data in original[
-                        "duration_p90_by_service"
-                    ].items():
-                        self.p90_data_store[p90_data_key]["original"][
-                            service_name
-                        ].extend(service_data)
+                    # Store MAPE results in report
+                    report_group = f"{app_name}_{compressor}"
+                    if "duration_p90_mape_runs" not in self.report[report_group]:
+                        self.report[report_group]["duration_p90_mape_runs"] = []
+                    self.report[report_group]["duration_p90_mape_runs"].append(
+                        mape_results
+                    )
 
-                    for service_name, service_data in results[
-                        "duration_p90_by_service"
-                    ].items():
-                        self.p90_data_store[p90_data_key]["compressed"][
-                            service_name
-                        ].extend(service_data)
+                # NEW: Process root duration before/after incident data
+                if (
+                    "root_duration_before_incident" in original
+                    and "root_duration_after_incident" in original
+                    and "root_duration_before_incident" in results
+                    and "root_duration_after_incident" in results
+                ):
+                    # Process "all" service data for before/after incident
+                    if (
+                        "all" in original["root_duration_before_incident"]
+                        and "all" in original["root_duration_after_incident"]
+                        and "all" in results["root_duration_before_incident"]
+                        and "all" in results["root_duration_after_incident"]
+                    ):
+                        # Generate before/after incident visualization
+                        wdist_before, wdist_after = (
+                            self.visualize_before_after_incident(
+                                original["root_duration_before_incident"]["all"],
+                                original["root_duration_after_incident"]["all"],
+                                results["root_duration_before_incident"]["all"],
+                                results["root_duration_after_incident"]["all"],
+                                compressor,
+                                f"{app_name}_{service}_{fault}_{run}",
+                            )
+                        )
 
-        # Generate p90 visualizations after collecting all data
-        if hasattr(self, "p90_data_store"):
-            for app_compressor_key, data in self.p90_data_store.items():
-                # Extract original app_name and compressor from stored metadata
-                app_name = data["metadata"]["app_name"]
-                compressor = data["metadata"]["compressor"]
+                        # Store Wasserstein distances in report
+                        report_group = f"{app_name}_{compressor}"
+                        if (
+                            "root_duration_before_wdist"
+                            not in self.report[report_group]
+                        ):
+                            self.report[report_group]["root_duration_before_wdist"] = []
+                        if "root_duration_after_wdist" not in self.report[report_group]:
+                            self.report[report_group]["root_duration_after_wdist"] = []
 
-                # Merge and sort p90 data by timebucket for each service
-                merged_original = {}
-                merged_compressed = {}
-
-                for service in data["original"]:
-                    # Merge duplicate timebuckets by averaging p90 values
-                    timebucket_p90s = defaultdict(list)
-                    for item in data["original"][service]:
-                        timebucket_p90s[item["timebucket"]].append(item["p90"])
-
-                    merged_original[service] = [
-                        {"timebucket": tb, "p90": np.mean(p90s)}
-                        for tb, p90s in timebucket_p90s.items()
-                    ]
-
-                for service in data["compressed"]:
-                    # Merge duplicate timebuckets by averaging p90 values
-                    timebucket_p90s = defaultdict(list)
-                    for item in data["compressed"][service]:
-                        timebucket_p90s[item["timebucket"]].append(item["p90"])
-
-                    merged_compressed[service] = [
-                        {"timebucket": tb, "p90": np.mean(p90s)}
-                        for tb, p90s in timebucket_p90s.items()
-                    ]
-
-                # Generate visualization and calculate MAPE
-                mape_results = self.visualize_duration_p90_comparison(
-                    merged_original,
-                    merged_compressed,
-                    compressor,  # Use original compressor name
-                    app_name,  # Use original app name
-                )
-
-                # Store MAPE results in report
-                self.report[app_compressor_key]["duration_p90_mape"] = mape_results
+                        # Only add finite distances to avoid inf values in averages
+                        if wdist_before != float("inf"):
+                            self.report[report_group][
+                                "root_duration_before_wdist"
+                            ].append(wdist_before)
+                        if wdist_after != float("inf"):
+                            self.report[report_group][
+                                "root_duration_after_wdist"
+                            ].append(wdist_after)
 
         # Calculate averages and clean up
         for group in self.report:
@@ -399,18 +540,36 @@ class DurationReport(BaseReport):
                 ) / len(self.report[group]["duration_pair_wdis"])
                 del self.report[group]["duration_pair_wdis"]
 
-            if "duration_p90_mape" in self.report[group]:
-                # Calculate average MAPE across all services
-                all_mape_values = list(self.report[group]["duration_p90_mape"].values())
-                if all_mape_values:
-                    self.report[group]["duration_p90_mape_avg"] = sum(
-                        all_mape_values
-                    ) / len(all_mape_values)
-                # Keep the individual service MAPE values as well
-                # del self.report[group]["duration_p90_mape"]  # Comment out to keep individual service MAPEs
+            if "duration_p90_mape_runs" in self.report[group]:
+                # Calculate average MAPE across all runs and all services
+                all_run_mapes = []
+                for run_mape in self.report[group]["duration_p90_mape_runs"]:
+                    all_run_mapes.extend(run_mape.values())
 
-        # Clean up temporary p90 data store
-        if hasattr(self, "p90_data_store"):
-            delattr(self, "p90_data_store")
+                if all_run_mapes:
+                    self.report[group]["duration_p90_mape_avg"] = sum(
+                        all_run_mapes
+                    ) / len(all_run_mapes)
+                # Keep the individual run MAPE values
+                # del self.report[group]["duration_p90_mape_runs"]  # Comment out to keep individual run MAPEs
+
+            # NEW: Calculate averages for before/after incident Wasserstein distances
+            if "root_duration_before_wdist" in self.report[group]:
+                if self.report[group]["root_duration_before_wdist"]:
+                    self.report[group]["root_duration_before_wdist_avg"] = sum(
+                        self.report[group]["root_duration_before_wdist"]
+                    ) / len(self.report[group]["root_duration_before_wdist"])
+                else:
+                    self.report[group]["root_duration_before_wdist_avg"] = float("inf")
+                del self.report[group]["root_duration_before_wdist"]
+
+            if "root_duration_after_wdist" in self.report[group]:
+                if self.report[group]["root_duration_after_wdist"]:
+                    self.report[group]["root_duration_after_wdist_avg"] = sum(
+                        self.report[group]["root_duration_after_wdist"]
+                    ) / len(self.report[group]["root_duration_after_wdist"])
+                else:
+                    self.report[group]["root_duration_after_wdist_avg"] = float("inf")
+                del self.report[group]["root_duration_after_wdist"]
 
         return dict(self.report)

@@ -196,8 +196,8 @@ def create_standard_parser(
     parser.add_argument(
         "--max_workers",
         type=int,
-        default=4,
-        help="Maximum number of parallel processes (default: 4)",
+        default=12,
+        help="Maximum number of parallel processes (default: 12)",
     )
     parser.add_argument(
         "--force",
