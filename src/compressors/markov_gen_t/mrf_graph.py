@@ -42,7 +42,7 @@ class MarkovRandomField:
         order: int = 1,
         max_depth: int = 10,
         max_children: int = 5000,
-        node_weight: float = 1.0,  # Lambda parameter for balancing edge vs node potentials
+        node_weight: float = 0,  # Lambda parameter for balancing edge vs node potentials
     ):
         self.order = order
         self.max_depth = max_depth
@@ -382,8 +382,7 @@ class MarkovRandomField:
         self.order = mrf_data["order"]
         self.max_depth = mrf_data["max_depth"]
         self.max_children = mrf_data["max_children"]
-        # self.node_weight = mrf_data["node_weight"]
-        self.node_weight = 0.5
+        self.node_weight = mrf_data["node_weight"]
         self.is_trained = mrf_data["is_trained"]
 
         # Initialize empty training data structures (not needed for generation)

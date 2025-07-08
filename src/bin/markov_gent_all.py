@@ -36,31 +36,26 @@ class MarkovGentProcessor(ScriptProcessor):
             print(f"Skipping {dataset_dir} as it is already processed.")
             return True
 
-        # Prepare script arguments with all the MarkovGenT parameters
+        # Prepare script arguments
         script_args = [
             "--dataset_dir",
             str(dataset_dir),
             "-o",
             str(output_dir),
-            "--start_time_latent_dim",
-            str(args.start_time_latent_dim),
-            "--start_time_epochs",
-            str(args.start_time_epochs),
-            "--markov_order",
-            str(args.markov_order),
-            "--max_depth",
-            str(args.max_depth),
-            "--metadata_epochs",
-            str(args.metadata_epochs),
-            "--metadata_hidden_dim",
-            str(args.metadata_hidden_dim),
-            "--batch_size",
-            str(args.batch_size),
-            "--learning_rate",
-            str(args.learning_rate),
             "--num_processes",
-            "1",
+            "12",
         ]
+
+        # Add wandb configuration if enabled
+        if hasattr(args, 'use_wandb') and args.use_wandb:
+            script_args.extend([
+                "--use_wandb",
+                "--wandb_project", args.wandb_project,
+                "--wandb_group", f"{app_name}_{service}_{fault}",
+                "--wandb_name", f"{app_name}_{service}_{fault}_run{run}",
+            ])
+            if args.wandb_tags:
+                script_args.extend(["--wandb_tags"] + args.wandb_tags)
 
         print(f"Processing {dataset_dir}...")
         return await self.run_script(script_args, semaphore)
@@ -74,69 +69,47 @@ def add_markov_gent_arguments(parser: argparse.ArgumentParser):
         default="markov_gent",
         help="Output directory name (default: markov_gent)",
     )
+    
+    # Wandb arguments
     parser.add_argument(
-        "--start_time_latent_dim",
-        type=int,
-        default=16,
-        help="Latent dimension for start time VAE (default: 16)",
+        "--use_wandb",
+        action="store_true",
+        help="Enable Weights & Biases logging (default: False)",
     )
     parser.add_argument(
-        "--start_time_epochs",
-        type=int,
-        default=10,
-        help="Training epochs for start time VAE (default: 10)",
+        "--wandb_project",
+        type=str,
+        default="markov-gent-eval",
+        help="Wandb project name (default: markov-gent-eval)",
     )
     parser.add_argument(
-        "--markov_order",
-        type=int,
-        default=1,
-        help="Order of the Markov chain (default: 1)",
+        "--wandb_tags",
+        nargs="*",
+        help="Wandb tags for the run (e.g., 'experiment1 baseline')",
     )
     parser.add_argument(
-        "--max_depth",
-        type=int,
-        default=10,
-        help="Maximum depth for Markov states (default: 10)",
-    )
-    parser.add_argument(
-        "--metadata_epochs",
-        type=int,
-        default=10,
-        help="Training epochs for metadata neural network (default: 10)",
-    )
-    parser.add_argument(
-        "--metadata_hidden_dim",
-        type=int,
-        default=128,
-        help="Hidden dimension for metadata neural network (default: 128)",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=32,
-        help="Batch size for training (default: 32)",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=0.001,
-        help="Learning rate for neural networks (default: 0.001)",
+        "--wandb_notes",
+        type=str,
+        help="Notes for the wandb run",
     )
 
 
 def get_markov_gent_config(args):
     """Get MarkovGenT-specific configuration for display."""
-    return {
+    config = {
         "Output Directory": args.output_dir_name,
-        "Start Time Latent Dim": args.start_time_latent_dim,
-        "Start Time Epochs": args.start_time_epochs,
-        "Markov Order": args.markov_order,
-        "Max Depth": args.max_depth,
-        "Metadata Epochs": args.metadata_epochs,
-        "Metadata Hidden Dim": args.metadata_hidden_dim,
-        "Batch Size": args.batch_size,
-        "Learning Rate": args.learning_rate,
     }
+    
+    # Add wandb configuration if enabled
+    if hasattr(args, 'use_wandb') and args.use_wandb:
+        config.update({
+            "Wandb Enabled": True,
+            "Wandb Project": args.wandb_project,
+            "Wandb Tags": args.wandb_tags or "None",
+            "Wandb Notes": args.wandb_notes or "None",
+        })
+    
+    return config
 
 
 async def markov_gent_task_factory(

@@ -12,3 +12,5 @@ wheels/
 # Data
 data/
 output/
+
+wandb/

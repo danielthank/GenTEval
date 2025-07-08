@@ -14,6 +14,7 @@ from .config import MarkovGenTConfig
 from .metadata_vae import MetadataSynthesizer
 from .mrf_graph import MarkovRandomField
 from .root_vae import RootDurationSynthesizer
+from .root_mlp import RootDurationMLPSynthesizer
 from .start_time_count import StartTimeCountSynthesizer
 
 
@@ -245,8 +246,14 @@ class MarkovGenTCompressor:
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,
         )
+        
+        # Choose between MLP and VAE for root duration synthesis
+        if self.config.use_root_mlp:
+            self.root_duration_synthesizer = RootDurationMLPSynthesizer(self.config)
+        else:
+            self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
+
         self.metadata_synthesizer = MetadataSynthesizer(self.config)
-        self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
 
     def compress(self, dataset: Dataset) -> CompressedDataset:
         """Learn models from the dataset."""
@@ -286,11 +293,11 @@ class MarkovGenTCompressor:
         # Train depth-aware Markov chain
         self.depth_markov_chain.fit(traces)
 
-        # Train metadata neural network
-        self.metadata_synthesizer.fit(traces)
-
         # Train root duration synthesizer
         self.root_duration_synthesizer.fit(traces)
+
+        # Train metadata neural network
+        self.metadata_synthesizer.fit(traces)
 
         # Create compressed dataset
         compressed_data = CompressedDataset()
@@ -312,10 +319,10 @@ class MarkovGenTCompressor:
         self.start_time_synthesizer.save_state_dict(
             compressed_data, decoder_only=decoder_only
         )
-        self.metadata_synthesizer.save_state_dict(
+        self.root_duration_synthesizer.save_state_dict(
             compressed_data, decoder_only=decoder_only
         )
-        self.root_duration_synthesizer.save_state_dict(
+        self.metadata_synthesizer.save_state_dict(
             compressed_data, decoder_only=decoder_only
         )
 
@@ -356,11 +363,15 @@ class MarkovGenTCompressor:
         self.start_time_synthesizer = StartTimeCountSynthesizer(self.config)
         self.start_time_synthesizer.load_state_dict(compressed_dataset)
 
+        # Choose between MLP and VAE for root duration synthesis
+        if self.config.use_root_mlp:
+            self.root_duration_synthesizer = RootDurationMLPSynthesizer(self.config)
+        else:
+            self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
+        self.root_duration_synthesizer.load_state_dict(compressed_dataset)
+
         self.metadata_synthesizer = MetadataSynthesizer(self.config)
         self.metadata_synthesizer.load_state_dict(compressed_dataset)
-
-        self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
-        self.root_duration_synthesizer.load_state_dict(compressed_dataset)
 
         # Load depth Markov chain
         self.depth_markov_chain = MarkovRandomField(

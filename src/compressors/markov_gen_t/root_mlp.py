@@ -1,22 +1,22 @@
 import logging
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
 from compressors import CompressedDataset, SerializationFormat
 
 
-class RootVAE(nn.Module):
-    def __init__(self, vocab_size: int, hidden_dim: int = 128, latent_dim: int = 32):
-        super(RootVAE, self).__init__()
+class RootMLP(nn.Module):
+    def __init__(self, vocab_size: int, hidden_dim: int = 128):
+        super(RootMLP, self).__init__()
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
-        self.latent_dim = latent_dim
 
         # Embedding for root node names
         self.node_embedding = nn.Embedding(vocab_size, 32)
@@ -24,50 +24,25 @@ class RootVAE(nn.Module):
         # Input: [start_time, node_embedding]
         input_dim = 1 + 32  # 1 numerical + embedding of size 32
 
-        # Encoder
-        self.encoder = nn.Sequential(
+        # Simple MLP network (similar to the decoder in VAE)
+        self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-        )
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
-
-        # Decoder - takes both latent and conditioning info
-        decoder_input_dim = latent_dim + input_dim  # latent + conditioning variables
-        self.decoder = nn.Sequential(
-            nn.Linear(decoder_input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),  # Output: duration
         )
-
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        h = self.encoder(x)
-        mu = self.fc_mu(h)
-        logvar = self.fc_logvar(h)
-        return mu, logvar
-
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def decode(self, z: torch.Tensor, conditioning: torch.Tensor) -> torch.Tensor:
-        # Concatenate latent vector with conditioning information
-        decoder_input = torch.cat([z, conditioning], dim=1)
-        return self.decoder(decoder_input)
 
     def forward(
         self,
         start_time: torch.Tensor,
         node_idx: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         """
         Args:
             start_time: Tensor of shape (batch_size,)
             node_idx: Tensor of shape (batch_size,) - root node name indices
 
         Returns:
-            Tuple of (reconstruction, mu, logvar)
+            Tensor of predicted durations (batch_size, 1)
         """
         # Get embeddings
         node_emb = self.node_embedding(node_idx)  # (batch_size, 32)
@@ -81,71 +56,12 @@ class RootVAE(nn.Module):
             dim=1,
         )  # (batch_size, 33)
 
-        # VAE forward pass
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        recon = self.decode(z, x)  # Pass conditioning info to decoder
-        return recon, mu, logvar
-
-    def loss_function(
-        self,
-        recon_x: torch.Tensor,
-        x: torch.Tensor,
-        mu: torch.Tensor,
-        logvar: torch.Tensor,
-    ) -> torch.Tensor:
-        # Reconstruction loss (MSE)
-        recon_loss = F.mse_loss(recon_x, x, reduction="sum")
-
-        # KL divergence loss
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-        return recon_loss + kl_loss
-
-    def sample(
-        self,
-        start_time: torch.Tensor,
-        node_idx: torch.Tensor,
-        num_samples: int = 1,
-    ) -> torch.Tensor:
-        """
-        Generate samples by sampling from the prior distribution (no encoder needed).
-
-        Args:
-            start_time: Tensor of shape (batch_size,)
-            node_idx: Tensor of shape (batch_size,) - root node name indices
-            num_samples: Number of samples to generate for each input
-
-        Returns:
-            Tensor of shape (batch_size, num_samples, 1) containing sampled durations
-        """
-        batch_size = start_time.shape[0]
-
-        # Get embeddings and create conditioning vector
-        node_emb = self.node_embedding(node_idx)  # (batch_size, 32)
-
-        conditioning = torch.cat(
-            [
-                start_time.unsqueeze(1),
-                node_emb,
-            ],
-            dim=1,
-        )  # (batch_size, 33)
-
-        samples = []
-        for _ in range(num_samples):
-            # Sample from prior distribution (standard normal)
-            z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
-
-            # Decode with conditioning
-            sample = self.decode(z, conditioning)
-            samples.append(sample)
-
-        # Stack samples: (batch_size, num_samples, 1)
-        return torch.stack(samples, dim=1)
+        # Forward pass through MLP
+        duration = self.mlp(x)
+        return duration
 
 
-class RootDurationSynthesizer:
+class RootDurationMLPSynthesizer:
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -156,7 +72,7 @@ class RootDurationSynthesizer:
 
         # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.logger.info(f"Root duration synthesizer using device: {self.device}")
+        self.logger.info(f"Root duration MLP synthesizer using device: {self.device}")
 
         # Scalers for normalization
         self.start_time_scaler_mean = 0
@@ -165,8 +81,8 @@ class RootDurationSynthesizer:
         self.duration_scaler_std = 1
 
     def fit(self, traces):
-        """Train the VAE on root span data."""
-        self.logger.info("Training Root Duration VAE")
+        """Train the MLP on root span data."""
+        self.logger.info("Training Root Duration MLP")
 
         # Collect root span data
         root_start_times = []
@@ -216,10 +132,9 @@ class RootDurationSynthesizer:
 
         # Initialize model now that we know vocab size
         vocab_size = len(self.node_encoder.classes_)
-        self.model = RootVAE(
+        self.model = RootMLP(
             vocab_size=vocab_size,
             hidden_dim=self.config.root_hidden_dim,
-            latent_dim=self.config.root_latent_dim,
         )
         self.model.to(self.device)
 
@@ -238,7 +153,7 @@ class RootDurationSynthesizer:
         dataset_size = len(start_time_tensor)
 
         pbar = tqdm(
-            range(self.config.root_epochs), desc="Training Root Duration VAE"
+            range(self.config.root_epochs), desc="Training Root Duration MLP"
         )
         for epoch in pbar:
             total_loss = 0
@@ -255,14 +170,12 @@ class RootDurationSynthesizer:
                 self.optimizer.zero_grad()
 
                 # Forward pass
-                recon_duration, mu, logvar = self.model(batch_start_times, batch_nodes)
+                predicted_duration = self.model(batch_start_times, batch_nodes)
 
-                # Compute loss - ensure shapes match
-                recon_duration_flat = recon_duration.view(-1)
+                # Compute loss - MSE loss for regression
+                predicted_duration_flat = predicted_duration.view(-1)
                 batch_durations_flat = batch_durations.view(-1)
-                loss = self.model.loss_function(
-                    recon_duration_flat, batch_durations_flat, mu, logvar
-                )
+                loss = F.mse_loss(predicted_duration_flat, batch_durations_flat)
 
                 loss.backward()
                 self.optimizer.step()
@@ -273,6 +186,13 @@ class RootDurationSynthesizer:
             # Update progress bar
             avg_loss = total_loss / max(num_batches, 1)
             pbar.set_postfix({"Loss": f"{avg_loss:.4f}"})
+            
+            # Log to wandb
+            if wandb.run is not None:
+                wandb.log({
+                    "root_mlp_loss": avg_loss,
+                    "root_mlp_epoch": epoch
+                }, step=epoch)
 
     def synthesize_root_duration_batch(
         self, start_times: List[float], node_names: List[str], num_samples: int = 1
@@ -285,8 +205,8 @@ class RootDurationSynthesizer:
             num_samples: Number of samples to generate per input (default: 1)
 
         Returns:
-            List of durations. If num_samples > 1, returns num_samples results
-            for each input concatenated in order.
+            List of durations. If num_samples > 1, returns the same prediction
+            repeated num_samples times for each input.
         """
         if self.model is None:
             raise ValueError("Model not trained. Call fit() first.")
@@ -321,32 +241,33 @@ class RootDurationSynthesizer:
             )
             node_tensor = torch.LongTensor(node_indices).to(self.device)
 
-            # Sample durations in batch (no encoder needed for generation)
-            samples = self.model.sample(
-                start_time_tensor, node_tensor, num_samples=num_samples
-            )
+            # Predict durations
+            predicted_durations = self.model(start_time_tensor, node_tensor)
 
             # Denormalize durations
             results = []
             for i in range(batch_size):
-                for j in range(num_samples):
-                    normalized_duration = samples[i, j, 0].cpu().numpy()
-                    log_duration = (
-                        normalized_duration * self.duration_scaler_std
-                        + self.duration_scaler_mean
-                    )
-                    duration = np.exp(log_duration) - 1  # Reverse log transform
-                    results.append(max(1, float(duration)))  # Ensure positive duration
+                normalized_duration = predicted_durations[i, 0].cpu().numpy()
+                log_duration = (
+                    normalized_duration * self.duration_scaler_std
+                    + self.duration_scaler_mean
+                )
+                duration = np.exp(log_duration) - 1  # Reverse log transform
+                duration = max(1, float(duration))  # Ensure positive duration
+                
+                # Repeat the same prediction for num_samples
+                for _ in range(num_samples):
+                    results.append(duration)
 
             return results
 
     def save_state_dict(
         self, compressed_data: CompressedDataset, decoder_only: bool = False
     ):
-        """Save state dictionary with optional decoder-only mode."""
+        """Save state dictionary."""
 
         compressed_data.add(
-            "root_synthesizer",
+            "root_mlp_synthesizer",
             CompressedDataset(
                 data={
                     "node_encoder": (
@@ -380,31 +301,25 @@ class RootDurationSynthesizer:
             SerializationFormat.CLOUDPICKLE,
         )
 
-        if decoder_only:
-            root_vae = {
-                k: v
-                for k, v in self.model.state_dict().items()
-                if k.startswith("decoder")
-                or k.startswith("node_embedding")  # Keep embeddings for conditioning
-            }
-        else:
-            root_vae = self.model.state_dict()
+        # For MLP, decoder_only doesn't apply since it's already simple
+        # But we keep the parameter for interface compatibility
+        root_mlp = self.model.state_dict()
 
-        compressed_data["root_synthesizer"].add(
+        compressed_data["root_mlp_synthesizer"].add(
             "state_dict",
-            root_vae,
+            root_mlp,
             SerializationFormat.CLOUDPICKLE,
         )
 
     def load_state_dict(self, compressed_dataset):
         """Load state dictionary."""
-        if "root_synthesizer" not in compressed_dataset:
-            raise ValueError("No root_synthesizer found in compressed dataset")
+        if "root_mlp_synthesizer" not in compressed_dataset:
+            raise ValueError("No root_mlp_synthesizer found in compressed dataset")
 
         logger = logging.getLogger(__name__)
 
         # Load root synthesizer data
-        root_synthesizer_data = compressed_dataset["root_synthesizer"]
+        root_synthesizer_data = compressed_dataset["root_mlp_synthesizer"]
 
         self.node_encoder = root_synthesizer_data["node_encoder"]
         self.start_time_scaler_mean = root_synthesizer_data["start_time_scaler_mean"]
@@ -414,17 +329,16 @@ class RootDurationSynthesizer:
         vocab_size = root_synthesizer_data["vocab_size"]
 
         # Initialize model
-        self.model = RootVAE(
+        self.model = RootMLP(
             vocab_size,
             self.config.root_hidden_dim,
-            self.config.root_latent_dim,
         )
         self.model.to(self.device)
 
         # Load model state dict
         if "state_dict" in root_synthesizer_data:
             model_state = root_synthesizer_data["state_dict"]
-            logger.info("Loading root synthesizer model")
+            logger.info("Loading root MLP synthesizer model")
             self.model.load_state_dict(model_state, strict=False)
         else:
-            raise ValueError("No state_dict found in root_synthesizer")
+            raise ValueError("No state_dict found in root_mlp_synthesizer")

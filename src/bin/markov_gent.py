@@ -2,6 +2,7 @@ import argparse
 import os
 import pathlib
 import sys
+import wandb
 
 from logger import setup_logging
 
@@ -30,78 +31,66 @@ if __name__ == "__main__":
         help="Output file to save the compressed traces and recovered traces using MarkovGenT",
     )
     argparser.add_argument(
-        "--start_time_latent_dim",
-        type=int,
-        default=16,
-        help="Latent dimension for start time VAE (default: 16)",
-    )
-    argparser.add_argument(
-        "--start_time_epochs",
-        type=int,
-        default=10,
-        help="Training epochs for start time VAE (default: 100)",
-    )
-    argparser.add_argument(
-        "--markov_order",
-        type=int,
-        default=1,
-        help="Order of the Markov chain (default: 1)",
-    )
-    argparser.add_argument(
-        "--max_depth",
-        type=int,
-        default=10,
-        help="Maximum depth for Markov states (default: 10)",
-    )
-    argparser.add_argument(
-        "--metadata_epochs",
-        type=int,
-        default=10,
-        help="Training epochs for metadata neural network (default: 150)",
-    )
-    argparser.add_argument(
-        "--metadata_hidden_dim",
-        type=int,
-        default=128,
-        help="Hidden dimension for metadata neural network (default: 128)",
-    )
-    argparser.add_argument(
-        "--batch_size",
-        type=int,
-        default=32,
-        help="Batch size for training (default: 32)",
-    )
-    argparser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=0.001,
-        help="Learning rate for neural networks (default: 0.001)",
-    )
-    argparser.add_argument(
         "--num_processes",
         type=int,
         default=8,
         help="Number of processes for parallel processing (default: 8)",
     )
+    
+    # Wandb arguments
+    argparser.add_argument(
+        "--use_wandb",
+        action="store_true",
+        help="Enable Weights & Biases logging (default: False)",
+    )
+    argparser.add_argument(
+        "--wandb_project",
+        type=str,
+        default="GenT",
+        help="Wandb project name (default: markov-gent-eval)",
+    )
+    argparser.add_argument(
+        "--wandb_group",
+        type=str,
+        help="Wandb group name for organizing runs",
+    )
+    argparser.add_argument(
+        "--wandb_name",
+        type=str,
+        help="Wandb run name",
+    )
+    argparser.add_argument(
+        "--wandb_tags",
+        nargs="*",
+        help="Wandb tags for the run",
+    )
+    
     args = argparser.parse_args()
 
     dataset_dir = pathlib.Path(args.dataset_dir)
     gent_dir = pathlib.Path(args.gent_dir)
     dataset = RCAEvalDataset().load(dataset_dir)
 
-    # Create MarkovGenT configuration
-    config = MarkovGenTConfig(
-        start_time_latent_dim=args.start_time_latent_dim,
-        start_time_epochs=args.start_time_epochs,
-        markov_order=args.markov_order,
-        max_depth=args.max_depth,
-        metadata_epochs=args.metadata_epochs,
-        metadata_hidden_dim=args.metadata_hidden_dim,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-    )
+    # Initialize wandb if enabled
+    wandb_run = None
+    if args.use_wandb:
+        wandb_run = wandb.init(
+            project=args.wandb_project,
+            group=args.wandb_group,
+            name=args.wandb_name,
+            tags=args.wandb_tags or ["markov_gent"],
+            config={
+                "num_processes": args.num_processes,
+                "dataset_dir": str(dataset_dir),
+                "output_dir": str(gent_dir),
+            }
+        )
+        print(f"Wandb run initialized: {wandb_run.name if wandb_run else 'Failed'}")
 
-    print("Using MarkovGenT configuration:")
+    # Create MarkovGenT configuration with default values
+    config = MarkovGenTConfig()
+
+    print("Using MarkovGenT configuration with default values:")
     print(
         f"- Start Time VAE: latent_dim={config.start_time_latent_dim}, epochs={config.start_time_epochs}"
     )
@@ -109,6 +98,7 @@ if __name__ == "__main__":
     print(
         f"- Metadata NN: hidden_dim={config.metadata_hidden_dim}, epochs={config.metadata_epochs}"
     )
+    print(f"- Root Duration Model: {'MLP' if config.use_root_mlp else 'VAE'}")
     print(f"- Training: batch_size={config.batch_size}, lr={config.learning_rate}")
 
     # Compress the dataset
@@ -131,3 +121,8 @@ if __name__ == "__main__":
     print(f"Generated dataset saved to {gent_dir / 'dataset'}")
 
     print("MarkovGenT compression and generation completed successfully!")
+
+    # Log final results to wandb
+    if wandb_run:
+        wandb.finish()
+        print("Wandb run finished.")
