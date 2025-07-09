@@ -16,12 +16,12 @@ class MarkovGenTConfig:
     # Root span duration models
     root_latent_dim: int = 32
     root_hidden_dim: int = 128
-    root_epochs: int = 40
+    root_epochs: int = 500
 
     # Metadata VAE/NN
     metadata_latent_dim: int = 32
     metadata_hidden_dim: int = 128
-    metadata_epochs: int = 40
+    metadata_epochs: int = 10
 
     # General
     batch_size: int = 64
@@ -29,7 +29,7 @@ class MarkovGenTConfig:
 
     # Compression options
     save_decoders_only: bool = True
-    
+
     # Model selection
     use_root_mlp: bool = True  # If True, use MLP for root duration, else use VAE
 

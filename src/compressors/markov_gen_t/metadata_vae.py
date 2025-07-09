@@ -5,10 +5,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import wandb
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
+import wandb
 from compressors import CompressedDataset, SerializationFormat
 
 
@@ -375,13 +375,9 @@ class MetadataSynthesizer:
             # Update progress bar with current loss
             avg_loss = total_loss / max(num_batches, 1)
             pbar.set_postfix({"Loss": f"{avg_loss:.4f}"})
-            
-            # Log to wandb with custom step
+
             if wandb.run is not None:
-                wandb.log({
-                    "metadata_vae_loss": avg_loss,
-                    "metadata_vae_epoch": epoch
-                }, step=epoch)
+                wandb.log({"metadata_vae_loss": avg_loss, "metadata_vae_epoch": epoch})
 
         self.is_fitted = True
 

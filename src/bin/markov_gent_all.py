@@ -47,13 +47,18 @@ class MarkovGentProcessor(ScriptProcessor):
         ]
 
         # Add wandb configuration if enabled
-        if hasattr(args, 'use_wandb') and args.use_wandb:
-            script_args.extend([
-                "--use_wandb",
-                "--wandb_project", args.wandb_project,
-                "--wandb_group", f"{app_name}_{service}_{fault}",
-                "--wandb_name", f"{app_name}_{service}_{fault}_run{run}",
-            ])
+        if hasattr(args, "use_wandb") and args.use_wandb:
+            script_args.extend(
+                [
+                    "--use_wandb",
+                    "--wandb_project",
+                    args.wandb_project,
+                    "--wandb_group",
+                    f"{app_name}_{service}_{fault}",
+                    "--wandb_name",
+                    f"{app_name}_{service}_{fault}_run{run}",
+                ]
+            )
             if args.wandb_tags:
                 script_args.extend(["--wandb_tags"] + args.wandb_tags)
 
@@ -69,7 +74,7 @@ def add_markov_gent_arguments(parser: argparse.ArgumentParser):
         default="markov_gent",
         help="Output directory name (default: markov_gent)",
     )
-    
+
     # Wandb arguments
     parser.add_argument(
         "--use_wandb",
@@ -99,16 +104,18 @@ def get_markov_gent_config(args):
     config = {
         "Output Directory": args.output_dir_name,
     }
-    
+
     # Add wandb configuration if enabled
-    if hasattr(args, 'use_wandb') and args.use_wandb:
-        config.update({
-            "Wandb Enabled": True,
-            "Wandb Project": args.wandb_project,
-            "Wandb Tags": args.wandb_tags or "None",
-            "Wandb Notes": args.wandb_notes or "None",
-        })
-    
+    if hasattr(args, "use_wandb") and args.use_wandb:
+        config.update(
+            {
+                "Wandb Enabled": True,
+                "Wandb Project": args.wandb_project,
+                "Wandb Tags": args.wandb_tags or "None",
+                "Wandb Notes": args.wandb_notes or "None",
+            }
+        )
+
     return config
 
 

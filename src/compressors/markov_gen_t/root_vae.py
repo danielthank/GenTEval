@@ -8,21 +8,32 @@ import torch.nn.functional as F
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
+import wandb
 from compressors import CompressedDataset, SerializationFormat
 
 
 class RootVAE(nn.Module):
-    def __init__(self, vocab_size: int, hidden_dim: int = 128, latent_dim: int = 32):
+    def __init__(
+        self,
+        vocab_size: int,
+        time_bucket_vocab_size: int,
+        hidden_dim: int = 128,
+        latent_dim: int = 32,
+    ):
         super(RootVAE, self).__init__()
         self.vocab_size = vocab_size
+        self.time_bucket_vocab_size = time_bucket_vocab_size
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
 
         # Embedding for root node names
         self.node_embedding = nn.Embedding(vocab_size, 32)
 
-        # Input: [start_time, node_embedding]
-        input_dim = 1 + 32  # 1 numerical + embedding of size 32
+        # Embedding for time buckets (categorical)
+        self.time_embedding = nn.Embedding(time_bucket_vocab_size, 16)
+
+        # Input: [time_embedding, node_embedding]
+        input_dim = 16 + 32  # time embedding + node embedding
 
         # Encoder
         self.encoder = nn.Sequential(
@@ -58,28 +69,24 @@ class RootVAE(nn.Module):
 
     def forward(
         self,
-        start_time: torch.Tensor,
+        time_bucket_idx: torch.Tensor,
         node_idx: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
-            start_time: Tensor of shape (batch_size,)
+            time_bucket_idx: Tensor of shape (batch_size,) - time bucket indices
             node_idx: Tensor of shape (batch_size,) - root node name indices
 
         Returns:
             Tuple of (reconstruction, mu, logvar)
         """
         # Get embeddings
+        time_emb = self.time_embedding(time_bucket_idx)  # (batch_size, 16)
         node_emb = self.node_embedding(node_idx)  # (batch_size, 32)
+        time_emb = time_emb.view(time_emb.size(0), -1)  # Ensure correct shape
 
         # Concatenate inputs
-        x = torch.cat(
-            [
-                start_time.unsqueeze(1),
-                node_emb,
-            ],
-            dim=1,
-        )  # (batch_size, 33)
+        x = torch.cat([time_emb, node_emb], dim=1)  # (batch_size, 48)
 
         # VAE forward pass
         mu, logvar = self.encode(x)
@@ -104,7 +111,7 @@ class RootVAE(nn.Module):
 
     def sample(
         self,
-        start_time: torch.Tensor,
+        time_bucket_idx: torch.Tensor,
         node_idx: torch.Tensor,
         num_samples: int = 1,
     ) -> torch.Tensor:
@@ -112,25 +119,20 @@ class RootVAE(nn.Module):
         Generate samples by sampling from the prior distribution (no encoder needed).
 
         Args:
-            start_time: Tensor of shape (batch_size,)
+            time_bucket_idx: Tensor of shape (batch_size,) - time bucket indices
             node_idx: Tensor of shape (batch_size,) - root node name indices
             num_samples: Number of samples to generate for each input
 
         Returns:
             Tensor of shape (batch_size, num_samples, 1) containing sampled durations
         """
-        batch_size = start_time.shape[0]
+        batch_size = time_bucket_idx.shape[0]
 
         # Get embeddings and create conditioning vector
+        time_emb = self.time_embedding(time_bucket_idx)  # (batch_size, 16)
         node_emb = self.node_embedding(node_idx)  # (batch_size, 32)
 
-        conditioning = torch.cat(
-            [
-                start_time.unsqueeze(1),
-                node_emb,
-            ],
-            dim=1,
-        )  # (batch_size, 33)
+        conditioning = torch.cat([time_emb, node_emb], dim=1)  # (batch_size, 48)
 
         samples = []
         for _ in range(num_samples):
@@ -150,17 +152,19 @@ class RootDurationSynthesizer:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
+        # Time bucketing configuration (hardcoded, same as root_mlp)
+        self.bucket_size_us = 60 * 1000000  # 1 minute in microseconds
+
         # Initialize placeholder model (will be properly initialized after fitting)
         self.model = None
         self.node_encoder = LabelEncoder()
+        self.time_bucket_encoder = LabelEncoder()
 
         # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger.info(f"Root duration synthesizer using device: {self.device}")
 
-        # Scalers for normalization
-        self.start_time_scaler_mean = 0
-        self.start_time_scaler_std = 1
+        # Scalers for normalization (only for durations now)
         self.duration_scaler_mean = 0
         self.duration_scaler_std = 1
 
@@ -195,12 +199,12 @@ class RootDurationSynthesizer:
         root_durations = np.array(root_durations)
         root_node_names = np.array(root_node_names)
 
-        # Normalize start times
-        self.start_time_scaler_mean = np.mean(root_start_times)
-        self.start_time_scaler_std = np.std(root_start_times)
-        normalized_start_times = (
-            root_start_times - self.start_time_scaler_mean
-        ) / self.start_time_scaler_std
+        # Convert start times to time buckets (categorical, not normalized)
+        time_buckets = root_start_times // self.bucket_size_us
+
+        # Encode time buckets as categories
+        self.time_bucket_encoder.fit(time_buckets)
+        time_bucket_indices = self.time_bucket_encoder.transform(time_buckets)
 
         # Normalize durations (log transform first to handle skewed distribution)
         log_durations = np.log(root_durations + 1)  # +1 to avoid log(0)
@@ -214,10 +218,12 @@ class RootDurationSynthesizer:
         self.node_encoder.fit(root_node_names)
         node_indices = self.node_encoder.transform(root_node_names)
 
-        # Initialize model now that we know vocab size
+        # Initialize model now that we know vocab sizes
         vocab_size = len(self.node_encoder.classes_)
+        time_bucket_vocab_size = len(self.time_bucket_encoder.classes_)
         self.model = RootVAE(
             vocab_size=vocab_size,
+            time_bucket_vocab_size=time_bucket_vocab_size,
             hidden_dim=self.config.root_hidden_dim,
             latent_dim=self.config.root_latent_dim,
         )
@@ -229,17 +235,15 @@ class RootDurationSynthesizer:
         )
 
         # Convert to tensors
-        start_time_tensor = torch.FloatTensor(normalized_start_times).to(self.device)
+        time_bucket_tensor = torch.LongTensor(time_bucket_indices).to(self.device)
         duration_tensor = torch.FloatTensor(normalized_durations).to(self.device)
         node_tensor = torch.LongTensor(node_indices).to(self.device)
 
         # Training loop
         self.model.train()
-        dataset_size = len(start_time_tensor)
+        dataset_size = len(time_bucket_tensor)
 
-        pbar = tqdm(
-            range(self.config.root_epochs), desc="Training Root Duration VAE"
-        )
+        pbar = tqdm(range(self.config.root_epochs), desc="Training Root Duration VAE")
         for epoch in pbar:
             total_loss = 0
             num_batches = 0
@@ -248,14 +252,14 @@ class RootDurationSynthesizer:
             for i in range(0, dataset_size, self.config.batch_size):
                 end_idx = min(i + self.config.batch_size, dataset_size)
 
-                batch_start_times = start_time_tensor[i:end_idx]
+                batch_time_buckets = time_bucket_tensor[i:end_idx]
                 batch_durations = duration_tensor[i:end_idx]
                 batch_nodes = node_tensor[i:end_idx]
 
                 self.optimizer.zero_grad()
 
                 # Forward pass
-                recon_duration, mu, logvar = self.model(batch_start_times, batch_nodes)
+                recon_duration, mu, logvar = self.model(batch_time_buckets, batch_nodes)
 
                 # Compute loss - ensure shapes match
                 recon_duration_flat = recon_duration.view(-1)
@@ -273,6 +277,10 @@ class RootDurationSynthesizer:
             # Update progress bar
             avg_loss = total_loss / max(num_batches, 1)
             pbar.set_postfix({"Loss": f"{avg_loss:.4f}"})
+
+            # Log to wandb
+            if wandb.run is not None:
+                wandb.log({"root_vae_loss": avg_loss, "root_vae_epoch": epoch})
 
     def synthesize_root_duration_batch(
         self, start_times: List[float], node_names: List[str], num_samples: int = 1
@@ -301,11 +309,24 @@ class RootDurationSynthesizer:
         with torch.no_grad():
             batch_size = len(start_times)
 
-            # Normalize start times
-            normalized_start_times = [
-                (start_time - self.start_time_scaler_mean) / self.start_time_scaler_std
-                for start_time in start_times
+            # Convert start times to time buckets (categorical, consistent with training)
+            time_buckets = [
+                start_time // self.bucket_size_us for start_time in start_times
             ]
+
+            # Encode time buckets as categories
+            time_bucket_indices = []
+            for bucket in time_buckets:
+                if bucket in self.time_bucket_encoder.classes_:
+                    time_bucket_indices.append(
+                        self.time_bucket_encoder.transform([bucket])[0]
+                    )
+                else:
+                    # Use a random existing time bucket if unseen
+                    random_bucket = np.random.choice(self.time_bucket_encoder.classes_)
+                    time_bucket_indices.append(
+                        self.time_bucket_encoder.transform([random_bucket])[0]
+                    )
 
             # Encode node names
             node_indices = []
@@ -316,14 +337,12 @@ class RootDurationSynthesizer:
                 node_indices.append(self.node_encoder.transform([node_name])[0])
 
             # Convert to tensors
-            start_time_tensor = torch.FloatTensor(normalized_start_times).to(
-                self.device
-            )
+            time_bucket_tensor = torch.LongTensor(time_bucket_indices).to(self.device)
             node_tensor = torch.LongTensor(node_indices).to(self.device)
 
             # Sample durations in batch (no encoder needed for generation)
             samples = self.model.sample(
-                start_time_tensor, node_tensor, num_samples=num_samples
+                time_bucket_tensor, node_tensor, num_samples=num_samples
             )
 
             # Denormalize durations
@@ -353,13 +372,9 @@ class RootDurationSynthesizer:
                         self.node_encoder,
                         SerializationFormat.CLOUDPICKLE,
                     ),
-                    "start_time_scaler_mean": (
-                        self.start_time_scaler_mean,
-                        SerializationFormat.MSGPACK,
-                    ),
-                    "start_time_scaler_std": (
-                        self.start_time_scaler_std,
-                        SerializationFormat.MSGPACK,
+                    "time_bucket_encoder": (
+                        self.time_bucket_encoder,
+                        SerializationFormat.CLOUDPICKLE,
                     ),
                     "duration_scaler_mean": (
                         self.duration_scaler_mean,
@@ -375,6 +390,12 @@ class RootDurationSynthesizer:
                         else 0,
                         SerializationFormat.MSGPACK,
                     ),
+                    "time_bucket_vocab_size": (
+                        len(self.time_bucket_encoder.classes_)
+                        if hasattr(self.time_bucket_encoder, "classes_")
+                        else 0,
+                        SerializationFormat.MSGPACK,
+                    ),
                 }
             ),
             SerializationFormat.CLOUDPICKLE,
@@ -385,7 +406,8 @@ class RootDurationSynthesizer:
                 k: v
                 for k, v in self.model.state_dict().items()
                 if k.startswith("decoder")
-                or k.startswith("node_embedding")  # Keep embeddings for conditioning
+                or k.startswith("node_embedding")
+                or k.startswith("time_embedding")
             }
         else:
             root_vae = self.model.state_dict()
@@ -407,15 +429,16 @@ class RootDurationSynthesizer:
         root_synthesizer_data = compressed_dataset["root_synthesizer"]
 
         self.node_encoder = root_synthesizer_data["node_encoder"]
-        self.start_time_scaler_mean = root_synthesizer_data["start_time_scaler_mean"]
-        self.start_time_scaler_std = root_synthesizer_data["start_time_scaler_std"]
+        self.time_bucket_encoder = root_synthesizer_data["time_bucket_encoder"]
         self.duration_scaler_mean = root_synthesizer_data["duration_scaler_mean"]
         self.duration_scaler_std = root_synthesizer_data["duration_scaler_std"]
         vocab_size = root_synthesizer_data["vocab_size"]
+        time_bucket_vocab_size = root_synthesizer_data["time_bucket_vocab_size"]
 
         # Initialize model
         self.model = RootVAE(
             vocab_size,
+            time_bucket_vocab_size,
             self.config.root_hidden_dim,
             self.config.root_latent_dim,
         )

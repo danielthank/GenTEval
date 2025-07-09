@@ -2,9 +2,10 @@ import argparse
 import os
 import pathlib
 import sys
-import wandb
 
 from logger import setup_logging
+
+import wandb
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
@@ -36,7 +37,7 @@ if __name__ == "__main__":
         default=8,
         help="Number of processes for parallel processing (default: 8)",
     )
-    
+
     # Wandb arguments
     argparser.add_argument(
         "--use_wandb",
@@ -64,7 +65,7 @@ if __name__ == "__main__":
         nargs="*",
         help="Wandb tags for the run",
     )
-    
+
     args = argparser.parse_args()
 
     dataset_dir = pathlib.Path(args.dataset_dir)
@@ -83,7 +84,7 @@ if __name__ == "__main__":
                 "num_processes": args.num_processes,
                 "dataset_dir": str(dataset_dir),
                 "output_dir": str(gent_dir),
-            }
+            },
         )
         print(f"Wandb run initialized: {wandb_run.name if wandb_run else 'Failed'}")
 

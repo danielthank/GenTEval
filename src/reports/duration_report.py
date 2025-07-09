@@ -21,6 +21,7 @@ class DurationReport(BaseReport):
         self.duration_pair_dir = (
             self.viz_output_dir / "duration_pair_all_wasserstein_dist"
         )
+        self.duration_p50_dir = self.viz_output_dir / "duration_p50"
         self.duration_p90_dir = self.viz_output_dir / "duration_p90"
         self.duration_before_after_dir = (
             self.viz_output_dir / "duration_before_after_incident"
@@ -29,6 +30,7 @@ class DurationReport(BaseReport):
         # Create all subdirectories
         self.duration_all_dir.mkdir(parents=True, exist_ok=True)
         self.duration_pair_dir.mkdir(parents=True, exist_ok=True)
+        self.duration_p50_dir.mkdir(parents=True, exist_ok=True)
         self.duration_p90_dir.mkdir(parents=True, exist_ok=True)
         self.duration_before_after_dir.mkdir(parents=True, exist_ok=True)
 
@@ -98,143 +100,6 @@ class DurationReport(BaseReport):
         plt.close()
 
         return wdist
-
-    def visualize_duration_p90_comparison(
-        self, original_p90_data, compressed_p90_data, compressor, app_name
-    ):
-        """Visualize duration p90 comparison by service with line charts and calculate MAPE."""
-        # Get all services that exist in both datasets
-        common_services = set(original_p90_data.keys()) & set(
-            compressed_p90_data.keys()
-        )
-
-        if not common_services:
-            print(f"No common services found for {app_name}_{compressor}")
-            return {}
-
-        # Calculate number of subplots needed
-        num_services = len(common_services)
-        cols = min(3, num_services)  # Max 3 columns
-        rows = (num_services + cols - 1) // cols  # Ceiling division
-
-        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows))
-        if num_services == 1:
-            axes = [axes]
-        elif rows == 1:
-            axes = axes.reshape(1, -1)
-
-        mape_results = {}
-
-        for idx, service in enumerate(sorted(common_services)):
-            row = idx // cols
-            col = idx % cols
-            ax = axes[row, col] if rows > 1 else axes[col]
-
-            # Extract and sort data by timebucket
-            original_data = sorted(
-                original_p90_data[service], key=lambda x: x["timebucket"]
-            )
-            compressed_data = sorted(
-                compressed_p90_data[service], key=lambda x: x["timebucket"]
-            )
-
-            # Find all timebuckets from both datasets (union instead of intersection)
-            original_buckets = {
-                item["timebucket"]: item["p90"] for item in original_data
-            }
-            compressed_buckets = {
-                item["timebucket"]: item["p90"] for item in compressed_data
-            }
-            all_buckets = sorted(
-                set(original_buckets.keys()) | set(compressed_buckets.keys())
-            )
-
-            if not all_buckets:
-                ax.text(
-                    0.5,
-                    0.5,
-                    f"No data\nfor\n{service}",
-                    ha="center",
-                    va="center",
-                    transform=ax.transAxes,
-                )
-                ax.set_title(service)
-                continue
-
-            # Extract p90 values for all timebuckets, fill missing with 0
-            original_p90s = [original_buckets.get(bucket, 0) for bucket in all_buckets]
-            compressed_p90s = [
-                compressed_buckets.get(bucket, 0) for bucket in all_buckets
-            ]
-
-            # Plot lines
-            ax.plot(
-                range(len(all_buckets)),
-                original_p90s,
-                label="head_sampling_1",
-                color="blue",
-                linewidth=2,
-                marker="o",
-            )
-            ax.plot(
-                range(len(all_buckets)),
-                compressed_p90s,
-                label=compressor,
-                color="red",
-                linewidth=2,
-                marker="s",
-            )
-
-            # Calculate MAPE
-            original_array = np.array(original_p90s)
-            compressed_array = np.array(compressed_p90s)
-
-            # Avoid division by zero
-            non_zero_mask = original_array > 0
-            if np.any(non_zero_mask):
-                mape = (
-                    np.mean(
-                        np.abs(
-                            (
-                                original_array[non_zero_mask]
-                                - compressed_array[non_zero_mask]
-                            )
-                            / original_array[non_zero_mask]
-                        )
-                    )
-                    * 100
-                )
-            else:
-                mape = 0
-
-            mape_results[service] = mape
-
-            ax.set_title(f"{service}\nMAPE: {mape:.2f}%")
-            ax.set_xlabel("Time Index")
-            ax.set_ylabel("Duration P90")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            # Set y-axis to start from 0
-            ax.set_ylim(bottom=0)
-
-        # Hide unused subplots
-        for idx in range(num_services, rows * cols):
-            row = idx // cols
-            col = idx % cols
-            if rows > 1:
-                axes[row, col].set_visible(False)
-            else:
-                axes[col].set_visible(False)
-
-        plt.tight_layout()
-
-        # Save the plot in duration_p90 subdirectory
-        filename = f"{app_name}_{compressor}_duration_p90_comparison.png"
-        filepath = self.duration_p90_dir / filename
-        plt.savefig(filepath, dpi=300, bbox_inches="tight")
-        plt.close()
-
-        return mape_results
 
     def visualize_before_after_incident(
         self,
@@ -459,24 +324,45 @@ class DurationReport(BaseReport):
                     report_group = f"{app_name}_{compressor}"
                     self.report[report_group]["duration_pair_wdis"].append(wdist)
 
-                # Process duration p90 data if available
+                # Process root duration p90 data if available
                 if (
-                    "duration_p90_by_service" in original
-                    and "duration_p90_by_service" in results
+                    "root_duration_p90_by_service" in original
+                    and "root_duration_p90_by_service" in results
                 ):
                     # Generate p90 visualization immediately for this run
-                    mape_results = self.visualize_duration_p90_comparison(
-                        original["duration_p90_by_service"],
-                        results["duration_p90_by_service"],
+                    mape_results = self.visualize_duration_percentile_comparison(
+                        original["root_duration_p90_by_service"],
+                        results["root_duration_p90_by_service"],
+                        "P90",
                         compressor,
                         f"{app_name}_{service}_{fault}_{run}",
                     )
 
                     # Store MAPE results in report
                     report_group = f"{app_name}_{compressor}"
-                    if "duration_p90_mape_runs" not in self.report[report_group]:
-                        self.report[report_group]["duration_p90_mape_runs"] = []
-                    self.report[report_group]["duration_p90_mape_runs"].append(
+                    if "root_duration_p90_mape_runs" not in self.report[report_group]:
+                        self.report[report_group]["root_duration_p90_mape_runs"] = []
+                    self.report[report_group]["root_duration_p90_mape_runs"].append(
+                        mape_results
+                    )  # Process root duration p50 data if available
+                if (
+                    "root_duration_p50_by_service" in original
+                    and "root_duration_p50_by_service" in results
+                ):
+                    # Generate p50 visualization immediately for this run
+                    mape_results = self.visualize_duration_percentile_comparison(
+                        original["root_duration_p50_by_service"],
+                        results["root_duration_p50_by_service"],
+                        "P50",
+                        compressor,
+                        f"{app_name}_{service}_{fault}_{run}",
+                    )
+
+                    # Store MAPE results in report
+                    report_group = f"{app_name}_{compressor}"
+                    if "root_duration_p50_mape_runs" not in self.report[report_group]:
+                        self.report[report_group]["root_duration_p50_mape_runs"] = []
+                    self.report[report_group]["root_duration_p50_mape_runs"].append(
                         mape_results
                     )
 
@@ -540,18 +426,31 @@ class DurationReport(BaseReport):
                 ) / len(self.report[group]["duration_pair_wdis"])
                 del self.report[group]["duration_pair_wdis"]
 
-            if "duration_p90_mape_runs" in self.report[group]:
+            if "root_duration_p90_mape_runs" in self.report[group]:
                 # Calculate average MAPE across all runs and all services
                 all_run_mapes = []
-                for run_mape in self.report[group]["duration_p90_mape_runs"]:
+                for run_mape in self.report[group]["root_duration_p90_mape_runs"]:
                     all_run_mapes.extend(run_mape.values())
 
                 if all_run_mapes:
-                    self.report[group]["duration_p90_mape_avg"] = sum(
+                    self.report[group]["root_duration_p90_mape_avg"] = sum(
                         all_run_mapes
                     ) / len(all_run_mapes)
                 # Keep the individual run MAPE values
-                # del self.report[group]["duration_p90_mape_runs"]  # Comment out to keep individual run MAPEs
+                # del self.report[group]["root_duration_p90_mape_runs"]  # Comment out to keep individual run MAPEs
+
+            if "root_duration_p50_mape_runs" in self.report[group]:
+                # Calculate average MAPE across all runs and all services
+                all_run_mapes = []
+                for run_mape in self.report[group]["root_duration_p50_mape_runs"]:
+                    all_run_mapes.extend(run_mape.values())
+
+                if all_run_mapes:
+                    self.report[group]["root_duration_p50_mape_avg"] = sum(
+                        all_run_mapes
+                    ) / len(all_run_mapes)
+                # Keep the individual run MAPE values
+                # del self.report[group]["root_duration_p50_mape_runs"]  # Comment out to keep individual run MAPEs
 
             # NEW: Calculate averages for before/after incident Wasserstein distances
             if "root_duration_before_wdist" in self.report[group]:
@@ -573,3 +472,201 @@ class DurationReport(BaseReport):
                 del self.report[group]["root_duration_after_wdist"]
 
         return dict(self.report)
+
+    def visualize_duration_percentile_comparison(
+        self, original_data, compressed_data, percentile_name, compressor, app_name
+    ):
+        """Visualize duration percentile comparison by service with line charts and calculate MAPE."""
+        # Get all services that exist in both datasets
+        common_services = set(original_data.keys()) & set(compressed_data.keys())
+
+        if not common_services:
+            print(f"No common services found for {app_name}_{compressor}")
+            return {}
+
+        # Calculate number of subplots needed
+        num_services = len(common_services)
+        cols = min(3, num_services)  # Max 3 columns
+        rows = (num_services + cols - 1) // cols  # Ceiling division
+
+        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows))
+        if num_services == 1:
+            axes = [axes]
+        elif rows == 1:
+            axes = axes.reshape(1, -1)
+
+        mape_results = {}
+
+        for idx, service in enumerate(sorted(common_services)):
+            row = idx // cols
+            col = idx % cols
+            ax = axes[row, col] if rows > 1 else axes[col]
+
+            # Extract and sort data by timebucket
+            original_service_data = sorted(
+                original_data[service], key=lambda x: x["timebucket"]
+            )
+            compressed_service_data = sorted(
+                compressed_data[service], key=lambda x: x["timebucket"]
+            )
+
+            # Find all timebuckets from both datasets (union instead of intersection)
+            original_buckets = {
+                item["timebucket"]: item[percentile_name.lower()]
+                for item in original_service_data
+            }
+            compressed_buckets = {
+                item["timebucket"]: item[percentile_name.lower()]
+                for item in compressed_service_data
+            }
+            all_buckets = sorted(
+                set(original_buckets.keys()) | set(compressed_buckets.keys())
+            )
+
+            if not all_buckets:
+                ax.text(
+                    0.5,
+                    0.5,
+                    f"No data\nfor\n{service}",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
+                ax.set_title(service)
+                continue
+
+            # Extract percentile values for all timebuckets, interpolate missing values
+            original_values = []
+            compressed_values = []
+
+            # First pass: collect values, mark missing as None
+            for bucket in all_buckets:
+                original_values.append(original_buckets.get(bucket, None))
+                compressed_values.append(compressed_buckets.get(bucket, None))
+
+            # Second pass: interpolate missing values
+            def interpolate_missing_values(values):
+                values = values.copy()  # Don't modify original
+                n = len(values)
+
+                # Handle edge cases where all values are None
+                if all(v is None for v in values):
+                    return [0] * n
+
+                # Forward fill from first non-None value
+                first_valid = next(
+                    (i for i, v in enumerate(values) if v is not None), None
+                )
+                if first_valid is not None:
+                    for i in range(first_valid):
+                        values[i] = values[first_valid]
+
+                # Backward fill from last non-None value
+                last_valid = next(
+                    (i for i, v in enumerate(reversed(values)) if v is not None), None
+                )
+                if last_valid is not None:
+                    last_valid = n - 1 - last_valid
+                    for i in range(last_valid + 1, n):
+                        values[i] = values[last_valid]
+
+                # Linear interpolation for missing values between valid values
+                for i in range(n):
+                    if values[i] is None:
+                        # Find previous and next valid values
+                        prev_idx = next(
+                            (j for j in range(i - 1, -1, -1) if values[j] is not None),
+                            None,
+                        )
+                        next_idx = next(
+                            (j for j in range(i + 1, n) if values[j] is not None), None
+                        )
+
+                        if prev_idx is not None and next_idx is not None:
+                            # Linear interpolation
+                            prev_val = values[prev_idx]
+                            next_val = values[next_idx]
+                            weight = (i - prev_idx) / (next_idx - prev_idx)
+                            values[i] = prev_val + weight * (next_val - prev_val)
+                        elif prev_idx is not None:
+                            values[i] = values[prev_idx]
+                        elif next_idx is not None:
+                            values[i] = values[next_idx]
+                        else:
+                            values[i] = 0
+
+                return values
+
+            original_values = interpolate_missing_values(original_values)
+            compressed_values = interpolate_missing_values(compressed_values)
+
+            # Plot the data
+            x_indices = range(len(all_buckets))
+            ax.plot(
+                x_indices,
+                original_values,
+                label=f"Original {percentile_name}",
+                marker="o",
+                linewidth=2,
+            )
+            ax.plot(
+                x_indices,
+                compressed_values,
+                label=f"{compressor} {percentile_name}",
+                marker="s",
+                linewidth=2,
+            )
+
+            # Calculate MAPE (Mean Absolute Percentage Error)
+            original_array = np.array(original_values)
+            compressed_array = np.array(compressed_values)
+
+            # Only calculate MAPE for non-zero original values
+            non_zero_mask = original_array > 0
+            if np.any(non_zero_mask):
+                mape = (
+                    np.mean(
+                        np.abs(
+                            (
+                                original_array[non_zero_mask]
+                                - compressed_array[non_zero_mask]
+                            )
+                            / original_array[non_zero_mask]
+                        )
+                    )
+                    * 100
+                )
+            else:
+                mape = 0
+
+            mape_results[service] = mape
+
+            ax.set_title(f"{service}\nMAPE: {mape:.2f}%")
+            ax.set_xlabel("Time Index")
+            ax.set_ylabel(f"Duration {percentile_name}")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            # Set y-axis to start from 0
+            ax.set_ylim(bottom=0)
+
+        # Hide unused subplots
+        for idx in range(num_services, rows * cols):
+            row = idx // cols
+            col = idx % cols
+            if rows > 1:
+                axes[row, col].set_visible(False)
+            else:
+                axes[col].set_visible(False)
+
+        plt.tight_layout()
+
+        # Save the plot in appropriate subdirectory
+        output_dir = getattr(self, f"duration_{percentile_name.lower()}_dir")
+        filename = (
+            f"{app_name}_{compressor}_duration_{percentile_name.lower()}_comparison.png"
+        )
+        filepath = output_dir / filename
+        plt.savefig(filepath, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        return mape_results
