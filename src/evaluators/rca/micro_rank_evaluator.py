@@ -7,8 +7,8 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 
-from dataset import Dataset, RCAEvalDataset
-from evaluators import Evaluator
+from ...dataset import Dataset, RCAEvalDataset
+from ..evaluator import Evaluator
 
 warnings.filterwarnings("ignore")
 

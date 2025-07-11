@@ -1,7 +1,7 @@
 import random
 
-from compressors import CompressedDataset, Compressor, SerializationFormat
-from dataset import Dataset
+from ...dataset import Dataset
+from .. import CompressedDataset, Compressor, SerializationFormat
 
 
 class HeadSamplingCompressor(Compressor):

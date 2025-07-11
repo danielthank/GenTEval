@@ -1,13 +1,8 @@
 import argparse
-import os
 import pathlib
 import pickle
-import sys
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
-from dataset.rca_eval_dataset import RCAEvalDataset  # noqa: E402
+from ..dataset.rca_eval_dataset import RCAEvalDataset
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Normalize trace data")

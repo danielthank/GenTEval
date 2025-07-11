@@ -2,14 +2,14 @@ import argparse
 import asyncio
 import pathlib
 
-from all_utils import ScriptProcessor, run_standard_processing
+from .all_utils import ScriptProcessor, run_standard_processing
 
 
 class NormalizeProcessor(ScriptProcessor):
     """Processor for normalize operations."""
 
     def __init__(self, root_dir: pathlib.Path, output_dir: pathlib.Path):
-        super().__init__("normalize.py", root_dir)
+        super().__init__("normalize", root_dir)
         self.output_root = output_dir
 
     async def process_combination(

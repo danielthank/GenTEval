@@ -6,9 +6,8 @@ import pandas as pd
 from rdt.transformers import LogScaler
 from sdv.metadata import Metadata
 
-from compressors import CompressedDataset, SerializationFormat
-from dataset import Dataset
-
+from ...dataset import Dataset
+from .. import CompressedDataset, SerializationFormat
 from .config import GenTConfig
 from .ctgan.gen_t_ctgan_synthesizer import GenTCTGANSynthesizer
 

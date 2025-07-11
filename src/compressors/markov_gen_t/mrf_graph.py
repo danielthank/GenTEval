@@ -6,8 +6,8 @@ import networkx as nx
 import numpy as np
 from scipy.special import logsumexp
 
-from compressors import CompressedDataset, SerializationFormat
-from compressors.trace import Trace
+from .. import CompressedDataset, SerializationFormat
+from ..trace import Trace
 
 
 class TreeNode:

@@ -3,10 +3,9 @@ import logging
 import pandas as pd
 from sdv.metadata import Metadata
 
-from compressors import CompressedDataset, SerializationFormat
-from compressors.trace import Trace
-from dataset import Dataset
-
+from ...dataset import Dataset
+from .. import CompressedDataset, SerializationFormat
+from ..trace import Trace
 from .config import GenTConfig
 from .ctgan.gen_t_ctgan_synthesizer import GenTCTGANSynthesizer
 

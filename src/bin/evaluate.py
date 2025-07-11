@@ -1,24 +1,19 @@
 import argparse
 import json
-import os
 import pathlib
 import pickle
-import sys
 
-from logger import setup_logging
-
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-setup_logging()
-
-from dataset import RCAEvalDataset  # noqa: E402
-from evaluators import (  # noqa: E402
+from ..dataset import RCAEvalDataset
+from ..evaluators import (
     DurationEvaluator,
     MicroRankEvaluator,
     OperationEvaluator,
     SpanCountEvaluator,
     TraceRCAEvaluator,
 )
+from .logger import setup_logging
+
+setup_logging()
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(

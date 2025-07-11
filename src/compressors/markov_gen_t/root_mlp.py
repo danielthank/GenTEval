@@ -8,7 +8,8 @@ from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
 import wandb
-from compressors import CompressedDataset, SerializationFormat
+
+from .. import CompressedDataset, SerializationFormat
 
 
 class RootMLP(nn.Module):

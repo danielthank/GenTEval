@@ -1,22 +1,17 @@
 import argparse
-import os
 import pathlib
-import sys
-
-from logger import setup_logging
 
 import wandb
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-setup_logging()
-
-from compressors import CompressedDataset  # noqa: E402
-from compressors.markov_gen_t import (  # noqa: E402
+from ..compressors import CompressedDataset
+from ..compressors.markov_gen_t import (
     MarkovGenTCompressor,
     MarkovGenTConfig,
 )
-from dataset import RCAEvalDataset  # noqa: E402
+from ..dataset import RCAEvalDataset
+from .logger import setup_logging
+
+setup_logging()
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(

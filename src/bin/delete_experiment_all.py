@@ -11,8 +11,8 @@ import pathlib
 import shutil
 from typing import List, Optional
 
-from all_utils import add_common_arguments, display_configuration
-from utils import run_dirs
+from .all_utils import add_common_arguments, display_configuration
+from .utils import run_dirs
 
 
 def find_experiment_dirs(
@@ -136,8 +136,8 @@ def main():
     parser.add_argument(
         "--root_dir",
         type=str,
-        default="../output",
-        help="Directory containing the experiment outputs (default: ../output)",
+        default="./output",
+        help="Directory containing the experiment outputs (default: ./output)",
     )
 
     # Action arguments

@@ -5,8 +5,8 @@ from typing import List, Tuple
 import networkx as nx
 import numpy as np
 
-from compressors import CompressedDataset, SerializationFormat
-from compressors.trace import Trace
+from .. import CompressedDataset, SerializationFormat
+from ..trace import Trace
 
 
 class TreeNode:

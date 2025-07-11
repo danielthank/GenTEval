@@ -10,7 +10,8 @@ import pathlib
 from typing import Any, Callable, Dict, List, Optional
 
 from tqdm import tqdm
-from utils import run_dirs
+
+from .utils import run_dirs
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -114,22 +115,27 @@ async def process_all_combinations(
 class ScriptProcessor:
     """Base class for script processors that run external scripts."""
 
-    def __init__(self, script_name: str, root_dir: pathlib.Path):
-        self.script_name = script_name
+    def __init__(self, module_name: str, root_dir: pathlib.Path):
+        self.module_name = module_name
         self.root_dir = root_dir
-        self.current_dir = pathlib.Path(__file__).parent
-        self.script_path = self.current_dir / script_name
 
     async def run_script(self, args: List[str], semaphore: asyncio.Semaphore) -> bool:
         """Run the script with given arguments."""
         async with semaphore:
             try:
+                # Get the project root directory (two levels up from this file)
+                project_root = pathlib.Path(__file__).parent.parent.parent
+
                 process = await asyncio.create_subprocess_exec(
-                    "python3",
-                    str(self.script_path),
+                    "uv",
+                    "run",
+                    "python",
+                    "-m",
+                    f"src.bin.{self.module_name}",
                     *args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    cwd=str(project_root),
                 )
 
                 async def stream_output(stream):
@@ -190,8 +196,8 @@ def create_standard_parser(
     parser.add_argument(
         "--root_dir",
         type=str,
-        default="../output",
-        help="Directory containing the dataset (default: ../output)",
+        default="./output",
+        help="Directory containing the dataset (default: ./output)",
     )
     parser.add_argument(
         "--max_workers",

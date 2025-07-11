@@ -1,16 +1,11 @@
 import argparse
-import os
 import pathlib
-import sys
 
-from logger import setup_logging
+from ..compressors import CompressedDataset, HeadSamplingCompressor
+from ..dataset import RCAEvalDataset
+from .logger import setup_logging
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
 setup_logging()
-
-from compressors import CompressedDataset, HeadSamplingCompressor  # noqa: E402
-from dataset import RCAEvalDataset  # noqa: E402
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Compress and decompress traces")

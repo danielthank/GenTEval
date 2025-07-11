@@ -6,11 +6,12 @@ This shows how to use all_utils for scripts that don't fit the standard pattern.
 import asyncio
 import pathlib
 
-from all_utils import (
+from tqdm import tqdm
+
+from .all_utils import (
     create_standard_parser,
     display_configuration,
 )
-from tqdm import tqdm
 
 
 async def evaluate_task(
@@ -41,11 +42,15 @@ async def evaluate_task(
     async with semaphore:
         try:
             print(f"Processing {dataset_dir} with {evaluator} evaluator...")
-            current_dir = pathlib.Path(__file__).parent
-            script = current_dir / "evaluate.py"
+            # Get the project root directory (two levels up from this file)
+            project_root = pathlib.Path(__file__).parent.parent.parent
+
             process = await asyncio.create_subprocess_exec(
-                "python3",
-                str(script),
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "src.bin.evaluate",
                 "--dataset_dir",
                 str(dataset_dir),
                 "--labels_path",
@@ -56,6 +61,7 @@ async def evaluate_task(
                 str(evaluated_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=str(project_root),
             )
 
             # Stream output
@@ -124,7 +130,7 @@ async def main():
     tasks = []
 
     # Generate all combinations including compressors and evaluators
-    from utils import run_dirs
+    from .utils import run_dirs
 
     for app_name, service, fault, run in run_dirs(applications, services, faults, runs):
         for compressor in args.compressors:

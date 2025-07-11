@@ -2,8 +2,8 @@ from collections import defaultdict
 
 import numpy as np
 
-from dataset import Dataset
-from evaluators import Evaluator
+from ...dataset import Dataset
+from ..evaluator import Evaluator
 
 
 class DurationEvaluator(Evaluator):
@@ -75,11 +75,12 @@ class DurationEvaluator(Evaluator):
                 if durations:  # only calculate if there are durations
                     p50 = np.percentile(durations, 50)
                     p90 = np.percentile(durations, 90)
+                    count = len(durations)  # Number of traces in this bucket
                     root_duration_p50_by_service[service].append(
-                        {"timebucket": timebucket, "p50": p50}
+                        {"timebucket": timebucket, "p50": p50, "count": count}
                     )
                     root_duration_p90_by_service[service].append(
-                        {"timebucket": timebucket, "p90": p90}
+                        {"timebucket": timebucket, "p90": p90, "count": count}
                     )
             # sort by timebucket for consistent ordering
             root_duration_p50_by_service[service].sort(key=lambda x: x["timebucket"])

@@ -1,7 +1,7 @@
 from collections import defaultdict
 
-from dataset import Dataset
-from evaluators import Evaluator
+from ...dataset import Dataset
+from ..evaluator import Evaluator
 
 
 class SpanCountEvaluator(Evaluator):

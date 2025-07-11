@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from dataset import Dataset, RCAEvalDataset
-from evaluators import Evaluator
+from ...dataset import Dataset, RCAEvalDataset
+from ..evaluator import Evaluator
 
 pd.options.mode.copy_on_write = True
 

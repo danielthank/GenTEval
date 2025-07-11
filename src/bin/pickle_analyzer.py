@@ -21,9 +21,6 @@ from typing import Any, Dict
 
 import cloudpickle
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
 
 class PickleSizeAnalyzer:
     """Enhanced pickle size analyzer with CLI support."""

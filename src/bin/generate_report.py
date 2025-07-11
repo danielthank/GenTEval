@@ -1,14 +1,7 @@
 import argparse
-import os
 import pathlib
-import sys
 
-from utils import run_dirs
-
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
-from reports import (  # noqa: E402
+from ..reports import (
     DurationReport,
     EnhancedReportGenerator,
     OperationReport,
@@ -16,6 +9,7 @@ from reports import (  # noqa: E402
     SizeReport,
     SpanCountReport,
 )
+from .utils import run_dirs
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -53,8 +47,8 @@ if __name__ == "__main__":
     argparser.add_argument(
         "--root_dir",
         type=str,
-        default="../output",
-        help="Directory containing the output (default: ../output)",
+        default="./output",
+        help="Directory containing the output (default: ./output)",
     )
     argparser.add_argument(
         "--compressors",
@@ -74,6 +68,18 @@ if __name__ == "__main__":
             "span_count",
         ],
         help="Evaluators to run (default: all evaluators)",
+    )
+    argparser.add_argument(
+        "--plot",
+        action="store_true",
+        default=True,
+        help="Enable plotting for duration evaluator (default: True)",
+    )
+    argparser.add_argument(
+        "--no-plot",
+        dest="plot",
+        action="store_false",
+        help="Disable plotting for duration evaluator",
     )
     argparser.add_argument(
         "--output",
@@ -96,7 +102,7 @@ if __name__ == "__main__":
     all_reports = {}
 
     if "duration" in args.evaluators:
-        report_generator = DurationReport(args.compressors, root_dir)
+        report_generator = DurationReport(args.compressors, root_dir, plot=args.plot)
         report = report_generator.generate(run_dirs_func)
         all_reports["duration"] = report
 

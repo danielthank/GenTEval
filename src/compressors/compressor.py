@@ -1,5 +1,5 @@
-from compressors.compressed_dataset import CompressedDataset
-from dataset import Dataset
+from ..dataset import Dataset
+from .compressed_dataset import CompressedDataset
 
 
 class Compressor:

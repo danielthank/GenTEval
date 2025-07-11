@@ -1,6 +1,5 @@
-from compressors import CompressedDataset, SerializationFormat
-from dataset import Dataset
-
+from ...dataset import Dataset
+from .. import CompressedDataset, SerializationFormat
 from .config import GenTConfig
 from .edge_synthesizer import EdgeSynthesizer
 

@@ -4,7 +4,7 @@ from typing import Dict
 
 import numpy as np
 
-from compressors import CompressedDataset, SerializationFormat
+from .. import CompressedDataset, SerializationFormat
 
 
 class StartTimeCountSynthesizer:

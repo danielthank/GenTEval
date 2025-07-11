@@ -1,8 +1,7 @@
 import logging
 
-from compressors import CompressedDataset, Compressor
-from dataset import Dataset
-
+from ...dataset import Dataset
+from .. import CompressedDataset, Compressor
 from .config import GenTConfig
 from .metadata import MetadataSynthesizer
 from .start_time import StartTimeSynthesizer

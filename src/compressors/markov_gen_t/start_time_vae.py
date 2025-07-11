@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from compressors import CompressedDataset, SerializationFormat
+from .. import CompressedDataset, SerializationFormat
 
 
 class StartTimeVAE(nn.Module):

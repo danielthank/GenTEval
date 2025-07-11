@@ -6,15 +6,14 @@ import cloudpickle
 import numpy as np
 from tqdm import tqdm
 
-from compressors import CompressedDataset, SerializationFormat
-from compressors.trace import Trace
-from dataset import Dataset
-
+from ...dataset import Dataset
+from .. import CompressedDataset, SerializationFormat
+from ..trace import Trace
 from .config import MarkovGenTConfig
 from .metadata_vae import MetadataSynthesizer
 from .mrf_graph import MarkovRandomField
-from .root_vae import RootDurationSynthesizer
 from .root_mlp import RootDurationMLPSynthesizer
+from .root_vae import RootDurationSynthesizer
 from .start_time_count import StartTimeCountSynthesizer
 
 
@@ -246,7 +245,7 @@ class MarkovGenTCompressor:
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,
         )
-        
+
         # Choose between MLP and VAE for root duration synthesis
         if self.config.use_root_mlp:
             self.root_duration_synthesizer = RootDurationMLPSynthesizer(self.config)

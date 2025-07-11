@@ -1,8 +1,7 @@
 import logging
 
-from compressors import CompressedDataset
-from dataset import Dataset
-
+from ...dataset import Dataset
+from .. import CompressedDataset
 from .config import GenTConfig
 from .graph_gen_t_compressor import GraphGenTCompressor
 from .naive_gen_t_compressor import NaiveGenTCompressor

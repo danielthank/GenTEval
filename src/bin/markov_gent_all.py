@@ -2,14 +2,14 @@ import argparse
 import asyncio
 import pathlib
 
-from all_utils import ScriptProcessor, run_standard_processing
+from .all_utils import ScriptProcessor, run_standard_processing
 
 
 class MarkovGentProcessor(ScriptProcessor):
     """Processor for MarkovGenT operations."""
 
     def __init__(self, root_dir: pathlib.Path, output_dir_name: str = "markov_gent"):
-        super().__init__("markov_gent.py", root_dir)
+        super().__init__("markov_gent", root_dir)
         self.output_dir_name = output_dir_name
 
     async def process_combination(
@@ -43,7 +43,7 @@ class MarkovGentProcessor(ScriptProcessor):
             "-o",
             str(output_dir),
             "--num_processes",
-            "12",
+            "1",
         ]
 
         # Add wandb configuration if enabled

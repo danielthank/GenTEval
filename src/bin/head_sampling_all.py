@@ -2,14 +2,14 @@ import argparse
 import asyncio
 import pathlib
 
-from all_utils import ScriptProcessor, run_standard_processing
+from .all_utils import ScriptProcessor, run_standard_processing
 
 
 class HeadSamplingProcessor(ScriptProcessor):
     """Processor for head sampling operations."""
 
     def __init__(self, root_dir: pathlib.Path, sampling_rate: int):
-        super().__init__("head_sampling.py", root_dir)
+        super().__init__("head_sampling", root_dir)
         self.sampling_rate = sampling_rate
 
     async def process_combination(

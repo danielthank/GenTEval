@@ -2,14 +2,14 @@ import argparse
 import asyncio
 import pathlib
 
-from all_utils import ScriptProcessor, run_standard_processing
+from .all_utils import ScriptProcessor, run_standard_processing
 
 
 class GentProcessor(ScriptProcessor):
     """Processor for GenT operations."""
 
     def __init__(self, root_dir: pathlib.Path, output_dir_name: str = "gent"):
-        super().__init__("gent.py", root_dir)
+        super().__init__("gent", root_dir)
         self.output_dir_name = output_dir_name
 
     async def process_combination(

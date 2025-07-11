@@ -4,7 +4,7 @@ from typing import Optional
 
 import pandas as pd
 
-from dataset import Dataset
+from .dataset import Dataset
 
 
 class RCAEvalDataset(Dataset):
