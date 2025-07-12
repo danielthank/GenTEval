@@ -22,19 +22,23 @@ class DurationReport(BaseReport):
         self.duration_pair_dir = (
             self.viz_output_dir / "duration_pair_all_wasserstein_dist"
         )
-        self.duration_p50_dir = self.viz_output_dir / "duration_p50"
-        self.duration_p90_dir = self.viz_output_dir / "duration_p90"
-        self.duration_before_after_dir = (
-            self.viz_output_dir / "duration_before_after_incident"
+        self.duration_depth_0_p50_dir = self.viz_output_dir / "duration_depth_0_p50"
+        self.duration_depth_0_p90_dir = self.viz_output_dir / "duration_depth_0_p90"
+        self.duration_depth_0_before_after_dir = (
+            self.viz_output_dir / "duration_depth_0_before_after_incident"
+        )
+        self.duration_depth_1_before_after_dir = (
+            self.viz_output_dir / "duration_depth_1_before_after_incident"
         )
 
         # Create all subdirectories only if plotting is enabled
         if self.plot:
             self.duration_all_dir.mkdir(parents=True, exist_ok=True)
             self.duration_pair_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_p50_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_p90_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_before_after_dir.mkdir(parents=True, exist_ok=True)
+            self.duration_depth_0_p50_dir.mkdir(parents=True, exist_ok=True)
+            self.duration_depth_0_p90_dir.mkdir(parents=True, exist_ok=True)
+            self.duration_depth_0_before_after_dir.mkdir(parents=True, exist_ok=True)
+            self.duration_depth_1_before_after_dir.mkdir(parents=True, exist_ok=True)
 
     def visualize_wasserstein_distributions(
         self,
@@ -46,8 +50,19 @@ class DurationReport(BaseReport):
         plot=True,
     ):
         """Visualize the distributions used in Wasserstein distance calculation."""
+        # Convert duration data to milliseconds for consistency (duration_pair data is not converted)
+        is_duration_pair = "duration_pair" in group_name
+        if is_duration_pair:
+            # Duration pair ratios - no conversion needed
+            original_for_wdist = original_data
+            compressed_for_wdist = compressed_data
+        else:
+            # Duration data - convert from μs to ms
+            original_for_wdist = np.array(original_data) / 1000
+            compressed_for_wdist = np.array(compressed_data) / 1000
+        
         # Calculate and return Wasserstein distance
-        wdist = wasserstein_distance(original_data, compressed_data)
+        wdist = wasserstein_distance(original_for_wdist, compressed_for_wdist)
 
         if not plot:
             return wdist
@@ -58,8 +73,15 @@ class DurationReport(BaseReport):
         is_duration_pair = "duration_pair" in group_name
 
         # Plot CDFs for better visualization of Wasserstein distance
-        original_sorted = np.sort(original_data)
-        compressed_sorted = np.sort(compressed_data)
+        if is_duration_pair:
+            # Duration pair ratios - no conversion needed
+            original_sorted = np.sort(original_data)
+            compressed_sorted = np.sort(compressed_data)
+        else:
+            # Duration data - convert from μs to ms
+            original_sorted = np.sort(np.array(original_data) / 1000)
+            compressed_sorted = np.sort(np.array(compressed_data) / 1000)
+            
         original_cdf = np.arange(1, len(original_sorted) + 1) / len(original_sorted)
         compressed_cdf = np.arange(1, len(compressed_sorted) + 1) / len(
             compressed_sorted
@@ -79,7 +101,7 @@ class DurationReport(BaseReport):
             color="red",
             linewidth=2,
         )
-        ax.set_xlabel("Duration" if not is_duration_pair else "Duration Pair Ratio")
+        ax.set_xlabel("Duration (ms)" if not is_duration_pair else "Duration Pair Ratio")
         ax.set_ylabel("Cumulative Probability")
         ax.set_title(f"Cumulative Distribution Functions - {group_name}")
         ax.legend()
@@ -89,7 +111,7 @@ class DurationReport(BaseReport):
         if is_duration_pair:
             ax.set_xlim(0, 1)
         else:
-            ax.set_xlim(0, 500000)
+            ax.set_xlim(0, 500)  # 0 to 500 milliseconds (was 500,000 μs)
 
         # Set title with Wasserstein distance
         fig.suptitle(
@@ -114,7 +136,7 @@ class DurationReport(BaseReport):
 
         return wdist
 
-    def visualize_before_after_incident(
+    def visualize_depth_before_after_incident(
         self,
         original_before_data,
         original_after_data,
@@ -122,9 +144,10 @@ class DurationReport(BaseReport):
         compressed_after_data,
         compressor,
         app_name,
+        depth,
         plot=True,
     ):
-        """Visualize root span duration CDFs before and after incident injection in a single plot."""
+        """Visualize span duration CDFs before and after incident injection for specified depth."""
         # Calculate Wasserstein distances if both before and after data exist
         wdist_before = wdist_after = float("inf")
         if (
@@ -133,8 +156,11 @@ class DurationReport(BaseReport):
             and len(original_before_data) > 0
             and len(compressed_before_data) > 0
         ):
+            # Convert to milliseconds for consistent distance calculation
+            original_before_ms = np.array(original_before_data) / 1000
+            compressed_before_ms = np.array(compressed_before_data) / 1000
             wdist_before = wasserstein_distance(
-                original_before_data, compressed_before_data
+                original_before_ms, compressed_before_ms
             )
 
         if (
@@ -143,8 +169,11 @@ class DurationReport(BaseReport):
             and len(original_after_data) > 0
             and len(compressed_after_data) > 0
         ):
+            # Convert to milliseconds for consistent distance calculation
+            original_after_ms = np.array(original_after_data) / 1000
+            compressed_after_ms = np.array(compressed_after_data) / 1000
             wdist_after = wasserstein_distance(
-                original_after_data, compressed_after_data
+                original_after_ms, compressed_after_ms
             )
 
         if not plot:
@@ -154,7 +183,7 @@ class DurationReport(BaseReport):
 
         # Plot original data - before incident (solid lines)
         if original_before_data and len(original_before_data) > 0:
-            before_sorted = np.sort(original_before_data)
+            before_sorted = np.sort(np.array(original_before_data) / 1000)  # Convert μs to ms
             before_cdf = np.arange(1, len(before_sorted) + 1) / len(before_sorted)
             ax.plot(
                 before_sorted,
@@ -167,7 +196,7 @@ class DurationReport(BaseReport):
 
         # Plot original data - after incident (dashed lines)
         if original_after_data and len(original_after_data) > 0:
-            after_sorted = np.sort(original_after_data)
+            after_sorted = np.sort(np.array(original_after_data) / 1000000)  # Convert μs to s
             after_cdf = np.arange(1, len(after_sorted) + 1) / len(after_sorted)
             ax.plot(
                 after_sorted,
@@ -180,7 +209,7 @@ class DurationReport(BaseReport):
 
         # Plot compressed data - before incident (solid lines)
         if compressed_before_data and len(compressed_before_data) > 0:
-            comp_before_sorted = np.sort(compressed_before_data)
+            comp_before_sorted = np.sort(np.array(compressed_before_data) / 1000000)  # Convert μs to s
             comp_before_cdf = np.arange(1, len(comp_before_sorted) + 1) / len(
                 comp_before_sorted
             )
@@ -195,7 +224,7 @@ class DurationReport(BaseReport):
 
         # Plot compressed data - after incident (dashed lines)
         if compressed_after_data and len(compressed_after_data) > 0:
-            comp_after_sorted = np.sort(compressed_after_data)
+            comp_after_sorted = np.sort(np.array(compressed_after_data) / 1000000)  # Convert μs to s
             comp_after_cdf = np.arange(1, len(comp_after_sorted) + 1) / len(
                 comp_after_sorted
             )
@@ -208,10 +237,10 @@ class DurationReport(BaseReport):
                 linestyle="--",
             )
 
-        ax.set_xlabel("Root Span Duration (μs)", fontsize=12)
+        ax.set_xlabel(f"Depth {depth} Span Duration (ms)", fontsize=12)
         ax.set_ylabel("Cumulative Probability", fontsize=12)
         ax.set_title(
-            "Root Span Duration CDF - Before vs After Incident",
+            f"Depth {depth} Span Duration CDF - Before vs After Incident",
             fontsize=14,
             fontweight="bold",
         )
@@ -220,8 +249,8 @@ class DurationReport(BaseReport):
         ax.legend(loc="best", fontsize=10, framealpha=0.9)
         ax.grid(True, alpha=0.3)
         ax.set_xlim(
-            0, 2000000
-        )  # Root span duration range: 0 to 1,000,000 μs (1 second)
+            0, 1000
+        )  # Span duration range: 0 to 1000 ms (1 second)
 
         # Overall title with Wasserstein distances
         fig.suptitle(
@@ -233,9 +262,15 @@ class DurationReport(BaseReport):
 
         plt.tight_layout()
 
-        # Save the plot
-        filename = f"{app_name}_{compressor}_root_duration_before_after_incident.png"
-        filepath = self.duration_before_after_dir / filename
+        # Save the plot in appropriate subdirectory based on depth
+        filename = f"{app_name}_{compressor}_depth_{depth}_duration_before_after_incident.png"
+        if depth == 0:
+            filepath = self.duration_depth_0_before_after_dir / filename
+        elif depth == 1:
+            filepath = self.duration_depth_1_before_after_dir / filename
+        else:
+            # Fallback for other depths
+            filepath = self.viz_output_dir / filename
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
         plt.close()
 
@@ -307,7 +342,7 @@ class DurationReport(BaseReport):
                     """
 
                     report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_wdis"].append(wdist)
+                    self.report[report_group]["duration_wdist"].append(wdist)
 
                 # Process duration_pair data
                 for group in original["duration_pair"]:
@@ -325,17 +360,17 @@ class DurationReport(BaseReport):
                     )
 
                     report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_pair_wdis"].append(wdist)
+                    self.report[report_group]["duration_pair_wdist"].append(wdist)
 
-                # Process root duration p90 data if available
+                # Process duration_depth_0_p90_by_service data if available
                 if (
-                    "root_duration_p90_by_service" in original
-                    and "root_duration_p90_by_service" in results
+                    "duration_depth_0_p90_by_service" in original
+                    and "duration_depth_0_p90_by_service" in results
                 ):
                     # Generate p90 visualization immediately for this run
                     mape_count_results = self.visualize_duration_percentile_comparison(
-                        original["root_duration_p90_by_service"],
-                        results["root_duration_p90_by_service"],
+                        original["duration_depth_0_p90_by_service"],
+                        results["duration_depth_0_p90_by_service"],
                         "P90",
                         compressor,
                         f"{app_name}_{service}_{fault}_{run}",
@@ -344,24 +379,26 @@ class DurationReport(BaseReport):
 
                     # Store MAPE and count results in report
                     report_group = f"{app_name}_{compressor}"
-                    if "root_duration_p90_mape_runs" not in self.report[report_group]:
-                        self.report[report_group]["root_duration_p90_mape_runs"] = []
-                    if "root_duration_p90_count_runs" not in self.report[report_group]:
-                        self.report[report_group]["root_duration_p90_count_runs"] = []
-                    self.report[report_group]["root_duration_p90_mape_runs"].append(
+                    if "duration_depth_0_p90_mape_runs" not in self.report[report_group]:
+                        self.report[report_group]["duration_depth_0_p90_mape_runs"] = []
+                    if "duration_depth_0_p90_count_runs" not in self.report[report_group]:
+                        self.report[report_group]["duration_depth_0_p90_count_runs"] = []
+                    self.report[report_group]["duration_depth_0_p90_mape_runs"].append(
                         mape_count_results["mape"]
                     )
-                    self.report[report_group]["root_duration_p90_count_runs"].append(
+                    self.report[report_group]["duration_depth_0_p90_count_runs"].append(
                         mape_count_results["counts"]
-                    )  # Process root duration p50 data if available
+                    )  
+                    
+                # Process duration_depth_0_p50_by_service data if available
                 if (
-                    "root_duration_p50_by_service" in original
-                    and "root_duration_p50_by_service" in results
+                    "duration_depth_0_p50_by_service" in original
+                    and "duration_depth_0_p50_by_service" in results
                 ):
                     # Generate p50 visualization immediately for this run
                     mape_count_results = self.visualize_duration_percentile_comparison(
-                        original["root_duration_p50_by_service"],
-                        results["root_duration_p50_by_service"],
+                        original["duration_depth_0_p50_by_service"],
+                        results["duration_depth_0_p50_by_service"],
                         "P50",
                         compressor,
                         f"{app_name}_{service}_{fault}_{run}",
@@ -370,40 +407,41 @@ class DurationReport(BaseReport):
 
                     # Store MAPE and count results in report
                     report_group = f"{app_name}_{compressor}"
-                    if "root_duration_p50_mape_runs" not in self.report[report_group]:
-                        self.report[report_group]["root_duration_p50_mape_runs"] = []
-                    if "root_duration_p50_count_runs" not in self.report[report_group]:
-                        self.report[report_group]["root_duration_p50_count_runs"] = []
-                    self.report[report_group]["root_duration_p50_mape_runs"].append(
+                    if "duration_depth_0_p50_mape_runs" not in self.report[report_group]:
+                        self.report[report_group]["duration_depth_0_p50_mape_runs"] = []
+                    if "duration_depth_0_p50_count_runs" not in self.report[report_group]:
+                        self.report[report_group]["duration_depth_0_p50_count_runs"] = []
+                    self.report[report_group]["duration_depth_0_p50_mape_runs"].append(
                         mape_count_results["mape"]
                     )
-                    self.report[report_group]["root_duration_p50_count_runs"].append(
+                    self.report[report_group]["duration_depth_0_p50_count_runs"].append(
                         mape_count_results["counts"]
                     )
 
-                # NEW: Process root duration before/after incident data
+                # Process depth 0 duration before/after incident data
                 if (
-                    "root_duration_before_incident" in original
-                    and "root_duration_after_incident" in original
-                    and "root_duration_before_incident" in results
-                    and "root_duration_after_incident" in results
+                    "duration_depth_0_before_incident" in original
+                    and "duration_depth_0_after_incident" in original
+                    and "duration_depth_0_before_incident" in results
+                    and "duration_depth_0_after_incident" in results
                 ):
                     # Process "all" service data for before/after incident
                     if (
-                        "all" in original["root_duration_before_incident"]
-                        and "all" in original["root_duration_after_incident"]
-                        and "all" in results["root_duration_before_incident"]
-                        and "all" in results["root_duration_after_incident"]
+                        "all" in original["duration_depth_0_before_incident"]
+                        and "all" in original["duration_depth_0_after_incident"]
+                        and "all" in results["duration_depth_0_before_incident"]
+                        and "all" in results["duration_depth_0_after_incident"]
                     ):
-                        # Generate before/after incident visualization
+                        # Generate before/after incident visualization for depth 0
                         wdist_before, wdist_after = (
-                            self.visualize_before_after_incident(
-                                original["root_duration_before_incident"]["all"],
-                                original["root_duration_after_incident"]["all"],
-                                results["root_duration_before_incident"]["all"],
-                                results["root_duration_after_incident"]["all"],
+                            self.visualize_depth_before_after_incident(
+                                original["duration_depth_0_before_incident"]["all"],
+                                original["duration_depth_0_after_incident"]["all"],
+                                results["duration_depth_0_before_incident"]["all"],
+                                results["duration_depth_0_after_incident"]["all"],
                                 compressor,
                                 f"{app_name}_{service}_{fault}_{run}",
+                                depth=0,
                                 plot=self.plot,
                             )
                         )
@@ -411,46 +449,94 @@ class DurationReport(BaseReport):
                         # Store Wasserstein distances in report
                         report_group = f"{app_name}_{compressor}"
                         if (
-                            "root_duration_before_wdist"
+                            "duration_depth_0_before_wdist"
                             not in self.report[report_group]
                         ):
-                            self.report[report_group]["root_duration_before_wdist"] = []
-                        if "root_duration_after_wdist" not in self.report[report_group]:
-                            self.report[report_group]["root_duration_after_wdist"] = []
+                            self.report[report_group]["duration_depth_0_before_wdist"] = []
+                        if "duration_depth_0_after_wdist" not in self.report[report_group]:
+                            self.report[report_group]["duration_depth_0_after_wdist"] = []
 
                         # Only add finite distances to avoid inf values in averages
                         if wdist_before != float("inf"):
                             self.report[report_group][
-                                "root_duration_before_wdist"
+                                "duration_depth_0_before_wdist"
                             ].append(wdist_before)
                         if wdist_after != float("inf"):
                             self.report[report_group][
-                                "root_duration_after_wdist"
+                                "duration_depth_0_after_wdist"
+                            ].append(wdist_after)
+
+                # Process depth 1 duration before/after incident data
+                if (
+                    "duration_depth_1_before_incident" in original
+                    and "duration_depth_1_after_incident" in original
+                    and "duration_depth_1_before_incident" in results
+                    and "duration_depth_1_after_incident" in results
+                ):
+                    # Process "all" service data for before/after incident
+                    if (
+                        "all" in original["duration_depth_1_before_incident"]
+                        and "all" in original["duration_depth_1_after_incident"]
+                        and "all" in results["duration_depth_1_before_incident"]
+                        and "all" in results["duration_depth_1_after_incident"]
+                    ):
+                        # Generate before/after incident visualization for depth 1
+                        wdist_before, wdist_after = (
+                            self.visualize_depth_before_after_incident(
+                                original["duration_depth_1_before_incident"]["all"],
+                                original["duration_depth_1_after_incident"]["all"],
+                                results["duration_depth_1_before_incident"]["all"],
+                                results["duration_depth_1_after_incident"]["all"],
+                                compressor,
+                                f"{app_name}_{service}_{fault}_{run}",
+                                depth=1,
+                                plot=self.plot,
+                            )
+                        )
+
+                        # Store Wasserstein distances in report
+                        report_group = f"{app_name}_{compressor}"
+                        if (
+                            "duration_depth_1_before_wdist"
+                            not in self.report[report_group]
+                        ):
+                            self.report[report_group]["duration_depth_1_before_wdist"] = []
+                        if "duration_depth_1_after_wdist" not in self.report[report_group]:
+                            self.report[report_group]["duration_depth_1_after_wdist"] = []
+
+                        # Only add finite distances to avoid inf values in averages
+                        if wdist_before != float("inf"):
+                            self.report[report_group][
+                                "duration_depth_1_before_wdist"
+                            ].append(wdist_before)
+                        if wdist_after != float("inf"):
+                            self.report[report_group][
+                                "duration_depth_1_after_wdist"
                             ].append(wdist_after)
 
         # Calculate averages and clean up
         for group in self.report:
-            if "duration_wdis" in self.report[group]:
-                self.report[group]["duration_wdis_avg"] = sum(
-                    self.report[group]["duration_wdis"]
-                ) / len(self.report[group]["duration_wdis"])
-                del self.report[group]["duration_wdis"]
+            if "duration_wdist" in self.report[group]:
+                self.report[group]["duration_wdist_avg"] = sum(
+                    self.report[group]["duration_wdist"]
+                ) / len(self.report[group]["duration_wdist"])
+                del self.report[group]["duration_wdist"]
 
-            if "duration_pair_wdis" in self.report[group]:
-                self.report[group]["duration_pair_wdis_avg"] = sum(
-                    self.report[group]["duration_pair_wdis"]
-                ) / len(self.report[group]["duration_pair_wdis"])
-                del self.report[group]["duration_pair_wdis"]
+            if "duration_pair_wdist" in self.report[group]:
+                self.report[group]["duration_pair_wdist_avg"] = sum(
+                    self.report[group]["duration_pair_wdist"]
+                ) / len(self.report[group]["duration_pair_wdist"])
+                del self.report[group]["duration_pair_wdist"]
 
-            if "root_duration_p90_mape_runs" in self.report[group]:
+            if "duration_depth_0_p90_mape_runs" in self.report[group]:
                 # Calculate weighted average MAPE across all runs and all services
                 all_run_mapes = []
                 all_run_counts = []
 
                 for i, run_mape in enumerate(
-                    self.report[group]["root_duration_p90_mape_runs"]
+                    self.report[group]["duration_depth_0_p90_mape_runs"]
                 ):
-                    run_counts = self.report[group]["root_duration_p90_count_runs"][i]
+                    run_counts = self.report[group]["duration_depth_0_p90_count_runs"][i]
                     for service in run_mape:
                         if service in run_counts:
                             all_run_mapes.append(run_mape[service])
@@ -463,21 +549,19 @@ class DurationReport(BaseReport):
                         for mape, count in zip(all_run_mapes, all_run_counts)
                     )
                     total_count = sum(all_run_counts)
-                    self.report[group]["root_duration_p90_mape_avg"] = (
+                    self.report[group]["duration_depth_0_p90_mape_avg"] = (
                         total_weighted_mape / total_count
                     )
-                # Keep the individual run MAPE values
-                # del self.report[group]["root_duration_p90_mape_runs"]  # Comment out to keep individual run MAPEs
 
-            if "root_duration_p50_mape_runs" in self.report[group]:
+            if "duration_depth_0_p50_mape_runs" in self.report[group]:
                 # Calculate weighted average MAPE across all runs and all services
                 all_run_mapes = []
                 all_run_counts = []
 
                 for i, run_mape in enumerate(
-                    self.report[group]["root_duration_p50_mape_runs"]
+                    self.report[group]["duration_depth_0_p50_mape_runs"]
                 ):
-                    run_counts = self.report[group]["root_duration_p50_count_runs"][i]
+                    run_counts = self.report[group]["duration_depth_0_p50_count_runs"][i]
                     for service in run_mape:
                         if service in run_counts:
                             all_run_mapes.append(run_mape[service])
@@ -490,30 +574,47 @@ class DurationReport(BaseReport):
                         for mape, count in zip(all_run_mapes, all_run_counts)
                     )
                     total_count = sum(all_run_counts)
-                    self.report[group]["root_duration_p50_mape_avg"] = (
+                    self.report[group]["duration_depth_0_p50_mape_avg"] = (
                         total_weighted_mape / total_count
                     )
-                # Keep the individual run MAPE values
-                # del self.report[group]["root_duration_p50_mape_runs"]  # Comment out to keep individual run MAPEs
 
-            # NEW: Calculate averages for before/after incident Wasserstein distances
-            if "root_duration_before_wdist" in self.report[group]:
-                if self.report[group]["root_duration_before_wdist"]:
-                    self.report[group]["root_duration_before_wdist_avg"] = sum(
-                        self.report[group]["root_duration_before_wdist"]
-                    ) / len(self.report[group]["root_duration_before_wdist"])
+            # Calculate averages for depth 0 before/after incident Wasserstein distances
+            if "duration_depth_0_before_wdist" in self.report[group]:
+                if self.report[group]["duration_depth_0_before_wdist"]:
+                    self.report[group]["duration_depth_0_before_wdist_avg"] = sum(
+                        self.report[group]["duration_depth_0_before_wdist"]
+                    ) / len(self.report[group]["duration_depth_0_before_wdist"])
                 else:
-                    self.report[group]["root_duration_before_wdist_avg"] = float("inf")
-                del self.report[group]["root_duration_before_wdist"]
+                    self.report[group]["duration_depth_0_before_wdist_avg"] = float("inf")
+                del self.report[group]["duration_depth_0_before_wdist"]
 
-            if "root_duration_after_wdist" in self.report[group]:
-                if self.report[group]["root_duration_after_wdist"]:
-                    self.report[group]["root_duration_after_wdist_avg"] = sum(
-                        self.report[group]["root_duration_after_wdist"]
-                    ) / len(self.report[group]["root_duration_after_wdist"])
+            if "duration_depth_0_after_wdist" in self.report[group]:
+                if self.report[group]["duration_depth_0_after_wdist"]:
+                    self.report[group]["duration_depth_0_after_wdist_avg"] = sum(
+                        self.report[group]["duration_depth_0_after_wdist"]
+                    ) / len(self.report[group]["duration_depth_0_after_wdist"])
                 else:
-                    self.report[group]["root_duration_after_wdist_avg"] = float("inf")
-                del self.report[group]["root_duration_after_wdist"]
+                    self.report[group]["duration_depth_0_after_wdist_avg"] = float("inf")
+                del self.report[group]["duration_depth_0_after_wdist"]
+
+            # Calculate averages for depth 1 before/after incident Wasserstein distances
+            if "duration_depth_1_before_wdist" in self.report[group]:
+                if self.report[group]["duration_depth_1_before_wdist"]:
+                    self.report[group]["duration_depth_1_before_wdist_avg"] = sum(
+                        self.report[group]["duration_depth_1_before_wdist"]
+                    ) / len(self.report[group]["duration_depth_1_before_wdist"])
+                else:
+                    self.report[group]["duration_depth_1_before_wdist_avg"] = float("inf")
+                del self.report[group]["duration_depth_1_before_wdist"]
+
+            if "duration_depth_1_after_wdist" in self.report[group]:
+                if self.report[group]["duration_depth_1_after_wdist"]:
+                    self.report[group]["duration_depth_1_after_wdist_avg"] = sum(
+                        self.report[group]["duration_depth_1_after_wdist"]
+                    ) / len(self.report[group]["duration_depth_1_after_wdist"])
+                else:
+                    self.report[group]["duration_depth_1_after_wdist_avg"] = float("inf")
+                del self.report[group]["duration_depth_1_after_wdist"]
 
         return dict(self.report)
 
@@ -720,18 +821,21 @@ class DurationReport(BaseReport):
             compressed_values = data["compressed_values"]
             mape = data["mape"]
 
-            # Plot the data
+            # Plot the data (convert from μs to ms)
             x_indices = range(len(all_buckets))
+            original_values_ms = np.array(original_values) / 1000  # Convert μs to ms
+            compressed_values_ms = np.array(compressed_values) / 1000  # Convert μs to ms
+            
             ax.plot(
                 x_indices,
-                original_values,
+                original_values_ms,
                 label=f"Original {percentile_name}",
                 marker="o",
                 linewidth=2,
             )
             ax.plot(
                 x_indices,
-                compressed_values,
+                compressed_values_ms,
                 label=f"{compressor} {percentile_name}",
                 marker="s",
                 linewidth=2,
@@ -739,7 +843,7 @@ class DurationReport(BaseReport):
 
             ax.set_title(f"{service}\nMAPE: {mape:.2f}%")
             ax.set_xlabel("Time Index")
-            ax.set_ylabel(f"Duration {percentile_name}")
+            ax.set_ylabel(f"Duration {percentile_name} (ms)")
             ax.legend()
             ax.grid(True, alpha=0.3)
             # Set y-axis to start from 0
@@ -757,9 +861,15 @@ class DurationReport(BaseReport):
         plt.tight_layout()
 
         # Save the plot in appropriate subdirectory
-        output_dir = getattr(self, f"duration_{percentile_name.lower()}_dir")
+        if percentile_name.lower() == "p50":
+            output_dir = self.duration_depth_0_p50_dir
+        elif percentile_name.lower() == "p90":
+            output_dir = self.duration_depth_0_p90_dir
+        else:
+            output_dir = self.viz_output_dir  # Fallback
+            
         filename = (
-            f"{app_name}_{compressor}_duration_{percentile_name.lower()}_comparison.png"
+            f"{app_name}_{compressor}_duration_depth_0_{percentile_name.lower()}_comparison.png"
         )
         filepath = output_dir / filename
         plt.savefig(filepath, dpi=300, bbox_inches="tight")

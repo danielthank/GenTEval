@@ -11,22 +11,28 @@ class DurationEvaluator(Evaluator):
         # duration distribution by service
         duration_distribution = defaultdict(list)
         duration_pair_distribution = defaultdict(list)
-        # root span duration by service and time bucket for p50/p90 calculation
-        root_span_time_durations = defaultdict(lambda: defaultdict(list))
+        # depth 0 (root) span duration by service and time bucket for p50/p90 calculation
+        depth_0_span_time_durations = defaultdict(lambda: defaultdict(list))
 
-        # NEW: Root span durations before and after incident injection
-        root_duration_before_incident = defaultdict(list)
-        root_duration_after_incident = defaultdict(list)
+        # Depth 0 (root) span durations before and after incident injection
+        duration_depth_0_before_incident = defaultdict(list)
+        duration_depth_0_after_incident = defaultdict(list)
+        
+        # Depth 1 span durations before and after incident injection
+        duration_depth_1_before_incident = defaultdict(list)
+        duration_depth_1_after_incident = defaultdict(list)
 
         # Get inject_time from labels (convert from seconds to microseconds)
         inject_time_us = int(labels.get("inject_time", 0)) * 1000000
 
-        for trace in dataset.traces.values():
-            # Find root spans (spans with no parent)
-            root_spans = [
-                span for span in trace.values() if span["parentSpanId"] is None
-            ]
+        def get_span_depth(span_id, trace, depth=0):
+            """Calculate the depth of a span in the trace tree"""
+            span = trace.get(span_id)
+            if not span or span["parentSpanId"] is None:
+                return depth
+            return get_span_depth(span["parentSpanId"], trace, depth + 1)
 
+        for trace in dataset.traces.values():
             for span in trace.values():
                 duration = span["duration"]
 
@@ -44,62 +50,67 @@ class DurationEvaluator(Evaluator):
                                 else 1
                             )
 
-            # NEW: Process root spans for before/after incident analysis and time buckets
-            for root_span in root_spans:
-                service = root_span["nodeName"].split("@")[0]
-                span_start_time = root_span["startTime"]
-                span_duration = root_span["duration"]
-                start_time = span_start_time // (60 * 1000000)  # minute bucket
+            # Process depth 0 (root) spans for time buckets and before/after incident analysis
+            for span_id, span in trace.items():
+                if get_span_depth(span_id, trace) == 0:
+                    service = span["nodeName"].split("@")[0]
+                    span_start_time = span["startTime"]
+                    span_duration = span["duration"]
+                    start_time = span_start_time // (60 * 1000000)  # minute bucket
 
-                # collect root span duration by service and time bucket for p50/p90
-                root_span_time_durations[service][start_time].append(span_duration)
+                    # collect depth 0 span duration by service and time bucket for p50/p90
+                    depth_0_span_time_durations[service][start_time].append(span_duration)
+                    
+                    # Determine if this depth 0 span is before or after incident injection
+                    if span_start_time + span_duration < inject_time_us:
+                        # Span ended before incident injection
+                        duration_depth_0_before_incident["all"].append(span_duration)
+                    elif span_start_time >= inject_time_us:
+                        # Span started after incident injection
+                        duration_depth_0_after_incident["all"].append(span_duration)
 
-                # Determine if this root span is before or after incident injection
-                if span_start_time + span_duration < inject_time_us:
-                    # Span ended before incident injection
-                    root_duration_before_incident["all"].append(span_duration)
-                    root_duration_before_incident[service].append(span_duration)
-                elif span_start_time >= inject_time_us:
-                    # Span started after incident injection
-                    root_duration_after_incident["all"].append(span_duration)
-                    root_duration_after_incident[service].append(span_duration)
-                # Note: We skip spans that overlap with the injection time for cleaner analysis
+            # Process depth 1 spans for before/after incident analysis
+            for span_id, span in trace.items():
+                if get_span_depth(span_id, trace) == 1:
+                    span_start_time = span["startTime"]
+                    span_duration = span["duration"]
+                    
+                    # Determine if this depth 1 span is before or after incident injection
+                    if span_start_time + span_duration < inject_time_us:
+                        # Span ended before incident injection
+                        duration_depth_1_before_incident["all"].append(span_duration)
+                    elif span_start_time >= inject_time_us:
+                        # Span started after incident injection
+                        duration_depth_1_after_incident["all"].append(span_duration)
 
-        # calculate p50 and p90 for each root span service and time bucket
-        root_duration_p50_by_service = {}
-        root_duration_p90_by_service = {}
-        for service, time_buckets in root_span_time_durations.items():
-            root_duration_p50_by_service[service] = []
-            root_duration_p90_by_service[service] = []
+        # calculate p50 and p90 for each depth 0 span service and time bucket
+        duration_depth_0_p50_by_service = {}
+        duration_depth_0_p90_by_service = {}
+        for service, time_buckets in depth_0_span_time_durations.items():
+            duration_depth_0_p50_by_service[service] = []
+            duration_depth_0_p90_by_service[service] = []
             for timebucket, durations in time_buckets.items():
                 if durations:  # only calculate if there are durations
                     p50 = np.percentile(durations, 50)
                     p90 = np.percentile(durations, 90)
                     count = len(durations)  # Number of traces in this bucket
-                    root_duration_p50_by_service[service].append(
+                    duration_depth_0_p50_by_service[service].append(
                         {"timebucket": timebucket, "p50": p50, "count": count}
                     )
-                    root_duration_p90_by_service[service].append(
+                    duration_depth_0_p90_by_service[service].append(
                         {"timebucket": timebucket, "p90": p90, "count": count}
                     )
             # sort by timebucket for consistent ordering
-            root_duration_p50_by_service[service].sort(key=lambda x: x["timebucket"])
-            root_duration_p90_by_service[service].sort(key=lambda x: x["timebucket"])
-
-        # print number of root spans before and after incident
-        print(
-            f"Root spans before incident: {len(root_duration_before_incident['all'])}"
-        )
-        print(f"Root spans after incident: {len(root_duration_after_incident['all'])}")
-
-        # print number of spans
-        print(f"Total spans: {sum(len(trace) for trace in dataset.traces.values())}")
+            duration_depth_0_p50_by_service[service].sort(key=lambda x: x["timebucket"])
+            duration_depth_0_p90_by_service[service].sort(key=lambda x: x["timebucket"])
 
         return {
             "duration": duration_distribution,
             "duration_pair": duration_pair_distribution,
-            "root_duration_p50_by_service": root_duration_p50_by_service,
-            "root_duration_p90_by_service": root_duration_p90_by_service,
-            "root_duration_before_incident": root_duration_before_incident,
-            "root_duration_after_incident": root_duration_after_incident,
+            "duration_depth_0_p50_by_service": duration_depth_0_p50_by_service,
+            "duration_depth_0_p90_by_service": duration_depth_0_p90_by_service,
+            "duration_depth_0_before_incident": duration_depth_0_before_incident,
+            "duration_depth_0_after_incident": duration_depth_0_after_incident,
+            "duration_depth_1_before_incident": duration_depth_1_before_incident,
+            "duration_depth_1_after_incident": duration_depth_1_after_incident,
         }

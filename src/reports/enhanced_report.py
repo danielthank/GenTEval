@@ -131,7 +131,7 @@ class EnhancedReportGenerator:
                 metric.endswith("_f1_avg")
                 or metric.endswith("_precision_avg")
                 or metric.endswith("_recall_avg")
-                or metric.endswith("_wdis_avg")
+                or metric.endswith("_wdist_avg")
                 or metric.endswith("_mape_avg")
                 or metric == "size"
             ):
@@ -147,7 +147,15 @@ class EnhancedReportGenerator:
         ordered_metrics = sorted(available_metrics, key=metric_sort_key)
 
         for metric in ordered_metrics:
-            table.add_column(metric.replace("_", " ").title(), justify="right")
+            # Create more readable column names for duration depth metrics
+            column_name = metric.replace("_", " ").title()
+            if "Duration Depth" in column_name:
+                # Make duration depth metrics more readable
+                column_name = column_name.replace("Duration Depth 0", "Depth 0")
+                column_name = column_name.replace("Duration Depth 1", "Depth 1")
+                column_name = column_name.replace("Wdist", "W-Dist")
+                column_name = column_name.replace("Mape", "MAPE")
+            table.add_column(column_name, justify="right")
 
         # Add rows
         for compressor_group, metrics in sorted(report_data.items()):
@@ -156,7 +164,7 @@ class EnhancedReportGenerator:
                 value = metrics[metric]
                 if "f1" in metric or "precision" in metric or "recall" in metric:
                     formatted_value = self.format_metric_value(value, "accuracy")
-                elif "wdis" in metric:
+                elif "wdist" in metric:
                     formatted_value = self.format_metric_value(value, "wasserstein")
                 elif "mape" in metric:
                     formatted_value = self.format_metric_value(value, "mape")
@@ -332,10 +340,18 @@ class EnhancedReportGenerator:
             for compressor_group, metrics in sorted(report_data.items()):
                 print(f"\n{compressor_group}:")
                 for metric, value in sorted(metrics.items()):
+                    # Create more readable metric names
+                    display_name = metric.replace("_", " ").title()
+                    if "Duration Depth" in display_name:
+                        display_name = display_name.replace("Duration Depth 0", "Depth 0")
+                        display_name = display_name.replace("Duration Depth 1", "Depth 1")
+                        display_name = display_name.replace("Wdist", "W-Dist")
+                        display_name = display_name.replace("Mape", "MAPE")
+                    
                     if isinstance(value, float):
-                        print(f"  {metric.replace('_', ' ').title()}: {value:.4f}")
+                        print(f"  {display_name}: {value:.4f}")
                     else:
-                        print(f"  {metric.replace('_', ' ').title()}: {value}")
+                        print(f"  {display_name}: {value}")
             print()
 
         print("Report generation complete!")
