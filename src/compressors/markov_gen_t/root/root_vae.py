@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 import wandb
 
-from .. import CompressedDataset, SerializationFormat
+from ... import CompressedDataset, SerializationFormat
 
 
 class RootVAE(nn.Module):
@@ -148,7 +148,7 @@ class RootVAE(nn.Module):
         return torch.stack(samples, dim=1)
 
 
-class RootDurationSynthesizer:
+class RootDurationVAESynthesizer:
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)

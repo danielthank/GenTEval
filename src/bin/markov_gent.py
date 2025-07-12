@@ -94,7 +94,7 @@ if __name__ == "__main__":
     print(
         f"- Metadata NN: hidden_dim={config.metadata_hidden_dim}, epochs={config.metadata_epochs}"
     )
-    print(f"- Root Duration Model: {'MLP' if config.use_root_mlp else 'VAE'}")
+    print(f"- Root Duration Model: {config.root_model.value}")
     print(f"- Training: batch_size={config.batch_size}, lr={config.learning_rate}")
 
     # Compress the dataset

@@ -9,11 +9,10 @@ from tqdm import tqdm
 from ...dataset import Dataset
 from .. import CompressedDataset, SerializationFormat
 from ..trace import Trace
-from .config import MarkovGenTConfig
+from .config import MarkovGenTConfig, RootModel
 from .metadata_vae import MetadataSynthesizer
 from .mrf_graph import MarkovRandomField
-from .root_mlp import RootDurationMLPSynthesizer
-from .root_vae import RootDurationSynthesizer
+from .root import RootDurationMLPSynthesizer, RootDurationVAESynthesizer, RootDurationTableSynthesizer
 from .start_time_count import StartTimeCountSynthesizer
 
 
@@ -246,11 +245,15 @@ class MarkovGenTCompressor:
             max_children=self.config.max_children,
         )
 
-        # Choose between MLP and VAE for root duration synthesis
-        if self.config.use_root_mlp:
+        # Choose root duration synthesis model
+        if self.config.root_model == RootModel.MLP:
             self.root_duration_synthesizer = RootDurationMLPSynthesizer(self.config)
+        elif self.config.root_model == RootModel.VAE:
+            self.root_duration_synthesizer = RootDurationVAESynthesizer(self.config)
+        elif self.config.root_model == RootModel.TABLE:
+            self.root_duration_synthesizer = RootDurationTableSynthesizer(self.config)
         else:
-            self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
+            raise ValueError(f"Unknown root model: {self.config.root_model}")
 
         self.metadata_synthesizer = MetadataSynthesizer(self.config)
 
@@ -362,11 +365,15 @@ class MarkovGenTCompressor:
         self.start_time_synthesizer = StartTimeCountSynthesizer(self.config)
         self.start_time_synthesizer.load_state_dict(compressed_dataset)
 
-        # Choose between MLP and VAE for root duration synthesis
-        if self.config.use_root_mlp:
+        # Choose root duration synthesis model
+        if self.config.root_model == RootModel.MLP:
             self.root_duration_synthesizer = RootDurationMLPSynthesizer(self.config)
+        elif self.config.root_model == RootModel.VAE:
+            self.root_duration_synthesizer = RootDurationVAESynthesizer(self.config)
+        elif self.config.root_model == RootModel.TABLE:
+            self.root_duration_synthesizer = RootDurationTableSynthesizer(self.config)
         else:
-            self.root_duration_synthesizer = RootDurationSynthesizer(self.config)
+            raise ValueError(f"Unknown root model: {self.config.root_model}")
         self.root_duration_synthesizer.load_state_dict(compressed_dataset)
 
         self.metadata_synthesizer = MetadataSynthesizer(self.config)

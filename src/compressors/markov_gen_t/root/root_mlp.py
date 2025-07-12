@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 import wandb
 
-from .. import CompressedDataset, SerializationFormat
+from ... import CompressedDataset, SerializationFormat
 
 
 class RootMLP(nn.Module):

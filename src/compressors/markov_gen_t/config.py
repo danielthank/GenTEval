@@ -1,4 +1,11 @@
 from dataclasses import dataclass
+from enum import Enum
+
+
+class RootModel(Enum):
+    VAE = "VAE"
+    MLP = "MLP"
+    TABLE = "TABLE"
 
 
 @dataclass
@@ -31,11 +38,22 @@ class MarkovGenTConfig:
     save_decoders_only: bool = True
 
     # Model selection
-    use_root_mlp: bool = True  # If True, use MLP for root duration, else use VAE
+    root_model: RootModel = RootModel.TABLE
 
     @classmethod
     def from_dict(cls, config_dict):
+        # Create a copy to avoid modifying the original
+        config_dict = config_dict.copy()
+        
+        # Convert root_model string to enum if needed
+        if "root_model" in config_dict and isinstance(config_dict["root_model"], str):
+            config_dict["root_model"] = RootModel(config_dict["root_model"])
+            
         return cls(**config_dict)
 
     def to_dict(self):
-        return self.__dict__
+        result = self.__dict__.copy()
+        # Convert enum to string for serialization
+        if "root_model" in result:
+            result["root_model"] = result["root_model"].value
+        return result
