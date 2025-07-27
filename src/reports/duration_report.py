@@ -179,83 +179,75 @@ class DurationReport(BaseReport):
         if not plot:
             return wdist_before, wdist_after
 
-        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-        # Plot original data - before incident (solid lines)
+        # Left subplot: Before incident
         if original_before_data and len(original_before_data) > 0:
             before_sorted = np.sort(np.array(original_before_data) / 1000)  # Convert μs to ms
             before_cdf = np.arange(1, len(before_sorted) + 1) / len(before_sorted)
-            ax.plot(
+            ax1.plot(
                 before_sorted,
                 before_cdf,
-                label=f"Original Before ({len(original_before_data)} traces)",
+                label=f"Original ({len(original_before_data)} traces)",
                 color="blue",
                 linewidth=2.5,
-                linestyle="-",
             )
 
-        # Plot original data - after incident (dashed lines)
-        if original_after_data and len(original_after_data) > 0:
-            after_sorted = np.sort(np.array(original_after_data) / 1000000)  # Convert μs to s
-            after_cdf = np.arange(1, len(after_sorted) + 1) / len(after_sorted)
-            ax.plot(
-                after_sorted,
-                after_cdf,
-                label=f"Original After ({len(original_after_data)} traces)",
-                color="blue",
-                linewidth=2.5,
-                linestyle="--",
-            )
-
-        # Plot compressed data - before incident (solid lines)
         if compressed_before_data and len(compressed_before_data) > 0:
-            comp_before_sorted = np.sort(np.array(compressed_before_data) / 1000000)  # Convert μs to s
+            comp_before_sorted = np.sort(np.array(compressed_before_data) / 1000)  # Convert μs to ms
             comp_before_cdf = np.arange(1, len(comp_before_sorted) + 1) / len(
                 comp_before_sorted
             )
-            ax.plot(
+            ax1.plot(
                 comp_before_sorted,
                 comp_before_cdf,
-                label=f"{compressor} Before ({len(compressed_before_data)} traces)",
+                label=f"{compressor} ({len(compressed_before_data)} traces)",
                 color="red",
                 linewidth=2.5,
-                linestyle="-",
             )
 
-        # Plot compressed data - after incident (dashed lines)
+        ax1.set_xlabel(f"Depth {depth} Span Duration (ms)", fontsize=12)
+        ax1.set_ylabel("Cumulative Probability", fontsize=12)
+        ax1.set_title(f"Before Incident\nW-Distance: {wdist_before:.4f}", fontsize=12, fontweight="bold")
+        ax1.legend(loc="best", fontsize=10, framealpha=0.9)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_xlim(0, 10000)  # Span duration range: 0 to 10000 ms
+
+        # Right subplot: After incident
+        if original_after_data and len(original_after_data) > 0:
+            after_sorted = np.sort(np.array(original_after_data) / 1000)  # Convert μs to ms
+            after_cdf = np.arange(1, len(after_sorted) + 1) / len(after_sorted)
+            ax2.plot(
+                after_sorted,
+                after_cdf,
+                label=f"Original ({len(original_after_data)} traces)",
+                color="blue",
+                linewidth=2.5,
+            )
+
         if compressed_after_data and len(compressed_after_data) > 0:
-            comp_after_sorted = np.sort(np.array(compressed_after_data) / 1000000)  # Convert μs to s
+            comp_after_sorted = np.sort(np.array(compressed_after_data) / 1000)  # Convert μs to ms
             comp_after_cdf = np.arange(1, len(comp_after_sorted) + 1) / len(
                 comp_after_sorted
             )
-            ax.plot(
+            ax2.plot(
                 comp_after_sorted,
                 comp_after_cdf,
-                label=f"{compressor} After ({len(compressed_after_data)} traces)",
+                label=f"{compressor} ({len(compressed_after_data)} traces)",
                 color="red",
                 linewidth=2.5,
-                linestyle="--",
             )
 
-        ax.set_xlabel(f"Depth {depth} Span Duration (ms)", fontsize=12)
-        ax.set_ylabel("Cumulative Probability", fontsize=12)
-        ax.set_title(
-            f"Depth {depth} Span Duration CDF - Before vs After Incident",
-            fontsize=14,
-            fontweight="bold",
-        )
+        ax2.set_xlabel(f"Depth {depth} Span Duration (ms)", fontsize=12)
+        ax2.set_ylabel("Cumulative Probability", fontsize=12)
+        ax2.set_title(f"After Incident\nW-Distance: {wdist_after:.4f}", fontsize=12, fontweight="bold")
+        ax2.legend(loc="best", fontsize=10, framealpha=0.9)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_xlim(0, 10000)  # Span duration range: 0 to 10000 ms
 
-        # Enhanced legend with visual grouping
-        ax.legend(loc="best", fontsize=10, framealpha=0.9)
-        ax.grid(True, alpha=0.3)
-        ax.set_xlim(
-            0, 1000
-        )  # Span duration range: 0 to 1000 ms (1 second)
-
-        # Overall title with Wasserstein distances
+        # Overall title
         fig.suptitle(
-            f"{app_name} - {compressor}\n"
-            f"W-Distance Before: {wdist_before:.4f}, W-Distance After: {wdist_after:.4f}",
+            f"{app_name} - {compressor}\nDepth {depth} Span Duration CDF - Before vs After Incident",
             fontsize=16,
             fontweight="bold",
         )

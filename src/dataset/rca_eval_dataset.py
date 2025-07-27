@@ -78,7 +78,7 @@ class RCAEvalDataset(Dataset):
                 valid_trace_group.set_index("spanID")
                 .apply(
                     lambda row: {
-                        "nodeName": f"{row['serviceName']}@{row['methodName']}@{row['operationName']}",
+                        "nodeName": f"{row['serviceName']}!@#{row['methodName']}!@#{row['operationName']}",
                         "startTime": row["startTime"],
                         "duration": row["duration"],
                         "parentSpanId": None
@@ -100,7 +100,7 @@ class RCAEvalDataset(Dataset):
 
     def _traces_to_spans(self):
         def parse_node_name(node_name):
-            parts = node_name.split("@")
+            parts = node_name.split("!@#")
             return [None if part == "nan" else part for part in parts]
 
         rows = []

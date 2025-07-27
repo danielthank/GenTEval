@@ -23,6 +23,6 @@ if __name__ == "__main__":
     dataset = RCAEvalDataset(run_dir)
     dataset.save(dataset_dir)
     labels = {}
-    with open(run_dir.joinpath("inject_time.txt")) as f:
-        labels["inject_time"] = int(f.read().strip())
+    if run_dir.joinpath("labels.pkl").exists():
+        labels = pickle.load(open(run_dir.joinpath("labels.pkl"), "rb"))
     pickle.dump(labels, open(dataset_dir.joinpath("labels.pkl"), "wb"))

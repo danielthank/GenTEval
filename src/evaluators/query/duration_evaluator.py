@@ -17,7 +17,7 @@ class DurationEvaluator(Evaluator):
         # Depth 0 (root) span durations before and after incident injection
         duration_depth_0_before_incident = defaultdict(list)
         duration_depth_0_after_incident = defaultdict(list)
-        
+
         # Depth 1 span durations before and after incident injection
         duration_depth_1_before_incident = defaultdict(list)
         duration_depth_1_after_incident = defaultdict(list)
@@ -53,14 +53,16 @@ class DurationEvaluator(Evaluator):
             # Process depth 0 (root) spans for time buckets and before/after incident analysis
             for span_id, span in trace.items():
                 if get_span_depth(span_id, trace) == 0:
-                    service = span["nodeName"].split("@")[0]
+                    service = span["nodeName"].split("!@#")[0]
                     span_start_time = span["startTime"]
                     span_duration = span["duration"]
                     start_time = span_start_time // (60 * 1000000)  # minute bucket
 
                     # collect depth 0 span duration by service and time bucket for p50/p90
-                    depth_0_span_time_durations[service][start_time].append(span_duration)
-                    
+                    depth_0_span_time_durations[service][start_time].append(
+                        span_duration
+                    )
+
                     # Determine if this depth 0 span is before or after incident injection
                     if span_start_time + span_duration < inject_time_us:
                         # Span ended before incident injection
@@ -74,7 +76,7 @@ class DurationEvaluator(Evaluator):
                 if get_span_depth(span_id, trace) == 1:
                     span_start_time = span["startTime"]
                     span_duration = span["duration"]
-                    
+
                     # Determine if this depth 1 span is before or after incident injection
                     if span_start_time + span_duration < inject_time_us:
                         # Span ended before incident injection
