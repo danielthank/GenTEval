@@ -422,27 +422,34 @@ class MetadataSynthesizer:
         with torch.no_grad():
             batch_size = len(parent_start_times)
 
-            # Encode all node names
-            parent_node_indices = []
-            child_node_indices = []
+            # Encode all node names in batch
+            try:
+                parent_node_indices = self.node_encoder.transform(parent_nodes)
+            except ValueError:
+                parent_node_indices = []
+                for parent_node in parent_nodes:
+                    try:
+                        parent_node_idx = self.node_encoder.transform([parent_node])[0]
+                    except ValueError:
+                        parent_node_idx = np.random.randint(
+                            0, len(self.node_encoder.classes_)
+                        )
+                    parent_node_indices.append(parent_node_idx)
+                parent_node_indices = np.array(parent_node_indices)
 
-            for parent_node, child_node in zip(parent_nodes, child_nodes):
-                try:
-                    parent_node_idx = self.node_encoder.transform([parent_node])[0]
-                except ValueError:
-                    parent_node_idx = np.random.randint(
-                        0, len(self.node_encoder.classes_)
-                    )
-
-                try:
-                    child_node_idx = self.node_encoder.transform([child_node])[0]
-                except ValueError:
-                    child_node_idx = np.random.randint(
-                        0, len(self.node_encoder.classes_)
-                    )
-
-                parent_node_indices.append(parent_node_idx)
-                child_node_indices.append(child_node_idx)
+            try:
+                child_node_indices = self.node_encoder.transform(child_nodes)
+            except ValueError:
+                child_node_indices = []
+                for child_node in child_nodes:
+                    try:
+                        child_node_idx = self.node_encoder.transform([child_node])[0]
+                    except ValueError:
+                        child_node_idx = np.random.randint(
+                            0, len(self.node_encoder.classes_)
+                        )
+                    child_node_indices.append(child_node_idx)
+                child_node_indices = np.array(child_node_indices)
 
             # Scale all inputs
             scaled_start_times = [

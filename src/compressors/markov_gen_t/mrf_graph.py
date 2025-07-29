@@ -47,7 +47,9 @@ class MarkovRandomField:
         self.order = order
         self.max_depth = max_depth
         self.max_children = max_children
-        self.node_weight = node_weight  # This is your lambda
+        self.node_weight = node_weight
+        self.min_nodes_count = None
+        self.max_nodes_count = None
         self.logger = logging.getLogger(__name__)
 
         # Node features and relationships
@@ -129,6 +131,26 @@ class MarkovRandomField:
         """Learn MRF parameters from traces."""
         self.logger.info("Training Markov Random Field for graph structure modeling")
 
+        # Calculate min and max node counts from the dataset
+        node_counts = []
+        for trace in traces:
+            node_count = len(trace)
+            node_counts.append(node_count)
+
+        if node_counts:
+            self.min_nodes_count = min(node_counts)
+            self.max_nodes_count = max(node_counts)
+            self.logger.info(
+                f"Dataset node count range: {self.min_nodes_count} - {self.max_nodes_count}"
+            )
+        else:
+            # Fallback defaults if no traces
+            self.min_nodes_count = 1
+            self.max_nodes_count = 50
+            self.logger.warning(
+                "No traces provided, using default node count range: 1 - 50"
+            )
+
         # Extract features and collect statistics directly
         for trace in traces:
             self._extract_graph_features(trace)
@@ -194,29 +216,68 @@ class MarkovRandomField:
         for node_key, count in node_counts.items():
             self.node_potentials[node_key] = np.log(count / total_nodes)
 
-    def generate_tree_structure(self, max_nodes: int = 50) -> TreeNode:
-        """Generate tree structure using MRF sampling."""
+    def generate_tree_structure(self, max_nodes: int = None) -> TreeNode:
+        """Generate tree structure using MRF sampling with reject sampling for node count constraints."""
         if not self.is_trained:
             self.logger.warning("MRF not trained, cannot generate tree structure")
             return None
 
-        return self._sample_tree_structure(max_nodes)
+        # Use calculated or default values for constraints
+        min_count = self.min_nodes_count if self.min_nodes_count is not None else 1
+        max_count = self.max_nodes_count if self.max_nodes_count is not None else 50
 
-    def _sample_tree_structure(self, max_nodes: int) -> TreeNode:
-        """Sample tree structure from MRF using Gibbs sampling approach."""
+        # Reject sampling to ensure generated tree meets node count constraints
+        max_attempts = 100  # Prevent infinite loops
+        attempt = 0
+
+        while attempt < max_attempts:
+            tree, node_count = self._sample_tree_structure(max_nodes)
+            if tree is None:
+                attempt += 1
+                continue
+
+            # Check if the tree meets our constraints
+            if min_count <= node_count <= max_count:
+                self.logger.debug(
+                    f"Generated tree with {node_count} nodes (attempt {attempt + 1})"
+                )
+                return tree
+
+            self.logger.debug(
+                f"Rejecting tree with {node_count} nodes (attempt {attempt + 1})"
+            )
+            attempt += 1
+
+        # If we couldn't generate a valid tree, log warning and return the last attempt
+        self.logger.warning(
+            f"Could not generate tree within node count constraints "
+            f"({min_count}-{max_count}) after {max_attempts} attempts"
+        )
+        return tree if "tree" in locals() else None
+
+    def _sample_tree_structure(self, max_nodes: int) -> tuple[TreeNode, int]:
+        """Sample tree structure from MRF using Gibbs sampling approach.
+
+        Returns:
+            tuple: (tree_root, node_count) or (None, 0) if failed
+        """
+        # Use class default if max_nodes not provided
+        if max_nodes is None:
+            max_nodes = self.max_nodes_count
+
         # Sample root node based on node potentials
         root_features = self._sample_root_node()
         if root_features is None:
-            return None
+            return None, 0
 
         node_name, child_cnt, depth = root_features
         root = TreeNode(node_name, depth, child_cnt)
         nodes_generated = 1
 
         # Build tree using recursive sampling
-        self._sample_subtree(root, max_nodes, nodes_generated)
+        final_node_count = self._sample_subtree(root, max_nodes, nodes_generated)
 
-        return root
+        return root, final_node_count
 
     def _sample_root_node(self):
         """Sample root node (depth 0) from learned distribution."""
@@ -362,6 +423,14 @@ class MarkovRandomField:
                     "max_depth": (self.max_depth, SerializationFormat.MSGPACK),
                     "max_children": (self.max_children, SerializationFormat.MSGPACK),
                     "node_weight": (self.node_weight, SerializationFormat.MSGPACK),
+                    "min_nodes_count": (
+                        self.min_nodes_count,
+                        SerializationFormat.MSGPACK,
+                    ),
+                    "max_nodes_count": (
+                        self.max_nodes_count,
+                        SerializationFormat.MSGPACK,
+                    ),
                     "is_trained": (self.is_trained, SerializationFormat.MSGPACK),
                 }
             ),
@@ -383,6 +452,8 @@ class MarkovRandomField:
         self.max_depth = mrf_data["max_depth"]
         self.max_children = mrf_data["max_children"]
         self.node_weight = mrf_data["node_weight"]
+        self.min_nodes_count = mrf_data["min_nodes_count"]
+        self.max_nodes_count = mrf_data["max_nodes_count"]
         self.is_trained = mrf_data["is_trained"]
 
         # Initialize empty training data structures (not needed for generation)

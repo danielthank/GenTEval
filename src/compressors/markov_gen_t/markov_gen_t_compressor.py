@@ -12,7 +12,11 @@ from ..trace import Trace
 from .config import MarkovGenTConfig, RootModel
 from .metadata_vae import MetadataSynthesizer
 from .mrf_graph import MarkovRandomField
-from .root import RootDurationMLPSynthesizer, RootDurationVAESynthesizer, RootDurationTableSynthesizer
+from .root import (
+    RootDurationMLPSynthesizer,
+    RootDurationTableSynthesizer,
+    RootDurationVAESynthesizer,
+)
 from .start_time_count import StartTimeCountSynthesizer
 
 

@@ -13,6 +13,8 @@ class DurationEvaluator(Evaluator):
         duration_pair_distribution = defaultdict(list)
         # depth 0 (root) span duration by service and time bucket for p50/p90 calculation
         depth_0_span_time_durations = defaultdict(lambda: defaultdict(list))
+        # depth 1 span duration by service and time bucket for p50/p90 calculation
+        depth_1_span_time_durations = defaultdict(lambda: defaultdict(list))
 
         # Depth 0 (root) span durations before and after incident injection
         duration_depth_0_before_incident = defaultdict(list)
@@ -74,8 +76,15 @@ class DurationEvaluator(Evaluator):
             # Process depth 1 spans for before/after incident analysis
             for span_id, span in trace.items():
                 if get_span_depth(span_id, trace) == 1:
+                    service = span["nodeName"].split("!@#")[0]
                     span_start_time = span["startTime"]
                     span_duration = span["duration"]
+                    start_time = span_start_time // (60 * 1000000)  # minute bucket
+
+                    # collect depth 1 span duration by service and time bucket for p50/p90
+                    depth_1_span_time_durations[service][start_time].append(
+                        span_duration
+                    )
 
                     # Determine if this depth 1 span is before or after incident injection
                     if span_start_time + span_duration < inject_time_us:
@@ -106,11 +115,34 @@ class DurationEvaluator(Evaluator):
             duration_depth_0_p50_by_service[service].sort(key=lambda x: x["timebucket"])
             duration_depth_0_p90_by_service[service].sort(key=lambda x: x["timebucket"])
 
+        # calculate p50 and p90 for each depth 1 span service and time bucket
+        duration_depth_1_p50_by_service = {}
+        duration_depth_1_p90_by_service = {}
+        for service, time_buckets in depth_1_span_time_durations.items():
+            duration_depth_1_p50_by_service[service] = []
+            duration_depth_1_p90_by_service[service] = []
+            for timebucket, durations in time_buckets.items():
+                if durations:  # only calculate if there are durations
+                    p50 = np.percentile(durations, 50)
+                    p90 = np.percentile(durations, 90)
+                    count = len(durations)  # Number of traces in this bucket
+                    duration_depth_1_p50_by_service[service].append(
+                        {"timebucket": timebucket, "p50": p50, "count": count}
+                    )
+                    duration_depth_1_p90_by_service[service].append(
+                        {"timebucket": timebucket, "p90": p90, "count": count}
+                    )
+            # sort by timebucket for consistent ordering
+            duration_depth_1_p50_by_service[service].sort(key=lambda x: x["timebucket"])
+            duration_depth_1_p90_by_service[service].sort(key=lambda x: x["timebucket"])
+
         return {
             "duration": duration_distribution,
             "duration_pair": duration_pair_distribution,
             "duration_depth_0_p50_by_service": duration_depth_0_p50_by_service,
             "duration_depth_0_p90_by_service": duration_depth_0_p90_by_service,
+            "duration_depth_1_p50_by_service": duration_depth_1_p50_by_service,
+            "duration_depth_1_p90_by_service": duration_depth_1_p90_by_service,
             "duration_depth_0_before_incident": duration_depth_0_before_incident,
             "duration_depth_0_after_incident": duration_depth_0_after_incident,
             "duration_depth_1_before_incident": duration_depth_1_before_incident,

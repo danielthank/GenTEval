@@ -133,6 +133,7 @@ class EnhancedReportGenerator:
                 or metric.endswith("_recall_avg")
                 or metric.endswith("_wdist_avg")
                 or metric.endswith("_mape_avg")
+                or metric.endswith("_cosine_sim_avg")
                 or metric == "size"
             ):
                 available_metrics.append(metric)
@@ -155,6 +156,7 @@ class EnhancedReportGenerator:
                 column_name = column_name.replace("Duration Depth 1", "Depth 1")
                 column_name = column_name.replace("Wdist", "W-Dist")
                 column_name = column_name.replace("Mape", "MAPE")
+                column_name = column_name.replace("Cosine Sim", "Cos-Sim")
             table.add_column(column_name, justify="right")
 
         # Add rows
@@ -168,6 +170,8 @@ class EnhancedReportGenerator:
                     formatted_value = self.format_metric_value(value, "wasserstein")
                 elif "mape" in metric:
                     formatted_value = self.format_metric_value(value, "mape")
+                elif "cosine_sim" in metric:
+                    formatted_value = self.format_metric_value(value, "accuracy")
                 elif "size" in metric:
                     formatted_value = self.format_metric_value(value, "size")
                 else:
@@ -343,11 +347,16 @@ class EnhancedReportGenerator:
                     # Create more readable metric names
                     display_name = metric.replace("_", " ").title()
                     if "Duration Depth" in display_name:
-                        display_name = display_name.replace("Duration Depth 0", "Depth 0")
-                        display_name = display_name.replace("Duration Depth 1", "Depth 1")
+                        display_name = display_name.replace(
+                            "Duration Depth 0", "Depth 0"
+                        )
+                        display_name = display_name.replace(
+                            "Duration Depth 1", "Depth 1"
+                        )
                         display_name = display_name.replace("Wdist", "W-Dist")
                         display_name = display_name.replace("Mape", "MAPE")
-                    
+                        display_name = display_name.replace("Cosine Sim", "Cos-Sim")
+
                     if isinstance(value, float):
                         print(f"  {display_name}: {value:.4f}")
                     else:

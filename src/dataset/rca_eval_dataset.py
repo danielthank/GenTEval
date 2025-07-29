@@ -65,11 +65,10 @@ class RCAEvalDataset(Dataset):
         self._traces = {}
         for trace_id, trace_group in filtered_df.groupby("traceID"):
             all_spans_set = set(trace_group["spanID"])
-            valid_parent_mask = trace_group["parentSpanID"].isna() | trace_group[
-                "parentSpanID"
-            ].isin(all_spans_set)
+            # valid_parent_mask = trace_group["parentSpanID"].isna() | trace_group["parentSpanID"].isin(all_spans_set)
 
-            valid_trace_group = trace_group[valid_parent_mask]
+            # valid_trace_group = trace_group[valid_parent_mask]
+            valid_trace_group = trace_group
             if valid_trace_group.empty:
                 continue
 
