@@ -398,7 +398,3 @@ Examples:
         print(f"Error during analysis: {e}")
         raise e
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

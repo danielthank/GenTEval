@@ -4,7 +4,7 @@ import pickle
 
 from ..dataset.rca_eval_dataset import RCAEvalDataset
 
-if __name__ == "__main__":
+def main():
     argparser = argparse.ArgumentParser(description="Normalize trace data")
     argparser.add_argument(
         "--run_dir",

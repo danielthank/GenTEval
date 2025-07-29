@@ -11,7 +11,7 @@ from ..reports import (
 )
 from .utils import run_dirs
 
-if __name__ == "__main__":
+def main():
     argparser = argparse.ArgumentParser(
         description="Generate evaluation reports for GenTEval compression methods",
         formatter_class=argparse.RawDescriptionHelpFormatter,

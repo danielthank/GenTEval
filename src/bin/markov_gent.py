@@ -13,7 +13,7 @@ from .logger import setup_logging
 
 setup_logging()
 
-if __name__ == "__main__":
+def main():
     argparser = argparse.ArgumentParser(
         description="Compress and decompress traces using MarkovGenT"
     )

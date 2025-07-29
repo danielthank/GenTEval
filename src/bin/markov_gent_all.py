@@ -134,15 +134,11 @@ async def markov_gent_task_factory(
     )
 
 
-async def main():
-    await run_standard_processing(
+def main():
+    asyncio.run(run_standard_processing(
         description="Run MarkovGenT on all traces",
         task_factory=markov_gent_task_factory,
         additional_args_parser=add_markov_gent_arguments,
         extra_config_display=get_markov_gent_config,
         progress_description="MarkovGenT Processing",
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    ))

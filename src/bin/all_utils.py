@@ -129,9 +129,7 @@ class ScriptProcessor:
                 process = await asyncio.create_subprocess_exec(
                     "uv",
                     "run",
-                    "python",
-                    "-m",
-                    f"src.bin.{self.module_name}",
+                    self.module_name,
                     *args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,

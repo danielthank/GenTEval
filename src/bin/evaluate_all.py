@@ -48,9 +48,7 @@ async def evaluate_task(
             process = await asyncio.create_subprocess_exec(
                 "uv",
                 "run",
-                "python",
-                "-m",
-                "src.bin.evaluate",
+                "evaluate",
                 "--dataset_dir",
                 str(dataset_dir),
                 "--labels_path",
@@ -86,7 +84,7 @@ async def evaluate_task(
             return False
 
 
-async def main():
+async def evaluate_all():
     # Custom argument parsing for evaluate_all
     parser = create_standard_parser("Evaluate all datasets")
     parser.add_argument(
@@ -194,5 +192,5 @@ async def main():
     print(f"Processing complete. Successful: {successful}, Failed: {failed}")
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def main():
+    asyncio.run(evaluate_all())

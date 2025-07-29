@@ -76,15 +76,11 @@ async def head_sampling_task_factory(
     )
 
 
-async def main():
-    await run_standard_processing(
+def main():
+    asyncio.run(run_standard_processing(
         description="Run head sampling on all datasets",
         task_factory=head_sampling_task_factory,
         additional_args_parser=add_head_sampling_arguments,
         extra_config_display=get_head_sampling_config,
         progress_description="Head Sampling Processing",
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    ))

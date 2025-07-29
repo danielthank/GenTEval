@@ -240,7 +240,7 @@ wheels = [
 [[package]]
 name = "genteval"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "colorama" },
     { name = "matplotlib" },
