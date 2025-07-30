@@ -1,13 +1,11 @@
 import logging
-from typing import List
 
 import numpy as np
 import torch
-import torch.nn as nn
-from sklearn.preprocessing import LabelEncoder
-from tqdm import tqdm
-
 import wandb
+from sklearn.preprocessing import LabelEncoder
+from torch import nn
+from tqdm import tqdm
 
 from ... import CompressedDataset, SerializationFormat
 
@@ -199,8 +197,8 @@ class RootDurationMLPSynthesizer:
                 wandb.log({"root_mlp_loss": avg_loss, "root_mlp_epoch": epoch})
 
     def synthesize_root_duration_batch(
-        self, start_times: List[float], node_names: List[str], num_samples: int = 1
-    ) -> List[float]:
+        self, start_times: list[float], node_names: list[str], num_samples: int = 1
+    ) -> list[float]:
         """Generate root span durations for multiple start times and node names at once.
 
         Args:

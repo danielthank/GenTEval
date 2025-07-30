@@ -1,6 +1,6 @@
 """Size report generator for compressed data analysis."""
 
-from typing import Any, Dict
+from typing import Any
 
 from .base_report import BaseReport
 
@@ -8,7 +8,7 @@ from .base_report import BaseReport
 class SizeReport(BaseReport):
     """Report generator for compressed data size analysis."""
 
-    def generate(self, run_dirs) -> Dict[str, Any]:
+    def generate(self, run_dirs) -> dict[str, Any]:
         """Generate size report."""
 
         for app_name, service, fault, run in run_dirs():

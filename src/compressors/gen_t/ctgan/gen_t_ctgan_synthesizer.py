@@ -55,12 +55,11 @@ class GenTCTGANSynthesizer(CTGANSynthesizer):
         """
         if conditions is None:
             return self._model.sample(num_rows)
-        else:
-            sampled = self._model.sample(num_rows, conditions=conditions)
-            for column, value in conditions.items():
-                if column in sampled.columns:
-                    sampled[column] = value
-            return sampled
+        sampled = self._model.sample(num_rows, conditions=conditions)
+        for column, value in conditions.items():
+            if column in sampled.columns:
+                sampled[column] = value
+        return sampled
 
     def _sample_with_conditions(
         self,
@@ -91,7 +90,7 @@ class GenTCTGANSynthesizer(CTGANSynthesizer):
             if not isinstance(group, tuple):
                 group = [group]
 
-            condition = dict(zip(condition_columns, group))
+            condition = dict(zip(condition_columns, group, strict=False))
             condition_df = dataframe.iloc[0].to_frame().T
             try:
                 transformed_condition = self._data_processor.transform(
@@ -134,7 +133,7 @@ class GenTCTGANSynthesizer(CTGANSynthesizer):
                         transformed_group = [transformed_group]
 
                     transformed_condition = dict(
-                        zip(transformed_columns, transformed_group)
+                        zip(transformed_columns, transformed_group, strict=False)
                     )
                     sampled_rows = self._conditionally_sample_rows(
                         dataframe=transformed_dataframe,

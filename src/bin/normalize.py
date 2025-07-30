@@ -4,6 +4,7 @@ import pickle
 
 from ..dataset.rca_eval_dataset import RCAEvalDataset
 
+
 def main():
     argparser = argparse.ArgumentParser(description="Normalize trace data")
     argparser.add_argument(

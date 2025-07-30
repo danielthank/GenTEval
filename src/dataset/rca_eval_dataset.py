@@ -1,6 +1,5 @@
 import pathlib
 import pickle
-from typing import Optional
 
 import pandas as pd
 
@@ -8,7 +7,7 @@ from .dataset import Dataset
 
 
 class RCAEvalDataset(Dataset):
-    def __init__(self, run_dir: Optional[pathlib.Path] = None):
+    def __init__(self, run_dir: pathlib.Path | None = None):
         super().__init__()
         self.run_dir = run_dir
         self._spans = None
@@ -64,9 +63,8 @@ class RCAEvalDataset(Dataset):
         filtered_df = self._spans.dropna(subset=["startTime", "duration"])
         self._traces = {}
         for trace_id, trace_group in filtered_df.groupby("traceID"):
-            all_spans_set = set(trace_group["spanID"])
+            # all_spans_set = set(trace_group["spanID"])
             # valid_parent_mask = trace_group["parentSpanID"].isna() | trace_group["parentSpanID"].isin(all_spans_set)
-
             # valid_trace_group = trace_group[valid_parent_mask]
             valid_trace_group = trace_group
             if valid_trace_group.empty:

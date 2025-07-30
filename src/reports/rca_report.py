@@ -1,6 +1,6 @@
 """Unified RCA report generator."""
 
-from typing import Any, Dict
+from typing import Any
 
 from .base_report import BaseReport
 
@@ -34,7 +34,7 @@ class RCAReport(BaseReport):
         """
         return answer in ranks[:k]
 
-    def generate(self, run_dirs) -> Dict[str, Any]:
+    def generate(self, run_dirs) -> dict[str, Any]:
         """Generate RCA report."""
         services = set()
 

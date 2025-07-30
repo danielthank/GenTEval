@@ -4,13 +4,13 @@ import json
 import pathlib
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 
 class BaseReport(ABC):
     """Base class for all report generators."""
 
-    def __init__(self, compressors: List[str], root_dir: pathlib.Path):
+    def __init__(self, compressors: list[str], root_dir: pathlib.Path):
         """
         Initialize the report generator.
 
@@ -23,7 +23,7 @@ class BaseReport(ABC):
         self.report = defaultdict(lambda: defaultdict(list))
 
     @abstractmethod
-    def generate(self, run_dirs) -> Dict[str, Any]:
+    def generate(self, run_dirs) -> dict[str, Any]:
         """
         Generate the report.
 
@@ -33,9 +33,8 @@ class BaseReport(ABC):
         Returns:
             Dictionary containing the report data
         """
-        pass
 
-    def load_json_file(self, file_path: pathlib.Path) -> Dict[str, Any]:
+    def load_json_file(self, file_path: pathlib.Path) -> dict[str, Any]:
         """
         Load and parse a JSON file.
 

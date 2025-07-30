@@ -1,6 +1,5 @@
 import logging
 from collections import Counter
-from typing import Dict
 
 import numpy as np
 
@@ -22,8 +21,8 @@ class StartTimeCountSynthesizer:
         self.logger = logging.getLogger(__name__)
 
         # Store time bucket distribution
-        self.bucket_counts: Dict[int, int] = {}
-        self.bucket_probabilities: Dict[int, float] = {}
+        self.bucket_counts: dict[int, int] = {}
+        self.bucket_probabilities: dict[int, float] = {}
         self.total_samples = 0
 
         # Time bucket size in microseconds (1 minute)
@@ -137,7 +136,7 @@ class StartTimeCountSynthesizer:
 
         return np.array(start_times)
 
-    def get_bucket_statistics(self) -> Dict:
+    def get_bucket_statistics(self) -> dict:
         """Get statistics about the learned time bucket distribution."""
         if not self.bucket_counts:
             return {}

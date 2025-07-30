@@ -2,7 +2,8 @@
 
 import json
 import pathlib
-from typing import Any, Dict
+from typing import Any
+
 
 try:
     from rich import box
@@ -67,40 +68,35 @@ class EnhancedReportGenerator:
             # Higher is better (0-1 range) - includes precision and recall
             if value >= 0.8:
                 return Text(f"{value:.4f}", style="bold green")
-            elif value >= 0.6:
+            if value >= 0.6:
                 return Text(f"{value:.4f}", style="yellow")
-            else:
-                return Text(f"{value:.4f}", style="red")
-        elif metric_type == "wasserstein":
+            return Text(f"{value:.4f}", style="red")
+        if metric_type == "wasserstein":
             # Lower is better
             if value <= 0.1:
                 return Text(f"{value:.4f}", style="bold green")
-            elif value <= 0.3:
+            if value <= 0.3:
                 return Text(f"{value:.4f}", style="yellow")
-            else:
-                return Text(f"{value:.4f}", style="red")
-        elif metric_type == "mape":
+            return Text(f"{value:.4f}", style="red")
+        if metric_type == "mape":
             # Lower is better (percentage error)
             if value <= 5.0:
                 return Text(f"{value:.2f}%", style="bold green")
-            elif value <= 15.0:
+            if value <= 15.0:
                 return Text(f"{value:.2f}%", style="yellow")
-            else:
-                return Text(f"{value:.2f}%", style="red")
-        elif metric_type == "size":
+            return Text(f"{value:.2f}%", style="red")
+        if metric_type == "size":
             # Format file sizes nicely
             if value >= 1024 * 1024 * 1024:  # GB
                 return Text(f"{value / (1024**3):.2f} GB", style="cyan")
-            elif value >= 1024 * 1024:  # MB
+            if value >= 1024 * 1024:  # MB
                 return Text(f"{value / (1024**2):.2f} MB", style="cyan")
-            elif value >= 1024:  # KB
+            if value >= 1024:  # KB
                 return Text(f"{value / 1024:.2f} KB", style="cyan")
-            else:
-                return Text(f"{value} B", style="cyan")
-        else:
-            return Text(f"{value:.4f}", style="white")
+            return Text(f"{value} B", style="cyan")
+        return Text(f"{value:.4f}", style="white")
 
-    def create_summary_table(self, report_data: Dict[str, Any], title: str) -> "Table":
+    def create_summary_table(self, report_data: dict[str, Any], title: str) -> "Table":
         """Create a summary table for a specific metric type."""
         table = Table(title=title, box=box.ROUNDED, title_style="bold magenta")
 
@@ -142,8 +138,7 @@ class EnhancedReportGenerator:
         def metric_sort_key(metric):
             if metric in operation_metric_order:
                 return (0, operation_metric_order.index(metric))
-            else:
-                return (1, metric)  # Other metrics come after, sorted alphabetically
+            return (1, metric)  # Other metrics come after, sorted alphabetically
 
         ordered_metrics = sorted(available_metrics, key=metric_sort_key)
 
@@ -182,7 +177,7 @@ class EnhancedReportGenerator:
 
         return table
 
-    def create_rca_table(self, report_data: Dict[str, Any]) -> "Table":
+    def create_rca_table(self, report_data: dict[str, Any]) -> "Table":
         """Create a specialized table for RCA metrics."""
         table = Table(
             title="RCA Performance Metrics", box=box.ROUNDED, title_style="bold magenta"
@@ -210,7 +205,7 @@ class EnhancedReportGenerator:
         return table
 
     def create_performance_overview(
-        self, all_reports: Dict[str, Dict[str, Any]]
+        self, all_reports: dict[str, dict[str, Any]]
     ) -> "Panel":
         """Create a performance overview panel."""
         overview_text = []
@@ -265,7 +260,7 @@ class EnhancedReportGenerator:
 
         return overview_panel
 
-    def print_enhanced_report(self, all_reports: Dict[str, Dict[str, Any]]):
+    def print_enhanced_report(self, all_reports: dict[str, dict[str, Any]]):
         """Print enhanced, beautifully formatted reports."""
 
         if RICH_AVAILABLE:
@@ -273,7 +268,7 @@ class EnhancedReportGenerator:
         else:
             self._print_fallback_report(all_reports)
 
-    def _print_rich_report(self, all_reports: Dict[str, Dict[str, Any]]):
+    def _print_rich_report(self, all_reports: dict[str, dict[str, Any]]):
         """Print enhanced report using Rich formatting."""
         # Print header
         self.console.print()
@@ -315,7 +310,7 @@ class EnhancedReportGenerator:
         self.console.print("✨ Report generation complete!", style="bold green")
         self.console.print()
 
-    def _print_fallback_report(self, all_reports: Dict[str, Dict[str, Any]]):
+    def _print_fallback_report(self, all_reports: dict[str, dict[str, Any]]):
         """Print report using basic formatting when Rich is not available."""
         print()
         print("=" * 74)
@@ -367,7 +362,7 @@ class EnhancedReportGenerator:
         print()
 
     def save_enhanced_json_report(
-        self, all_reports: Dict[str, Dict[str, Any]], output_path: pathlib.Path
+        self, all_reports: dict[str, dict[str, Any]], output_path: pathlib.Path
     ):
         """Save an enhanced JSON report with metadata."""
         enhanced_report = {

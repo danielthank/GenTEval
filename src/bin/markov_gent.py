@@ -11,6 +11,7 @@ from ..compressors.markov_gen_t import (
 from ..dataset import RCAEvalDataset
 from .logger import setup_logging
 
+
 setup_logging()
 
 

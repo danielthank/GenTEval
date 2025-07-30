@@ -1,6 +1,6 @@
 """Span count report generator with Wasserstein distance visualization."""
 
-from typing import Any, Dict
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -75,7 +75,7 @@ class SpanCountReport(BaseReport):
 
         return wdist
 
-    def generate(self, run_dirs) -> Dict[str, Any]:
+    def generate(self, run_dirs) -> dict[str, Any]:
         """Generate span count report with Wasserstein distance calculations and visualizations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:

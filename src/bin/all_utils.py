@@ -7,7 +7,8 @@ and async processing patterns.
 import argparse
 import asyncio
 import pathlib
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from tqdm import tqdm
 
@@ -40,7 +41,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def display_configuration(
-    applications, services, faults, runs, extra_config: Optional[Dict[str, Any]] = None
+    applications, services, faults, runs, extra_config: dict[str, Any] | None = None
 ):
     """Display the current configuration."""
     print("Configuration:")
@@ -56,10 +57,10 @@ def display_configuration(
 
 
 async def process_all_combinations(
-    applications: Optional[List[str]],
-    services: Optional[List[str]],
-    faults: Optional[List[str]],
-    runs: Optional[List[int]],
+    applications: list[str] | None,
+    services: list[str] | None,
+    faults: list[str] | None,
+    runs: list[int] | None,
     task_factory: Callable,
     max_workers: int = 4,
     description: str = "Processing",
@@ -119,7 +120,7 @@ class ScriptProcessor:
         self.module_name = module_name
         self.root_dir = root_dir
 
-    async def run_script(self, args: List[str], semaphore: asyncio.Semaphore) -> bool:
+    async def run_script(self, args: list[str], semaphore: asyncio.Semaphore) -> bool:
         """Run the script with given arguments."""
         async with semaphore:
             try:
@@ -185,7 +186,7 @@ class ScriptProcessor:
 
 
 def create_standard_parser(
-    description: str, additional_args: Optional[Callable] = None
+    description: str, additional_args: Callable | None = None
 ) -> argparse.ArgumentParser:
     """Create a standard argument parser with common arguments."""
     parser = argparse.ArgumentParser(description=description)
@@ -223,8 +224,8 @@ def create_standard_parser(
 async def run_standard_processing(
     description: str,
     task_factory: Callable,
-    additional_args_parser: Optional[Callable] = None,
-    extra_config_display: Optional[Callable] = None,
+    additional_args_parser: Callable | None = None,
+    extra_config_display: Callable | None = None,
     progress_description: str = "Processing",
 ):
     """

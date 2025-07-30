@@ -161,7 +161,7 @@ def _generate_traces_worker(args):
 
                     # Create root spans
                     for (trace_idx, span_idx, span_id, node), duration in zip(
-                        root_span_mapping, root_durations
+                        root_span_mapping, root_durations, strict=False
                     ):
                         trace_data = batch_traces[trace_idx]
                         trace_data["spans"][span_id] = {
@@ -217,7 +217,7 @@ def _generate_traces_worker(args):
                     for (trace_idx, span_idx, span_id, node, parent_span_id), (
                         child_start_time,
                         child_duration,
-                    ) in zip(child_span_mapping, child_metadata):
+                    ) in zip(child_span_mapping, child_metadata, strict=False):
                         trace_data = batch_traces[trace_idx]
                         trace_data["spans"][span_id] = {
                             "nodeName": node.node_name,

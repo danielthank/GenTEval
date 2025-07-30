@@ -8,12 +8,13 @@ from .rca_report import RCAReport
 from .size_report import SizeReport
 from .span_count_report import SpanCountReport
 
+
 __all__ = [
     "BaseReport",
+    "DurationReport",
+    "EnhancedReportGenerator",
+    "OperationReport",
     "RCAReport",
     "SizeReport",
-    "DurationReport",
-    "OperationReport",
     "SpanCountReport",
-    "EnhancedReportGenerator",
 ]

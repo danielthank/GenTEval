@@ -13,7 +13,9 @@ from ..evaluators import (
 )
 from .logger import setup_logging
 
+
 setup_logging()
+
 
 def main():
     argparser = argparse.ArgumentParser(

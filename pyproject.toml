@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.10.3",
     "msgpack>=1.1.0",
     "numpy>=2.2.6",
+    "playwright>=1.53.0",
     "rich>=14.0.0",
     "scipy>=1.15.3",
     "sdv>=1.21.0",
@@ -16,6 +17,9 @@ dependencies = [
 ]
 
 [project.scripts]
+collect_request_data = "src.bin.collect_request_data:main"
+adjust_duration = "src.data_collection.utils.adjust_duration:main"
+remove_query_param = "src.data_collection.utils.remove_query_param:main"
 delete_experiment_all = "src.bin.delete_experiment_all:main"
 evaluate = "src.bin.evaluate:main"
 evaluate_all = "src.bin.evaluate_all:main"

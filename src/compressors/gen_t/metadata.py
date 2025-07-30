@@ -144,9 +144,9 @@ class MetadataSynthesizer:
 
         root = pd.DataFrame(root_dataset, columns=columns)
         chain = pd.DataFrame(chain_dataset, columns=columns)
-        root.fillna({column: 0 for column in columns[2:]}, inplace=True)
+        root.fillna(dict.fromkeys(columns[2:], 0), inplace=True)
         root = root.astype(dtypes, copy=False)
-        chain.fillna({column: 0 for column in columns[2:]}, inplace=True)
+        chain.fillna(dict.fromkeys(columns[2:], 0), inplace=True)
         chain = chain.astype(dtypes, copy=False)
 
         return {

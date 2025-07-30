@@ -4,7 +4,7 @@ import os
 import pathlib
 import shutil
 from enum import Enum
-from typing import Any, Dict
+from typing import Any
 
 import cloudpickle
 import msgpack
@@ -23,7 +23,7 @@ class CompressedDataset:
     Users must specify the format when adding data.
     """
 
-    def __init__(self, compression_level: int = 9, data: Dict[str, tuple] = None):
+    def __init__(self, compression_level: int = 9, data: dict[str, tuple] = None):
         """
         Initialize a new CompressedDataset.
 
@@ -39,8 +39,8 @@ class CompressedDataset:
                 "metadata": (meta_info, SerializationFormat.CLOUDPICKLE)
             })
         """
-        self.data: Dict[str, Any] = {}
-        self.formats: Dict[
+        self.data: dict[str, Any] = {}
+        self.formats: dict[
             str, SerializationFormat
         ] = {}  # Track format used for each key
         self.compression_level = compression_level
@@ -73,7 +73,7 @@ class CompressedDataset:
         self.data[key] = value
         self.formats[key] = format
 
-    def add_batch(self, data_dict: Dict[str, tuple]) -> None:
+    def add_batch(self, data_dict: dict[str, tuple]) -> None:
         """
         Add multiple items to the dataset at once using a dictionary.
 
@@ -157,19 +157,17 @@ class CompressedDataset:
         """Serialize an object based on the selected format."""
         if format == SerializationFormat.MSGPACK:
             return msgpack.packb(obj, use_bin_type=True)
-        elif format == SerializationFormat.CLOUDPICKLE:
+        if format == SerializationFormat.CLOUDPICKLE:
             return cloudpickle.dumps(obj)
-        else:
-            raise ValueError(f"Unsupported serialization format: {format}")
+        raise ValueError(f"Unsupported serialization format: {format}")
 
     def _deserialize(self, data: bytes, format: SerializationFormat) -> Any:
         """Deserialize data based on the selected format."""
         if format == SerializationFormat.MSGPACK:
             return msgpack.unpackb(data, raw=False)
-        elif format == SerializationFormat.CLOUDPICKLE:
+        if format == SerializationFormat.CLOUDPICKLE:
             return cloudpickle.loads(data)
-        else:
-            raise ValueError(f"Unsupported serialization format: {format}")
+        raise ValueError(f"Unsupported serialization format: {format}")
 
     def _compress(self, data: bytes) -> bytes:
         """Compress serialized data."""
@@ -237,7 +235,7 @@ class CompressedDataset:
             Loaded CompressedDataset instance
         """
         # Load metadata
-        with open(dir / "metadata.json", "r") as f:
+        with open(dir / "metadata.json") as f:
             metadata = json.load(f)
 
         # Create new instance

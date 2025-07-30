@@ -4,6 +4,7 @@ import pandas as pd
 from ...dataset import Dataset, RCAEvalDataset
 from ..evaluator import Evaluator
 
+
 pd.options.mode.copy_on_write = True
 
 
@@ -78,8 +79,8 @@ def tracerca(data, inject_time=None):
 
     # calculate support and confidence
     operations = list(anomal_df.operation.unique())
-    support_dict = {op: 0 for op in operations}
-    confidence_dict = {op: 0 for op in operations}
+    support_dict = dict.fromkeys(operations, 0)
+    confidence_dict = dict.fromkeys(operations, 0)
 
     # support = |abnormal_traces of operation A| / |total abnormal traces|
     # abnormal traces of operation A is when "abnormal" col is True
@@ -99,7 +100,7 @@ def tracerca(data, inject_time=None):
             anomal_df[anomal_df["operation"] == op]["abnormal"].sum()
             / anomal_df[anomal_df["operation"] == op]["operation"].count()
         )
-    ji_dict = {op: 0 for op in operations}
+    ji_dict = dict.fromkeys(operations, 0)
     # ji = 2 *s * c / (s + c)
     for op in operations:
         if support_dict[op] + confidence_dict[op] == 0:

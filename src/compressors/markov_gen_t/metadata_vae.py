@@ -1,14 +1,12 @@
 import logging
-from typing import List, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.preprocessing import LabelEncoder
-from tqdm import tqdm
-
 import wandb
+from sklearn.preprocessing import LabelEncoder
+from torch import nn
+from tqdm import tqdm
 
 from .. import CompressedDataset, SerializationFormat
 
@@ -43,7 +41,7 @@ class MetadataVAE(nn.Module):
             nn.Sigmoid(),  # Bound outputs to [0, 1]
         )
 
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
@@ -65,7 +63,7 @@ class MetadataVAE(nn.Module):
         parent_duration: torch.Tensor,
         parent_node_idx: torch.Tensor,
         child_node_idx: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             parent_start_time: Tensor of shape (batch_size,)
@@ -177,7 +175,7 @@ class MetadataSynthesizer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger.info(f"Using device: {self.device}")
 
-    def _prepare_training_data(self, traces: List) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_training_data(self, traces: list) -> tuple[np.ndarray, np.ndarray]:
         """Prepare training data from traces."""
         training_inputs = []
         training_targets = []
@@ -314,7 +312,7 @@ class MetadataSynthesizer:
 
         return training_inputs, training_targets
 
-    def fit(self, traces: List):
+    def fit(self, traces: list):
         """Train the metadata synthesis model."""
         self.logger.info("Training Metadata Neural Network")
 
@@ -384,12 +382,12 @@ class MetadataSynthesizer:
 
     def synthesize_metadata_batch(
         self,
-        parent_start_times: List[float],
-        parent_durations: List[float],
-        parent_nodes: List[str],
-        child_nodes: List[str],
+        parent_start_times: list[float],
+        parent_durations: list[float],
+        parent_nodes: list[str],
+        child_nodes: list[str],
         num_samples: int = 1,
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """
         Generate child start_times and durations for multiple parent-child pairs at once.
 

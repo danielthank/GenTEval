@@ -1,14 +1,12 @@
 import logging
-from typing import List, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.preprocessing import LabelEncoder
-from tqdm import tqdm
-
 import wandb
+from sklearn.preprocessing import LabelEncoder
+from torch import nn
+from tqdm import tqdm
 
 from ... import CompressedDataset, SerializationFormat
 
@@ -52,7 +50,7 @@ class RootVAE(nn.Module):
             nn.Linear(hidden_dim, 1),  # Output: duration
         )
 
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
@@ -72,7 +70,7 @@ class RootVAE(nn.Module):
         self,
         time_bucket_idx: torch.Tensor,
         node_idx: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             time_bucket_idx: Tensor of shape (batch_size,) - time bucket indices
@@ -284,8 +282,8 @@ class RootDurationVAESynthesizer:
                 wandb.log({"root_vae_loss": avg_loss, "root_vae_epoch": epoch})
 
     def synthesize_root_duration_batch(
-        self, start_times: List[float], node_names: List[str], num_samples: int = 1
-    ) -> List[float]:
+        self, start_times: list[float], node_names: list[str], num_samples: int = 1
+    ) -> list[float]:
         """Generate root span durations for multiple start times and node names at once.
 
         Args:

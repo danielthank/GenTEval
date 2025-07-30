@@ -80,8 +80,9 @@ class Trace:
                     else:
                         parent_span = self._spans[self._spans[id]["parentSpanId"]]
                         gap = self._spans[id]["startTime"] - parent_span["startTime"]
-                        if gap < 0:
-                            gap = 0  # gap is modeled as log normal distribution so it cannot be negative
+                        gap = max(
+                            gap, 0
+                        )  # gap is modeled as log normal distribution so it cannot be negative
                     self._gap_from_parent[id] = gap
                 else:
                     self._gap_from_parent[id] = 0

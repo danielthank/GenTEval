@@ -17,7 +17,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import cloudpickle
 
@@ -54,7 +54,7 @@ class PickleSizeAnalyzer:
 
         return size
 
-    def analyze_attributes(self, max_depth: int = 2) -> Dict[str, Dict]:
+    def analyze_attributes(self, max_depth: int = 2) -> dict[str, dict]:
         """Analyze size of each attribute in the object with configurable depth."""
         results = {}
 
@@ -105,7 +105,7 @@ class PickleSizeAnalyzer:
             print(f"Error calculating pickle size: {e}")
             return 0
 
-    def get_summary_stats(self) -> Dict[str, Any]:
+    def get_summary_stats(self) -> dict[str, Any]:
         """Get summary statistics about the object."""
         total_pickle_size = self.get_total_pickle_size()
         total_memory_size = self.get_object_size(self.obj)

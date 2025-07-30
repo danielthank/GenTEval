@@ -44,11 +44,11 @@ class MarkovGenTConfig:
     def from_dict(cls, config_dict):
         # Create a copy to avoid modifying the original
         config_dict = config_dict.copy()
-        
+
         # Convert root_model string to enum if needed
         if "root_model" in config_dict and isinstance(config_dict["root_model"], str):
             config_dict["root_model"] = RootModel(config_dict["root_model"])
-            
+
         return cls(**config_dict)
 
     def to_dict(self):

@@ -1,0 +1,124 @@
+{
+  // Python configuration
+  "python.defaultInterpreterPath": "./.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  // Ruff as primary linter and formatter
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    },
+  },
+  // Ruff extension settings
+  "ruff.enable": true,
+  "ruff.organizeImports": true,
+  "ruff.fixAll": true,
+  "ruff.lint.enable": true,
+  // Editor settings for Python development
+  "editor.rulers": [
+    88
+  ],
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  // File associations and exclusions
+  "files.associations": {
+    "*.toml": "toml",
+    "ruff.toml": "toml",
+    "pyproject.toml": "toml"
+  },
+  // Exclude data files and generated content from search/watch
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/*.pyo": true,
+    "**/*.egg-info": true,
+    "**/build": true,
+    "**/dist": true,
+    "**/.ruff_cache": true,
+    "**/data/**/*.csv": true,
+    "**/data/**/*.json": true,
+    "**/data/**/*.zip": true,
+    "**/data/**/*.log": true,
+    "uv.lock": true
+  },
+  "search.exclude": {
+    "**/data": true,
+    "**/*.csv": true,
+    "**/*.json": true,
+    "**/*.zip": true,
+    "**/*.log": true,
+    "**/uv.lock": true,
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.ruff_cache": true
+  },
+  "files.watcherExclude": {
+    "**/data/**": true,
+    "**/__pycache__": true,
+    "**/.ruff_cache": true,
+    "**/uv.lock": true
+  },
+  // Git settings
+  "git.ignoreLimitWarning": true,
+  // Terminal settings for uv
+  "terminal.integrated.env.linux": {
+    "UV_PROJECT_ENVIRONMENT": ".venv"
+  },
+  "terminal.integrated.env.osx": {
+    "UV_PROJECT_ENVIRONMENT": ".venv"
+  },
+  "terminal.integrated.env.windows": {
+    "UV_PROJECT_ENVIRONMENT": ".venv"
+  },
+  // IntelliSense and autocompletion
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.extraPaths": [
+    "./src"
+  ],
+  "python.analysis.include": [
+    "src"
+  ],
+  "python.analysis.exclude": [
+    "**/data",
+    "**/__pycache__",
+    "**/.*"
+  ],
+  // Testing configuration (if using pytest)
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": [
+    "src",
+    "tests"
+  ],
+  // Notebook settings
+  "[jupyter]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+  // TOML file settings
+  "[toml]": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true
+  },
+  // Additional language settings
+  "[markdown]": {
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "on"
+  },
+  "[json]": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[jsonc]": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  // Performance settings for large data projects
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "extensions.ignoreRecommendations": false
+}

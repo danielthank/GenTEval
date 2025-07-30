@@ -5,7 +5,9 @@ from ..compressors import CompressedDataset, HeadSamplingCompressor
 from ..dataset import RCAEvalDataset
 from .logger import setup_logging
 
+
 setup_logging()
+
 
 def main():
     argparser = argparse.ArgumentParser(description="Compress and decompress traces")

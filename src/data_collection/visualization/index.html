@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trace Visualizer</title>
+    
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link href="https://unpkg.com/vis-network/styles/vis-network.min.css" rel="stylesheet" type="text/css" />
+
+    <script src="https://unpkg.com/vis-timeline/standalone/umd/vis-timeline-graph2d.min.js"></script>
+    <script src="https://unpkg.com/papaparse/papaparse.min.js"></script>
+    <link href="https://unpkg.com/vis-timeline/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        #input-container {
+            margin-bottom: 20px;
+        }
+
+        #trace-input {
+            width: 100%;
+            height: 100px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        #controls-container {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .view-btn {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .view-btn.active {
+            background-color: #0056b3;
+        }
+
+        .view-btn:hover:not(.active) {
+            background-color: #0069d9;
+        }
+
+        #visualization-container {
+            flex-grow: 1;
+            display: flex;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        #graph-container, #timeline-container {
+            height: 100%;
+            width: 100%;
+            overflow: auto;
+            background: white;
+            position: relative;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .error {
+            color: #ff0000;
+            margin-top: 10px;
+        }
+
+        /* Tooltip styles */
+        .vis-tooltip {
+            position: absolute;
+            padding: 8px;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            pointer-events: none;
+            max-width: 300px;
+            white-space: pre-wrap;
+            z-index: 1000; /* Ensure tooltip is on top */
+        }
+
+        /* Custom styling for timeline items based on status code */
+        .vis-item.status-200 { background-color: #d4edda; border-color: #28a745; } /* Success */
+        .vis-item.status-4xx { background-color: #ffeeba; border-color: #ffc107; } /* Client Error */
+        .vis-item.status-5xx { background-color: #f8d7da; border-color: #dc3545; } /* Server Error */
+        /* Default for other statuses or if not present */
+        .vis-item { background-color: #e2e3e5; border-color: #6c757d; }
+
+        /* Timeline specific styling */
+        .vis-timeline {
+            height: 100% !important;
+        }
+
+        .vis-panel.vis-left {
+            overflow-y: auto !important;
+            height: 100% !important;
+        }
+
+        .vis-labelset {
+            overflow-y: auto !important;
+            height: 100% !important;
+        }
+
+        .vis-itemset {
+            overflow-y: auto !important;
+        }
+
+        /* Group styling for better hierarchy visibility */
+
+        /* Remove red borders from timeline groups */
+        .vis-group-level-unknown-but-gte1,
+        .vis-group {
+            border: black !important;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="input-container">
+        <textarea id="trace-input" placeholder="Paste your trace data here (CSV-like format)..."></textarea>
+        <div id="error-container"></div>
+    </div>
+    <div id="controls-container">
+        <button id="network-view-btn" class="view-btn active">Network View</button>
+        <button id="timeline-view-btn" class="view-btn">Timeline View</button>
+    </div>
+    <div id="visualization-container">
+        <div id="graph-container"></div>
+        <div id="timeline-container" class="hidden"></div>
+    </div>
+
+    <script>
+        let network = null;
+        let timeline = null;
+        let currentSpans = [];
+        let currentView = 'network'; // 'network' or 'timeline'
+
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        function clearError() {
+            document.getElementById('error-container').innerHTML = '';
+        }
+
+        function formatSpanDetails(span) {
+            let details = `Service: ${span.serviceName}\n`;
+            details += `Method: ${span.methodName}\n`;
+            details += `Operation: ${span.operationName}\n`;
+            details += `Duration: ${span.duration / 1000}ms\n`;
+            details += `Status Code: ${span.statusCode}\n`;
+            details += `Start Time: ${new Date(span.startTime / 1000).toISOString()}\n`;
+            if (span.parentSpanID) {
+                details += `Parent Span ID: ${span.parentSpanID}\n`;
+            }
+            details += `Span ID: ${span.spanID}`;
+            return details;
+        }
+
+        function parseTraceData(csvData) {
+            // Use PapaParse for robust CSV parsing
+            const result = Papa.parse(csvData, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: true
+            });
+            // Convert duration and startTime to numbers, handle missing fields
+            return result.data.map(span => {
+                if (!span) return span;
+                span.duration = typeof span.duration === 'number' ? span.duration : parseInt(span.duration, 10) || 0;
+                span.startTime = typeof span.startTime === 'number' ? span.startTime : parseInt(span.startTime, 10) || 0;
+                return span;
+            });
+        }
+
+        function createNetwork(spans) {
+            const graphContainer = document.getElementById('graph-container');
+
+            if (network) network.destroy(); // Destroy previous network if it exists
+
+            if (spans.length === 0) {
+                // showError("No trace data to visualize in network view."); // Commented out to prevent double error message if no trace data
+                return;
+            }
+
+            // Filter for a single traceID - assumes the first traceID found is the one to visualize
+            const firstTraceID = spans[0].traceID;
+            const relevantSpans = spans.filter(span => span.traceID === firstTraceID);
+
+            if (relevantSpans.length === 0) {
+                // showError("No spans found for the detected trace ID for network view.");
+                return;
+            }
+
+            const nodes = new vis.DataSet();
+            const edges = new vis.DataSet();
+
+            const spanMap = new Map(); // To quickly look up spans by ID
+            relevantSpans.forEach(span => spanMap.set(span.spanID, span));
+
+            relevantSpans.forEach(span => {
+                const nodeId = span.spanID;
+                
+                // Add node
+                nodes.add({
+                    id: nodeId,
+                    label: `${span.serviceName}\n${span.methodName}`,
+                    title: formatSpanDetails(span),
+                    value: span.duration > 0 ? span.duration / 1000 : 10,
+                    group: span.serviceName,
+                    status: span.statusCode // Store status for potential styling
+                });
+
+                // Add edge if it has a parent
+                if (span.parentSpanID) {
+                    if (spanMap.has(span.parentSpanID)) {
+                        edges.add({
+                            from: span.parentSpanID,
+                            to: nodeId,
+                            arrows: 'to'
+                        });
+                    } else {
+                        // Parent is external or missing from provided trace data for this traceID
+                        // Create a placeholder node for the external parent if it doesn't exist
+                        if (!nodes.get(span.parentSpanID)) {
+                            nodes.add({
+                                id: span.parentSpanID,
+                                label: `External/Root\n(${span.parentSpanID.substring(0, 6)}...)`,
+                                title: `External or Missing Parent Span ID: ${span.parentSpanID}`,
+                                value: 10, // Default size for unknown parent
+                                group: 'external',
+                                color: { background: '#f8d7da', border: '#dc3545' } // Highlight unknown parents
+                            });
+                        }
+                        edges.add({
+                            from: span.parentSpanID,
+                            to: nodeId,
+                            arrows: 'to',
+                            dashes: true, // Indicate external connection
+                            color: '#dc3545'
+                        });
+                    }
+                }
+            });
+
+            const data = { nodes, edges };
+
+            const options = {
+                nodes: {
+                    shape: 'dot',
+                    scaling: {
+                        min: 10,
+                        max: 40,
+                        label: {
+                            enabled: true,
+                            min: 12,
+                            max: 20
+                        }
+                    },
+                    font: {
+                        multi: 'html',
+                        align: 'center'
+                    }
+                },
+                edges: {
+                    color: { inherit: 'from' },
+                    smooth: {
+                        type: 'cubicBezier',
+                        forceDirection: 'vertical',
+                        roundness: 0.8
+                    }
+                },
+                physics: {
+                    enabled: true,
+                    stabilization: {
+                        iterations: 100
+                    },
+                    barnesHut: {
+                        gravitationalConstant: -2000,
+                        centralGravity: 0.1,
+                        springLength: 90,
+                        springConstant: 0.04,
+                        damping: 0.09,
+                        avoidOverlap: 0.5
+                    }
+                },
+                layout: {
+                    hierarchical: {
+                        enabled: true,
+                        direction: 'UD',
+                        sortMethod: 'directed',
+                        levelSeparation: 150,
+                        nodeSpacing: 100
+                    }
+                }
+            };
+
+            network = new vis.Network(graphContainer, data, options);
+
+            network.on("stabilizationIterationsDone", function () {
+                network.fit();
+            });
+        }
+
+        function createTimeline(spans) {
+            const timelineContainer = document.getElementById('timeline-container');
+
+            if (timeline) timeline.destroy(); // Destroy previous timeline if it exists
+
+            if (spans.length === 0) {
+                // showError("No trace data to visualize in timeline view."); // Commented out to prevent double error message
+                return;
+            }
+
+            // Filter for a single traceID
+            const firstTraceID = spans[0].traceID;
+            const relevantSpans = spans.filter(span => span.traceID === firstTraceID);
+
+            if (relevantSpans.length === 0) {
+                // showError("No spans found for the detected trace ID for timeline view.");
+                return;
+            }
+
+            const items = new vis.DataSet();
+            const groups = new vis.DataSet();
+
+            // Build a map for quick lookup of spans by ID
+            const spanMap = new Map();
+            relevantSpans.forEach(span => spanMap.set(span.spanID, span));
+
+            // Create groups and define hierarchy
+            const topLevelSpans = new Set(relevantSpans.map(s => s.spanID)); // All span IDs initially
+            const childrenMap = new Map(); // parentId -> [childId1, childId2]
+
+            relevantSpans.forEach(span => {
+                if (span.parentSpanID) {
+                    topLevelSpans.delete(span.spanID); // If a span has a parent, it's not a top-level root
+                    if (!childrenMap.has(span.parentSpanID)) {
+                        childrenMap.set(span.parentSpanID, []);
+                    }
+                    childrenMap.get(span.parentSpanID).push(span.spanID);
+                }
+            });
+
+            // Sort spans by startTime to ensure consistent ordering in groups
+            relevantSpans.sort((a, b) => a.startTime - b.startTime);
+
+            // Calculate depth for each span to create visual hierarchy
+            const spanDepths = new Map();
+            
+            function calculateDepth(spanId, visited = new Set()) {
+                if (visited.has(spanId)) return 0; // Avoid infinite loops
+                if (spanDepths.has(spanId)) return spanDepths.get(spanId);
+                
+                const span = spanMap.get(spanId);
+                if (!span || !span.parentSpanID || !spanMap.has(span.parentSpanID)) {
+                    spanDepths.set(spanId, 0);
+                    return 0;
+                }
+                
+                visited.add(spanId);
+                const parentDepth = calculateDepth(span.parentSpanID, visited);
+                const depth = parentDepth + 1;
+                spanDepths.set(spanId, depth);
+                visited.delete(spanId);
+                return depth;
+            }
+
+            // Calculate depths for all spans
+            relevantSpans.forEach(span => calculateDepth(span.spanID));
+
+            // Create groups with nested structure for collapsible hierarchy
+            const addedGroupIds = new Set();
+            
+            function addGroupRecursively(spanId) {
+                if (addedGroupIds.has(spanId)) return;
+
+                const span = spanMap.get(spanId);
+                if (!span) return;
+
+                const children = childrenMap.get(spanId) || [];
+                const nestedGroupIds = children.filter(childId => spanMap.has(childId));
+                const depth = spanDepths.get(spanId) || 0;
+                
+                groups.add({
+                    id: span.spanID,
+                    content: `${span.serviceName}: ${span.methodName} (${span.duration / 1000}ms)`,
+                    nestedGroups: nestedGroupIds.length > 0 ? nestedGroupIds : undefined,
+                    order: span.startTime + (depth * 0.001),
+                    treeLevel: depth,
+                });
+                
+                addedGroupIds.add(span.spanID);
+
+                // Recursively add child groups
+                nestedGroupIds.forEach(childId => addGroupRecursively(childId));
+            }
+
+            // Find root spans and add them recursively
+            let rootSpans = relevantSpans.filter(span => !span.parentSpanID || !spanMap.has(span.parentSpanID));
+            if (rootSpans.length === 0 && relevantSpans.length > 0) {
+                // If no explicit root, pick the earliest span
+                rootSpans = [relevantSpans.reduce((earliest, current) => 
+                    current.startTime < earliest.startTime ? current : earliest
+                )];
+            }
+            
+            rootSpans.sort((a, b) => a.startTime - b.startTime);
+            rootSpans.forEach(rootSpan => addGroupRecursively(rootSpan.spanID));
+
+            // Add timeline items
+            relevantSpans.forEach(span => {
+                const start = new Date(span.startTime / 1000);
+                const end = new Date(span.startTime / 1000 + span.duration / 1000);
+
+                let statusClass = '';
+                if (span.statusCode) {
+                    const statusCodePrefix = String(span.statusCode).charAt(0);
+                    if (statusCodePrefix === '2') statusClass = 'status-200';
+                    else if (statusCodePrefix === '4') statusClass = 'status-4xx';
+                    else if (statusCodePrefix === '5') statusClass = 'status-5xx';
+                }
+
+                items.add({
+                    id: span.spanID, // Item ID is the span ID
+                    content: `<div style="padding: 2px;">${span.operationName}</div>`, // Concise label for timeline item
+                    start: start,
+                    end: end,
+                    group: span.spanID, // Each span's item belongs to its own span-group
+                    title: formatSpanDetails(span), // Full details on hover
+                    type: 'range', // Display as a bar
+                    className: statusClass
+                });
+            });
+
+            const options = {
+                stack: false, // Don't stack items within the same span's group
+                zoomKey: 'ctrlKey',
+                verticalScroll: true,
+                horizontalScroll: true,
+                zoomMax: 1000 * 60 * 60 * 24 * 30, 
+                zoomMin: 10, // Allowing smaller zoom to see very short spans
+                editable: false,
+                height: '100%',
+                maxHeight: '100%',
+                margin: {
+                    item: {
+                        vertical: 5, // Vertical margin between items (relevant if stacking were true)
+                    },
+                    axis: 5
+                },
+                timeAxis: {
+                    scale: 'second'
+                },
+                orientation: 'top',
+                snap: null,
+                tooltip: {
+                    overflowMethod: 'cap'
+                }
+            };
+
+            timeline = new vis.Timeline(timelineContainer, items, groups, options);
+            timeline.fit(); // Fit all items in view initially
+        }
+
+        function switchView(viewType) {
+            currentView = viewType;
+            const graphContainer = document.getElementById('graph-container');
+            const timelineContainer = document.getElementById('timeline-container');
+            const networkBtn = document.getElementById('network-view-btn');
+            const timelineBtn = document.getElementById('timeline-view-btn');
+
+            if (viewType === 'network') {
+                graphContainer.classList.remove('hidden');
+                timelineContainer.classList.add('hidden');
+                networkBtn.classList.add('active');
+                timelineBtn.classList.remove('active');
+                // Ensure network re-draws/fits if it was hidden
+                if (network) network.fit();
+            } else {
+                graphContainer.classList.add('hidden');
+                timelineContainer.classList.remove('hidden');
+                networkBtn.classList.remove('active');
+                timelineBtn.classList.add('active');
+                // Ensure timeline re-draws/fits if it was hidden
+                if (timeline) timeline.fit();
+            }
+        }
+
+        document.getElementById('trace-input').addEventListener('input', () => {
+            clearError();
+            
+            try {
+                const input = document.getElementById('trace-input').value;
+                if (!input.trim()) {
+                    if (network) network.destroy();
+                    if (timeline) timeline.destroy();
+                    return; // Clear visualization if input is empty
+                }
+                currentSpans = parseTraceData(input);
+                
+                // Always create both, but only display the active one
+                createNetwork(currentSpans);
+                createTimeline(currentSpans);
+
+                // Ensure the currently active view is shown
+                switchView(currentView);
+
+            } catch (error) {
+                showError(`Error parsing data: ${error.message}`);
+                if (network) network.destroy();
+                if (timeline) timeline.destroy();
+            }
+        });
+
+        document.getElementById('network-view-btn').addEventListener('click', () => switchView('network'));
+        document.getElementById('timeline-view-btn').addEventListener('click', () => switchView('timeline'));
+
+        // Initial setup
+        switchView('network');
+    </script>
+</body>
+</html>

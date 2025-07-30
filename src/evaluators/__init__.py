@@ -5,6 +5,7 @@ from .query.span_count_evaluator import SpanCountEvaluator
 from .rca.micro_rank_evaluator import MicroRankEvaluator
 from .rca.trace_rca_evaluator import TraceRCAEvaluator
 
+
 __all__ = [
     Evaluator,
     TraceRCAEvaluator,

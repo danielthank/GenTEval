@@ -1,6 +1,6 @@
 """Operation report generator with F1 score calculation."""
 
-from typing import Any, Dict, Set
+from typing import Any
 
 from .base_report import BaseReport
 
@@ -8,7 +8,7 @@ from .base_report import BaseReport
 class OperationReport(BaseReport):
     """Report generator for operation evaluation with F1 score calculation."""
 
-    def calculate_metrics(self, x: Set, y: Set) -> tuple[float, float, float]:
+    def calculate_metrics(self, x: set, y: set) -> tuple[float, float, float]:
         """
         Calculate precision, recall, and F1 score between two sets.
 
@@ -40,7 +40,7 @@ class OperationReport(BaseReport):
 
         return precision, recall, f1
 
-    def generate(self, run_dirs) -> Dict[str, Any]:
+    def generate(self, run_dirs) -> dict[str, Any]:
         """Generate operation report with F1 score calculations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:

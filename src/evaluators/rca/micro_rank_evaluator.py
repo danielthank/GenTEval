@@ -10,6 +10,7 @@ import pandas as pd
 from ...dataset import Dataset, RCAEvalDataset
 from ..evaluator import Evaluator
 
+
 warnings.filterwarnings("ignore")
 
 pd.options.mode.copy_on_write = True
@@ -361,7 +362,7 @@ def get_pagerank_graph(df):
     trace_operation = {}
     pr_trace = {}
 
-    op_dict = dict(zip(df["spanID"], df["operation"]))
+    op_dict = dict(zip(df["spanID"], df["operation"], strict=False))
 
     parent_child_groups = df.groupby("parentSpanID")["spanID"].apply(list).to_dict()
     child_dict = parent_child_groups

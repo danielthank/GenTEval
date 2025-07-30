@@ -1,6 +1,6 @@
 """Duration report generator with Wasserstein distance visualization."""
 
-from typing import Any, Dict
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -318,7 +318,7 @@ class DurationReport(BaseReport):
 
         return similarity
 
-    def generate(self, run_dirs) -> Dict[str, Any]:
+    def generate(self, run_dirs) -> dict[str, Any]:
         """Generate duration report with Wasserstein distance calculations and visualizations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
@@ -630,7 +630,9 @@ class DurationReport(BaseReport):
                     # Calculate weighted average
                     total_weighted_mape = sum(
                         mape * count
-                        for mape, count in zip(all_run_mapes, all_run_counts)
+                        for mape, count in zip(
+                            all_run_mapes, all_run_counts, strict=False
+                        )
                     )
                     total_count = sum(all_run_counts)
                     self.report[group]["duration_depth_0_p90_mape_avg"] = (
@@ -657,7 +659,9 @@ class DurationReport(BaseReport):
                     # Calculate weighted average
                     total_weighted_mape = sum(
                         mape * count
-                        for mape, count in zip(all_run_mapes, all_run_counts)
+                        for mape, count in zip(
+                            all_run_mapes, all_run_counts, strict=False
+                        )
                     )
                     total_count = sum(all_run_counts)
                     self.report[group]["duration_depth_0_p50_mape_avg"] = (
@@ -684,7 +688,9 @@ class DurationReport(BaseReport):
                     # Calculate weighted average
                     total_weighted_mape = sum(
                         mape * count
-                        for mape, count in zip(all_run_mapes, all_run_counts)
+                        for mape, count in zip(
+                            all_run_mapes, all_run_counts, strict=False
+                        )
                     )
                     total_count = sum(all_run_counts)
                     self.report[group]["duration_depth_1_p90_mape_avg"] = (
@@ -711,7 +717,9 @@ class DurationReport(BaseReport):
                     # Calculate weighted average
                     total_weighted_mape = sum(
                         mape * count
-                        for mape, count in zip(all_run_mapes, all_run_counts)
+                        for mape, count in zip(
+                            all_run_mapes, all_run_counts, strict=False
+                        )
                     )
                     total_count = sum(all_run_counts)
                     self.report[group]["duration_depth_1_p50_mape_avg"] = (
@@ -764,7 +772,7 @@ class DurationReport(BaseReport):
                         total_weighted_cosine_sim = sum(
                             cosine_sim * count
                             for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts
+                                all_cosine_sims, all_cosine_counts, strict=False
                             )
                         )
                         total_count = sum(all_cosine_counts)
@@ -803,7 +811,7 @@ class DurationReport(BaseReport):
                         total_weighted_cosine_sim = sum(
                             cosine_sim * count
                             for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts
+                                all_cosine_sims, all_cosine_counts, strict=False
                             )
                         )
                         total_count = sum(all_cosine_counts)
@@ -842,7 +850,7 @@ class DurationReport(BaseReport):
                         total_weighted_cosine_sim = sum(
                             cosine_sim * count
                             for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts
+                                all_cosine_sims, all_cosine_counts, strict=False
                             )
                         )
                         total_count = sum(all_cosine_counts)
@@ -881,7 +889,7 @@ class DurationReport(BaseReport):
                         total_weighted_cosine_sim = sum(
                             cosine_sim * count
                             for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts
+                                all_cosine_sims, all_cosine_counts, strict=False
                             )
                         )
                         total_count = sum(all_cosine_counts)
@@ -1043,8 +1051,8 @@ class DurationReport(BaseReport):
 
             # First pass: collect values and counts, mark missing as None
             for bucket in all_buckets:
-                original_values.append(original_buckets.get(bucket, None))
-                compressed_values.append(compressed_buckets.get(bucket, None))
+                original_values.append(original_buckets.get(bucket))
+                compressed_values.append(compressed_buckets.get(bucket))
                 # Use original count or compressed count (prefer original, fallback to compressed, default to 0)
                 count = original_counts.get(bucket, compressed_counts.get(bucket, 0))
                 trace_counts.append(count)

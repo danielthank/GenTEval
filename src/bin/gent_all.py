@@ -73,11 +73,13 @@ async def gent_task_factory(
     )
 
 
-def main()
-    asyncio.run(run_standard_processing(
-        description="Run GenT compression on all traces",
-        task_factory=gent_task_factory,
-        additional_args_parser=add_gent_arguments,
-        extra_config_display=get_gent_config,
-        progress_description="GenT Processing",
-    ))
+def main():
+    asyncio.run(
+        run_standard_processing(
+            description="Run GenT compression on all traces",
+            task_factory=gent_task_factory,
+            additional_args_parser=add_gent_arguments,
+            extra_config_display=get_gent_config,
+            progress_description="GenT Processing",
+        )
+    )

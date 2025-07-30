@@ -1,6 +1,5 @@
 import logging
 from collections import Counter, defaultdict
-from typing import List, Tuple
 
 import networkx as nx
 import numpy as np
@@ -45,7 +44,7 @@ class DepthMarkovChain:
         self.start_states = Counter()
         self.node_names = set()
 
-    def _extract_tree_sequences(self, trace: Trace) -> List[List[Tuple]]:
+    def _extract_tree_sequences(self, trace: Trace) -> list[list[tuple]]:
         """Extract DFS sequences with (node_name, depth, child_cnt) states from trace."""
         sequences = []
 
@@ -76,7 +75,7 @@ class DepthMarkovChain:
         graph: nx.DiGraph,
         node: str,
         depth: int,
-        sequence: List[Tuple],
+        sequence: list[tuple],
         trace: Trace,
     ):
         """DFS traversal recording (node_name, depth, child_cnt) tuples."""
@@ -103,7 +102,7 @@ class DepthMarkovChain:
         except Exception as e:
             self.logger.warning(f"Error processing node {node}: {e}")
 
-    def fit(self, traces: List[Trace]):
+    def fit(self, traces: list[Trace]):
         """Learn Markov chain from traces."""
         self.logger.info(
             "Training Tree Markov Chain with (node_name, depth, child_cnt) states"
@@ -125,7 +124,7 @@ class DepthMarkovChain:
             f"{len(self.node_names)} unique node names"
         )
 
-    def _build_transition_matrix(self, sequences: List[List[Tuple]]):
+    def _build_transition_matrix(self, sequences: list[list[tuple]]):
         """Build transition matrix from sequences."""
         for sequence in sequences:
             if len(sequence) < self.order + 1:
@@ -198,7 +197,7 @@ class DepthMarkovChain:
         current_state,
         max_nodes: int,
         nodes_generated: int,
-    ) -> Tuple[int, any]:
+    ) -> tuple[int, any]:
         """Recursively build tree using DFS while sampling states."""
         if nodes_generated >= max_nodes:
             return nodes_generated, current_state

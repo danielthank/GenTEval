@@ -75,10 +75,12 @@ async def normalize_task_factory(
 
 
 def main():
-    asyncio.run(run_standard_processing(
-        description="Normalize all traces",
-        task_factory=normalize_task_factory,
-        additional_args_parser=add_normalize_arguments,
-        extra_config_display=get_normalize_config,
-        progress_description="Normalizing",
-    ))
+    asyncio.run(
+        run_standard_processing(
+            description="Normalize all traces",
+            task_factory=normalize_task_factory,
+            additional_args_parser=add_normalize_arguments,
+            extra_config_display=get_normalize_config,
+            progress_description="Normalizing",
+        )
+    )

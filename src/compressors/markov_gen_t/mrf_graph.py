@@ -1,6 +1,5 @@
 import logging
 from collections import Counter, defaultdict
-from typing import List
 
 import networkx as nx
 import numpy as np
@@ -127,7 +126,7 @@ class MarkovRandomField:
                 self.logger.warning(f"Error processing node {node_id}: {e}")
                 continue
 
-    def fit(self, traces: List[Trace]):
+    def fit(self, traces: list[Trace]):
         """Learn MRF parameters from traces."""
         self.logger.info("Training Markov Random Field for graph structure modeling")
 

@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Tuple
+from typing import Any
 
 
 @dataclass
@@ -7,11 +7,11 @@ class GenTConfig:
     chain_length: int = 3
     epochs: int = 5
     batch_size: int = 500
-    discriminator_dim: Tuple[int, ...] = (64,)
-    generator_dim: Tuple[int, ...] = (64,)
+    discriminator_dim: tuple[int, ...] = (64,)
+    generator_dim: tuple[int, ...] = (64,)
     span_cnt_threshold: int = 10
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """
         Convert the dataclass to a dictionary suitable for msgpack serialization.
         This handles any custom serialization logic for complex types.
@@ -26,7 +26,7 @@ class GenTConfig:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "GenTConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "GenTConfig":
         """
         Create a GenTConfig instance from a dictionary.
         This handles any custom deserialization logic needed.

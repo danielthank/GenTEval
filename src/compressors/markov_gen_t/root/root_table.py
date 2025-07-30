@@ -1,6 +1,5 @@
 import logging
 from collections import defaultdict
-from typing import List, Tuple
 
 import numpy as np
 
@@ -110,41 +109,39 @@ class RootDurationTableSynthesizer:
 
     def _get_statistics(
         self, time_bucket: int, node_name: str
-    ) -> Tuple[float, float, float, float]:
+    ) -> tuple[float, float, float, float]:
         """Get mean, variance, min_z, and max_z for a given (time_bucket, operation_type) combination."""
         key = (time_bucket, node_name)
 
         if key in self.stats_table:
             mean, variance, min_z, max_z = self.stats_table[key]
             return mean, variance, min_z, max_z
-        else:
-            # Fallback: use global statistics or return default values
-            if self.stats_table:
-                # Compute global statistics as fallback
-                all_means = []
-                all_variances = []
-                all_min_zs = []
-                all_max_zs = []
+        # Fallback: use global statistics or return default values
+        if self.stats_table:
+            # Compute global statistics as fallback
+            all_means = []
+            all_variances = []
+            all_min_zs = []
+            all_max_zs = []
 
-                for mean, variance, min_z, max_z in self.stats_table.values():
-                    all_means.append(mean)
-                    all_variances.append(variance)
-                    all_min_zs.append(min_z)
-                    all_max_zs.append(max_z)
+            for mean, variance, min_z, max_z in self.stats_table.values():
+                all_means.append(mean)
+                all_variances.append(variance)
+                all_min_zs.append(min_z)
+                all_max_zs.append(max_z)
 
-                global_mean = np.mean(all_means)
-                global_variance = np.mean(all_variances)
-                global_min_z = np.min(all_min_zs)
-                global_max_z = np.max(all_max_zs)
+            global_mean = np.mean(all_means)
+            global_variance = np.mean(all_variances)
+            global_min_z = np.min(all_min_zs)
+            global_max_z = np.max(all_max_zs)
 
-                return global_mean, global_variance, global_min_z, global_max_z
-            else:
-                # Default fallback if no data
-                return 0.0, 1.0, -3.0, 3.0
+            return global_mean, global_variance, global_min_z, global_max_z
+        # Default fallback if no data
+        return 0.0, 1.0, -3.0, 3.0
 
     def synthesize_root_duration_batch(
-        self, start_times: List[float], node_names: List[str], num_samples: int = 1
-    ) -> List[float]:
+        self, start_times: list[float], node_names: list[str], num_samples: int = 1
+    ) -> list[float]:
         """Generate root span durations for multiple start times and node names at once.
 
         Args:
@@ -166,7 +163,7 @@ class RootDurationTableSynthesizer:
 
         results = []
 
-        for start_time, node_name in zip(start_times, node_names):
+        for start_time, node_name in zip(start_times, node_names, strict=False):
             # Convert start time to time bucket
             time_bucket = int(start_time // self.bucket_size_us)
 

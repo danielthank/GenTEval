@@ -1,10 +1,9 @@
 import logging
-from typing import Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from tqdm import tqdm
 
 from .. import CompressedDataset, SerializationFormat
@@ -34,7 +33,7 @@ class StartTimeVAE(nn.Module):
             nn.Linear(hidden_dim, 1),
         )
 
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
@@ -50,7 +49,7 @@ class StartTimeVAE(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
         recon = self.decode(z)

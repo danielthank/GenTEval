@@ -9,7 +9,6 @@ This script lists and optionally deletes experiment output directories
 import argparse
 import pathlib
 import shutil
-from typing import List, Optional
 
 from .all_utils import add_common_arguments, display_configuration
 from .utils import run_dirs
@@ -18,11 +17,11 @@ from .utils import run_dirs
 def find_experiment_dirs(
     root_dir: pathlib.Path,
     output_dir_name: str,
-    applications: Optional[List[str]] = None,
-    services: Optional[List[str]] = None,
-    faults: Optional[List[str]] = None,
-    runs: Optional[List[int]] = None,
-) -> List[pathlib.Path]:
+    applications: list[str] | None = None,
+    services: list[str] | None = None,
+    faults: list[str] | None = None,
+    runs: list[int] | None = None,
+) -> list[pathlib.Path]:
     """
     Find all experiment directories matching the criteria.
 
@@ -72,7 +71,7 @@ def get_directory_size(path: pathlib.Path) -> int:
     return total_size
 
 
-def list_experiment_dirs(experiment_dirs: List[pathlib.Path], show_sizes: bool = False):
+def list_experiment_dirs(experiment_dirs: list[pathlib.Path], show_sizes: bool = False):
     """List experiment directories with optional size information."""
     if not experiment_dirs:
         print("No experiment directories found.")
@@ -98,7 +97,7 @@ def list_experiment_dirs(experiment_dirs: List[pathlib.Path], show_sizes: bool =
         print(f"Total size: {format_size(total_size)}")
 
 
-def delete_experiment_dirs(experiment_dirs: List[pathlib.Path]):
+def delete_experiment_dirs(experiment_dirs: list[pathlib.Path]):
     """Delete experiment directories."""
     if not experiment_dirs:
         print("No directories to delete.")
