@@ -744,18 +744,33 @@ class DurationReport(BaseReport):
             # Calculate averages for duration percentile cosine similarities
             if "duration_depth_0_p90_cosine_sim" in self.report[group]:
                 if self.report[group]["duration_depth_0_p90_cosine_sim"]:
-                    # Collect all cosine similarity values across runs and services
+                    # Calculate weighted average cosine similarity across all runs and all services
                     all_cosine_sims = []
-                    for run_cosine_sim in self.report[group][
-                        "duration_depth_0_p90_cosine_sim"
-                    ]:
-                        for service in run_cosine_sim:
-                            all_cosine_sims.append(run_cosine_sim[service])
+                    all_cosine_counts = []
 
-                    if all_cosine_sims:
-                        self.report[group]["duration_depth_0_p90_cosine_sim_avg"] = sum(
-                            all_cosine_sims
-                        ) / len(all_cosine_sims)
+                    for i, run_cosine_sim in enumerate(
+                        self.report[group]["duration_depth_0_p90_cosine_sim"]
+                    ):
+                        run_counts = self.report[group][
+                            "duration_depth_0_p90_count_runs"
+                        ][i]
+                        for service in run_cosine_sim:
+                            if service in run_counts:
+                                all_cosine_sims.append(run_cosine_sim[service])
+                                all_cosine_counts.append(run_counts[service])
+
+                    if all_cosine_sims and sum(all_cosine_counts) > 0:
+                        # Calculate weighted average
+                        total_weighted_cosine_sim = sum(
+                            cosine_sim * count
+                            for cosine_sim, count in zip(
+                                all_cosine_sims, all_cosine_counts
+                            )
+                        )
+                        total_count = sum(all_cosine_counts)
+                        self.report[group]["duration_depth_0_p90_cosine_sim_avg"] = (
+                            total_weighted_cosine_sim / total_count
+                        )
                     else:
                         self.report[group]["duration_depth_0_p90_cosine_sim_avg"] = (
                             float("nan")
@@ -768,18 +783,33 @@ class DurationReport(BaseReport):
 
             if "duration_depth_0_p50_cosine_sim" in self.report[group]:
                 if self.report[group]["duration_depth_0_p50_cosine_sim"]:
-                    # Collect all cosine similarity values across runs and services
+                    # Calculate weighted average cosine similarity across all runs and all services
                     all_cosine_sims = []
-                    for run_cosine_sim in self.report[group][
-                        "duration_depth_0_p50_cosine_sim"
-                    ]:
-                        for service in run_cosine_sim:
-                            all_cosine_sims.append(run_cosine_sim[service])
+                    all_cosine_counts = []
 
-                    if all_cosine_sims:
-                        self.report[group]["duration_depth_0_p50_cosine_sim_avg"] = sum(
-                            all_cosine_sims
-                        ) / len(all_cosine_sims)
+                    for i, run_cosine_sim in enumerate(
+                        self.report[group]["duration_depth_0_p50_cosine_sim"]
+                    ):
+                        run_counts = self.report[group][
+                            "duration_depth_0_p50_count_runs"
+                        ][i]
+                        for service in run_cosine_sim:
+                            if service in run_counts:
+                                all_cosine_sims.append(run_cosine_sim[service])
+                                all_cosine_counts.append(run_counts[service])
+
+                    if all_cosine_sims and sum(all_cosine_counts) > 0:
+                        # Calculate weighted average
+                        total_weighted_cosine_sim = sum(
+                            cosine_sim * count
+                            for cosine_sim, count in zip(
+                                all_cosine_sims, all_cosine_counts
+                            )
+                        )
+                        total_count = sum(all_cosine_counts)
+                        self.report[group]["duration_depth_0_p50_cosine_sim_avg"] = (
+                            total_weighted_cosine_sim / total_count
+                        )
                     else:
                         self.report[group]["duration_depth_0_p50_cosine_sim_avg"] = (
                             float("nan")
@@ -792,18 +822,33 @@ class DurationReport(BaseReport):
 
             if "duration_depth_1_p90_cosine_sim" in self.report[group]:
                 if self.report[group]["duration_depth_1_p90_cosine_sim"]:
-                    # Collect all cosine similarity values across runs and services
+                    # Calculate weighted average cosine similarity across all runs and all services
                     all_cosine_sims = []
-                    for run_cosine_sim in self.report[group][
-                        "duration_depth_1_p90_cosine_sim"
-                    ]:
-                        for service in run_cosine_sim:
-                            all_cosine_sims.append(run_cosine_sim[service])
+                    all_cosine_counts = []
 
-                    if all_cosine_sims:
-                        self.report[group]["duration_depth_1_p90_cosine_sim_avg"] = sum(
-                            all_cosine_sims
-                        ) / len(all_cosine_sims)
+                    for i, run_cosine_sim in enumerate(
+                        self.report[group]["duration_depth_1_p90_cosine_sim"]
+                    ):
+                        run_counts = self.report[group][
+                            "duration_depth_1_p90_count_runs"
+                        ][i]
+                        for service in run_cosine_sim:
+                            if service in run_counts:
+                                all_cosine_sims.append(run_cosine_sim[service])
+                                all_cosine_counts.append(run_counts[service])
+
+                    if all_cosine_sims and sum(all_cosine_counts) > 0:
+                        # Calculate weighted average
+                        total_weighted_cosine_sim = sum(
+                            cosine_sim * count
+                            for cosine_sim, count in zip(
+                                all_cosine_sims, all_cosine_counts
+                            )
+                        )
+                        total_count = sum(all_cosine_counts)
+                        self.report[group]["duration_depth_1_p90_cosine_sim_avg"] = (
+                            total_weighted_cosine_sim / total_count
+                        )
                     else:
                         self.report[group]["duration_depth_1_p90_cosine_sim_avg"] = (
                             float("nan")
@@ -816,18 +861,33 @@ class DurationReport(BaseReport):
 
             if "duration_depth_1_p50_cosine_sim" in self.report[group]:
                 if self.report[group]["duration_depth_1_p50_cosine_sim"]:
-                    # Collect all cosine similarity values across runs and services
+                    # Calculate weighted average cosine similarity across all runs and all services
                     all_cosine_sims = []
-                    for run_cosine_sim in self.report[group][
-                        "duration_depth_1_p50_cosine_sim"
-                    ]:
-                        for service in run_cosine_sim:
-                            all_cosine_sims.append(run_cosine_sim[service])
+                    all_cosine_counts = []
 
-                    if all_cosine_sims:
-                        self.report[group]["duration_depth_1_p50_cosine_sim_avg"] = sum(
-                            all_cosine_sims
-                        ) / len(all_cosine_sims)
+                    for i, run_cosine_sim in enumerate(
+                        self.report[group]["duration_depth_1_p50_cosine_sim"]
+                    ):
+                        run_counts = self.report[group][
+                            "duration_depth_1_p50_count_runs"
+                        ][i]
+                        for service in run_cosine_sim:
+                            if service in run_counts:
+                                all_cosine_sims.append(run_cosine_sim[service])
+                                all_cosine_counts.append(run_counts[service])
+
+                    if all_cosine_sims and sum(all_cosine_counts) > 0:
+                        # Calculate weighted average
+                        total_weighted_cosine_sim = sum(
+                            cosine_sim * count
+                            for cosine_sim, count in zip(
+                                all_cosine_sims, all_cosine_counts
+                            )
+                        )
+                        total_count = sum(all_cosine_counts)
+                        self.report[group]["duration_depth_1_p50_cosine_sim_avg"] = (
+                            total_weighted_cosine_sim / total_count
+                        )
                     else:
                         self.report[group]["duration_depth_1_p50_cosine_sim_avg"] = (
                             float("nan")
