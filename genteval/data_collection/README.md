@@ -116,7 +116,6 @@ The tool generates OpenTelemetry-compatible CSV files with columns:
 - `serviceName`: Service name (extracted from URL)
 - `methodName`: HTTP method
 - `operationName`: HTTP method + path
-- `startTimeMillis`: Start time in milliseconds
 - `startTime`: Start time in microseconds
 - `duration`: Request duration in milliseconds
 - `statusCode`: HTTP status code

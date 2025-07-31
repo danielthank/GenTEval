@@ -33,6 +33,7 @@ markov_gent = "genteval.bin.markov_gent:main"
 normalize_all = "genteval.bin.normalize_all:main"
 normalize = "genteval.bin.normalize:main"
 pickle_analyzer = "genteval.bin.pickle_analyzer:main"
+convert_trajectory = "genteval.data_collection.ai_agent.cli:main"
 
 [build-system]
 requires = ["hatchling"]
