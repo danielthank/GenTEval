@@ -17,29 +17,29 @@ dependencies = [
 ]
 
 [project.scripts]
-collect_request_data = "src.bin.collect_request_data:main"
-adjust_duration = "src.data_collection.utils.adjust_duration:main"
-remove_query_param = "src.data_collection.utils.remove_query_param:main"
-delete_experiment_all = "src.bin.delete_experiment_all:main"
-evaluate = "src.bin.evaluate:main"
-evaluate_all = "src.bin.evaluate_all:main"
-generate_report = "src.bin.generate_report:main"
-gent_all = "src.bin.gent_all:main"
-gent = "src.bin.gent:main"
-head_sampling_all = "src.bin.head_sampling_all:main"
-head_sampling = "src.bin.head_sampling:main"
-markov_gent_all = "src.bin.markov_gent_all:main"
-markov_gent = "src.bin.markov_gent:main"
-normalize_all = "src.bin.normalize_all:main"
-normalize = "src.bin.normalize:main"
-pickle_analyzer = "src.bin.pickle_analyzer:main"
+collect_request_data = "genteval.bin.collect_request_data:main"
+adjust_duration = "genteval.data_collection.utils.adjust_duration:main"
+remove_query_param = "genteval.data_collection.utils.remove_query_param:main"
+delete_experiment_all = "genteval.bin.delete_experiment_all:main"
+evaluate = "genteval.bin.evaluate:main"
+evaluate_all = "genteval.bin.evaluate_all:main"
+generate_report = "genteval.bin.generate_report:main"
+gent_all = "genteval.bin.gent_all:main"
+gent = "genteval.bin.gent:main"
+head_sampling_all = "genteval.bin.head_sampling_all:main"
+head_sampling = "genteval.bin.head_sampling:main"
+markov_gent_all = "genteval.bin.markov_gent_all:main"
+markov_gent = "genteval.bin.markov_gent:main"
+normalize_all = "genteval.bin.normalize_all:main"
+normalize = "genteval.bin.normalize:main"
+pickle_analyzer = "genteval.bin.pickle_analyzer:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["genteval"]
 
 [dependency-groups]
 dev = [
