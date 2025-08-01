@@ -1,14 +1,12 @@
-#!/usr/bin/env python3
 """
-Duration Adjustment Tool
+Duration Adjustment Classes
 
-Adjusts the end time and duration of spans to match the latest end time of their children.
-This ensures that parent spans properly encompass all child span execution times.
+Contains SpanData and DurationAdjuster classes for adjusting span durations
+to match the latest end time of their children.
 """
 
-import argparse
 import csv
-import sys
+from pathlib import Path
 
 
 class SpanData:
@@ -48,13 +46,14 @@ class SpanData:
 class DurationAdjuster:
     """Adjusts span durations based on children's end times"""
 
-    def __init__(self):
+    def __init__(self, verbose: bool = True):
         self.spans: dict[str, SpanData] = {}
         self.fieldnames: list[str] = []
+        self.verbose = verbose
 
     def load_csv(self, input_file: str) -> None:
         """Load spans from CSV file"""
-        with open(input_file, newline="") as csvfile:
+        with Path(input_file).open(newline="") as csvfile:
             reader = csv.DictReader(csvfile)
             self.fieldnames = reader.fieldnames or []
 
@@ -62,7 +61,8 @@ class DurationAdjuster:
                 span = SpanData(row)
                 self.spans[span.span_id] = span
 
-        print(f"Loaded {len(self.spans)} spans from {input_file}")
+        if self.verbose:
+            print(f"Loaded {len(self.spans)} spans from {input_file}")
 
     def build_relationships(self) -> None:
         """Build parent-child relationships between spans"""
@@ -73,7 +73,8 @@ class DurationAdjuster:
 
         # Count spans with children
         parents_count = sum(1 for span in self.spans.values() if span.children)
-        print(f"Built relationships: {parents_count} parent spans found")
+        if self.verbose:
+            print(f"Built relationships: {parents_count} parent spans found")
 
     def adjust_durations(self) -> int:
         """
@@ -141,19 +142,21 @@ class DurationAdjuster:
             if not changes_made:
                 break
 
-        print(f"Adjusted {adjusted_count} spans over {iteration} iterations")
+        if self.verbose:
+            print(f"Adjusted {adjusted_count} spans over {iteration} iterations")
         return adjusted_count
 
     def save_csv(self, output_file: str) -> None:
         """Save adjusted spans to CSV file"""
-        with open(output_file, "w", newline="") as csvfile:
+        with Path(output_file).open("w", newline="") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()
 
             for span in self.spans.values():
                 writer.writerow(span.to_csv_row())
 
-        print(f"Saved adjusted spans to {output_file}")
+        if self.verbose:
+            print(f"Saved adjusted spans to {output_file}")
 
     def print_adjustment_summary(self) -> None:
         """Print summary of adjustments made"""
@@ -192,59 +195,3 @@ class DurationAdjuster:
                 f"{span.start_time:<12} {span.original_duration:<10} "
                 f"{span.adjusted_duration:<10} {changes_str:<20}"
             )
-
-
-def main():
-    """Main entry point for the adjust-duration CLI"""
-    parser = argparse.ArgumentParser(
-        description="Adjust span durations to encompass all child spans"
-    )
-
-    parser.add_argument("input_file", help="Input CSV file with span data")
-
-    parser.add_argument(
-        "--output", "-o", required=True, help="Output CSV file for adjusted data"
-    )
-
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Show detailed adjustment information",
-    )
-
-    args = parser.parse_args()
-
-    try:
-        # Initialize the adjuster
-        adjuster = DurationAdjuster()
-
-        # Load and process the data
-        adjuster.load_csv(args.input_file)
-        adjuster.build_relationships()
-        adjusted_count = adjuster.adjust_durations()
-
-        # Save results
-        adjuster.save_csv(args.output)
-
-        # Show summary
-        if args.verbose:
-            adjuster.print_adjustment_summary()
-
-        if adjusted_count > 0:
-            print(f"\nSuccessfully adjusted {adjusted_count} spans.")
-        else:
-            print(
-                "\nNo adjustments were needed - all spans already properly encompass their children."
-            )
-
-    except FileNotFoundError as e:
-        print(f"Error: Input file not found: {e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

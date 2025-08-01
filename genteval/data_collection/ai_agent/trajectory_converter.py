@@ -181,13 +181,12 @@ class TrajectoryConverter:
                 if cause is None:  # No natural parent
                     self.artificial_parent_map[entry_id] = current_user_chat_id
 
-    def convert(self, input_file: str, output_file: str) -> None:
-        """Convert trajectory JSON to traces CSV format."""
-        # Load trajectory data
-        input_path = Path(input_file)
-        with input_path.open() as f:
-            trajectory_data = json.load(f)
+    def convert_data(self, trajectory_data: list[dict[str, Any]]) -> None:
+        """Convert trajectory data (already loaded) to traces format.
 
+        Args:
+            trajectory_data: List of trajectory entries as dictionaries
+        """
         # Store trajectory data for summary generation
         self.trajectory_data = trajectory_data
 
@@ -209,7 +208,6 @@ class TrajectoryConverter:
         for i, entry in enumerate(trajectory_data):
             entry_id = entry.get("id", i)
             timestamp_str = entry.get("timestamp", "")
-
             if not timestamp_str:
                 continue
 
@@ -251,7 +249,12 @@ class TrajectoryConverter:
 
             self.traces.append(trace_entry)
 
-        # Write to CSV
+    def write_traces(self, output_file: str) -> None:
+        """Write traces to CSV file.
+
+        Args:
+            output_file: Path to output CSV file
+        """
         fieldnames = [
             "time",
             "traceID",
@@ -270,6 +273,17 @@ class TrajectoryConverter:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(self.traces)
+
+    def convert(self, input_file: str, output_file: str) -> None:
+        """Convert trajectory JSON to traces CSV format."""
+        # Load trajectory data
+        input_path = Path(input_file)
+        with input_path.open() as f:
+            trajectory_data = json.load(f)
+
+        # Convert data and write to file
+        self.convert_data(trajectory_data)
+        self.write_traces(output_file)
 
     def get_conversion_stats(self) -> dict[str, Any]:
         """Get statistics about the conversion."""
