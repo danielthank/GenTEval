@@ -43,7 +43,7 @@ def main():
         adjusted_count = adjuster.adjust_durations()
 
         # Save results
-        adjuster.save_csv(args.output)
+        adjuster.write_csv(args.output)
 
         # Show summary
         if args.verbose:

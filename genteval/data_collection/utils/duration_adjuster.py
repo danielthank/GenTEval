@@ -146,8 +146,8 @@ class DurationAdjuster:
             print(f"Adjusted {adjusted_count} spans over {iteration} iterations")
         return adjusted_count
 
-    def save_csv(self, output_file: str) -> None:
-        """Save adjusted spans to CSV file"""
+    def write_csv(self, output_file: str) -> None:
+        """Write adjusted spans to CSV file"""
         with Path(output_file).open("w", newline="") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=self.fieldnames)
             writer.writeheader()

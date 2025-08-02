@@ -125,6 +125,7 @@ def process_single_file(
         adjuster.load_csv(str(temp_output))
         adjuster.build_relationships()
         adjuster.adjust_durations()
+        adjuster.write_csv(str(temp_adjusted))
 
         # Read the adjusted data
         with temp_adjusted.open("rt", encoding="utf-8") as f:
