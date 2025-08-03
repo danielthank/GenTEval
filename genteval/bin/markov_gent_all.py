@@ -8,9 +8,8 @@ from .all_utils import ScriptProcessor, run_standard_processing
 class MarkovGentProcessor(ScriptProcessor):
     """Processor for MarkovGenT operations."""
 
-    def __init__(self, root_dir: pathlib.Path, output_dir_name: str = "markov_gent"):
+    def __init__(self, root_dir: pathlib.Path):
         super().__init__("markov_gent", root_dir)
-        self.output_dir_name = output_dir_name
 
     async def process_combination(
         self,
@@ -22,10 +21,10 @@ class MarkovGentProcessor(ScriptProcessor):
         args,
     ) -> bool:
         """Process a single app/service/fault/run combination."""
-        dataset_dir = self.get_dataset_dir(app_name, service, fault, run)
-        output_dir = self.get_output_dir(
-            app_name, service, fault, run, args.output_dir_name
+        dataset_dir = (
+            self.get_dir(app_name, service, fault, run) / "original" / "dataset"
         )
+        output_dir = self.get_dir(app_name, service, fault, run) / args.output_dir_name
 
         # Skip if already processed (unless forced)
         if (
@@ -122,13 +121,13 @@ def get_markov_gent_config(args):
 async def markov_gent_task_factory(
     app_name: str,
     service: str,
-    fault: str,
+    fault: str | None,
     run: int,
     semaphore: asyncio.Semaphore,
     args,
 ):
     """Factory function to create MarkovGenT processing tasks."""
-    processor = MarkovGentProcessor(pathlib.Path(args.root_dir), args.output_dir_name)
+    processor = MarkovGentProcessor(pathlib.Path(args.root_dir))
     return await processor.process_combination(
         app_name, service, fault, run, semaphore, args
     )

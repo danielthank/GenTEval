@@ -38,11 +38,6 @@
     "**/build": true,
     "**/dist": true,
     "**/.ruff_cache": true,
-    "**/data/**/*.csv": true,
-    "**/data/**/*.json": true,
-    "**/data/**/*.zip": true,
-    "**/data/**/*.log": true,
-    "uv.lock": true
   },
   "search.exclude": {
     "**/data": true,

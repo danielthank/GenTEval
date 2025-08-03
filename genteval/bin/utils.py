@@ -1,3 +1,6 @@
+import pathlib
+
+
 def run_dirs(applications=None, services=None, faults=None, runs=None):
     """
     Generate combinations of app, service, fault, and run.
@@ -6,7 +9,7 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
         applications: List of application names or None for all (default: all)
         services: List of service names or None for all (default: all)
         faults: List of fault types or None for all (default: all)
-        runs: List of run numbers or None for all (default: [1, 2, 3])
+        runs: List of run numbers or None for all (default: all)
 
     Yields:
         Tuple of (app_name, service, fault, run)
@@ -20,6 +23,7 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
                 "productcatalogservice",
             ],
             ["cpu", "delay", "disk", "loss", "mem", "socket"],
+            [1, 2, 3],
         ),
         "RE2-TT": (
             [
@@ -30,6 +34,12 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
                 "ts-travel-service",
             ],
             ["cpu", "delay", "disk", "loss", "mem", "socket"],
+            [1, 2, 3],
+        ),
+        "the-agent-company-transformed": (
+            ["20241217_OpenHands-0.14.2-gemini-1.5-pro"],
+            [None],
+            [1],
         ),
     }
 
@@ -41,19 +51,14 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
     else:
         target_apps = applications
 
-    if runs is None:
-        target_runs = [1, 2, 3]
-    elif isinstance(runs, int):
-        target_runs = [runs]
-    else:
-        target_runs = runs
-
     # Process each requested application
     for app_name in target_apps:
         if app_name not in all_applications:
             continue
 
-        available_services, available_faults = all_applications[app_name]
+        available_services, available_faults, available_runs = all_applications[
+            app_name
+        ]
         # Filter services
         if services is None:
             target_services = available_services
@@ -61,6 +66,14 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
             target_services = [services] if services in available_services else []
         else:
             target_services = [s for s in services if s in available_services]
+
+        # Filter runs
+        if runs is None:
+            target_runs = available_runs
+        elif isinstance(runs, int):
+            target_runs = [runs] if runs in available_runs else []
+        else:
+            target_runs = [r for r in runs if r in available_runs]
 
         # Filter faults
         if faults is None:
@@ -74,3 +87,11 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
             for fault in target_faults:
                 for run in target_runs:
                     yield app_name, service, fault, run
+
+
+def get_dir_with_root(
+    root_dir: pathlib.Path, app_name: str, service: str, fault: str | None, run: int
+) -> pathlib.Path:
+    if fault is not None:
+        return root_dir / app_name / f"{service}_{fault}" / str(run)
+    return root_dir / app_name / service / str(run)

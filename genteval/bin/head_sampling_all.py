@@ -22,9 +22,12 @@ class HeadSamplingProcessor(ScriptProcessor):
         args,
     ) -> bool:
         """Process a single app/service/fault/run combination."""
-        dataset_dir = self.get_dataset_dir(app_name, service, fault, run)
-        output_dir = self.get_output_dir(
-            app_name, service, fault, run, f"head_sampling_{args.sampling_rate}"
+        dataset_dir = (
+            self.get_dir(app_name, service, fault, run) / "original" / "dataset"
+        )
+        output_dir = (
+            self.get_dir(app_name, service, fault, run)
+            / f"head_sampling_{args.sampling_rate}"
         )
 
         # Skip if already processed unless forced
@@ -68,7 +71,7 @@ def get_head_sampling_config(args):
 async def head_sampling_task_factory(
     app_name: str,
     service: str,
-    fault: str,
+    fault: str | None,
     run: int,
     semaphore: asyncio.Semaphore,
     args,

@@ -11,7 +11,7 @@ import pathlib
 import shutil
 
 from .all_utils import add_common_arguments, display_configuration
-from .utils import run_dirs
+from .utils import get_dir_with_root, run_dirs
 
 
 def find_experiment_dirs(
@@ -40,7 +40,7 @@ def find_experiment_dirs(
 
     for app_name, service, fault, run in run_dirs(applications, services, faults, runs):
         experiment_dir = (
-            root_dir / app_name / f"{service}_{fault}" / str(run) / output_dir_name
+            get_dir_with_root(root_dir, app_name, service, fault, run) / output_dir_name
         )
 
         if experiment_dir.exists() and experiment_dir.is_dir():

@@ -12,7 +12,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from .utils import run_dirs
+from .utils import get_dir_with_root, run_dirs
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -160,29 +160,10 @@ class ScriptProcessor:
                 print(f"Error running script: {e}")
                 return False
 
-    def get_dataset_dir(
-        self,
-        app_name: str,
-        service: str,
-        fault: str,
-        run: int,
-        subdir: str = "original",
+    def get_dir(
+        self, app_name: str, service: str, fault: str | None, run: int
     ) -> pathlib.Path:
-        """Get the dataset directory path."""
-        return (
-            self.root_dir
-            / app_name
-            / f"{service}_{fault}"
-            / str(run)
-            / subdir
-            / "dataset"
-        )
-
-    def get_output_dir(
-        self, app_name: str, service: str, fault: str, run: int, output_name: str
-    ) -> pathlib.Path:
-        """Get the output directory path."""
-        return self.root_dir / app_name / f"{service}_{fault}" / str(run) / output_name
+        return get_dir_with_root(self.root_dir, app_name, service, fault, run)
 
 
 def create_standard_parser(

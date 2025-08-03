@@ -61,7 +61,7 @@ def find_trajectory_files(root_dir: str) -> list[tuple[Path, Path]]:
         model_name = parts[model_idx]
         filename = Path(traj_file.stem).stem  # Remove both .gz and .json extensions
 
-        # Create output path: output_dir/the-agent-company/model_name/1/traces.csv
+        # Create output path: output_dir/model_name/1/traces.csv
         file_pairs.append((traj_file, model_name, filename))
 
     return file_pairs
@@ -161,14 +161,14 @@ Examples:
 
     parser.add_argument(
         "--root_dir",
-        required=True,
-        help="Root directory containing trajectory files (e.g., ./data/the-agent-company)",
+        default="./data/the-agent-company",
+        help="Root directory containing trajectory files (default: ./data/the-agent-company)",
     )
 
     parser.add_argument(
         "--output_dir",
-        required=True,
-        help="Output directory for converted CSV files (e.g., ./output)",
+        default="./data/the-agent-company-transformed",
+        help="Output directory for converted CSV files (default: ./data/the-agent-company-transformed)",
     )
 
     parser.add_argument(
@@ -199,13 +199,7 @@ Examples:
         if args.dry_run:
             console.print("\n[bold]Files that would be processed:[/bold]")
             for input_file, model_name, _filename in file_pairs:
-                output_file = (
-                    Path(args.output_dir)
-                    / "the-agent-company"
-                    / model_name
-                    / "1"
-                    / "traces.csv"
-                )
+                output_file = Path(args.output_dir) / model_name / "1" / "traces.csv"
                 console.print(f"  {input_file} -> {output_file}")
             return
 
@@ -234,13 +228,7 @@ Examples:
 
             for model_name, files in model_groups.items():
                 # Create output directory for this model
-                output_file = (
-                    Path(args.output_dir)
-                    / "the-agent-company"
-                    / model_name
-                    / "1"
-                    / "traces.csv"
-                )
+                output_file = Path(args.output_dir) / model_name / "1" / "traces.csv"
                 ensure_output_directory(output_file)
 
                 model_task = progress.add_task(

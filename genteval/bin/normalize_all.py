@@ -3,14 +3,15 @@ import asyncio
 import pathlib
 
 from .all_utils import ScriptProcessor, run_standard_processing
+from .utils import get_dir_with_root
 
 
 class NormalizeProcessor(ScriptProcessor):
     """Processor for normalize operations."""
 
-    def __init__(self, root_dir: pathlib.Path, output_dir: pathlib.Path):
+    def __init__(self, root_dir: pathlib.Path, run_dir: pathlib.Path):
         super().__init__("normalize", root_dir)
-        self.output_root = output_dir
+        self.run_dir = run_dir
 
     async def process_combination(
         self,
@@ -22,21 +23,16 @@ class NormalizeProcessor(ScriptProcessor):
         args,
     ) -> bool:
         """Process a single app/service/fault/run combination."""
-        run_dir = self.root_dir / app_name / f"{service}_{fault}" / str(run)
-        output_path = (
-            self.output_root
-            / app_name
-            / f"{service}_{fault}"
-            / str(run)
-            / "original"
-            / "dataset"
+        run_dir = get_dir_with_root(self.run_dir, app_name, service, fault, run)
+        output_dir = (
+            self.get_dir(app_name, service, fault, run) / "original" / "dataset"
         )
 
         # Create output directory
-        output_path.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Prepare script arguments
-        script_args = ["--run_dir", str(run_dir), "-o", str(output_path)]
+        script_args = ["--run_dir", str(run_dir), "-o", str(output_dir)]
 
         print(f"Processing {run_dir}...")
         return await self.run_script(script_args, semaphore)
@@ -45,29 +41,29 @@ class NormalizeProcessor(ScriptProcessor):
 def add_normalize_arguments(parser: argparse.ArgumentParser):
     """Add normalize-specific arguments."""
     parser.add_argument(
-        "--output_dir",
+        "--run_dir",
         type=str,
         required=True,
-        help="Directory to save the normalized traces",
+        help="Directory of data to normalize",
     )
 
 
 def get_normalize_config(args):
     """Get normalize-specific configuration for display."""
-    return {"Output Directory": args.output_dir}
+    return {"Run Directory": args.run_dir}
 
 
 async def normalize_task_factory(
     app_name: str,
     service: str,
-    fault: str,
+    fault: str | None,
     run: int,
     semaphore: asyncio.Semaphore,
     args,
 ):
     """Factory function to create normalize processing tasks."""
     processor = NormalizeProcessor(
-        pathlib.Path(args.root_dir), pathlib.Path(args.output_dir)
+        pathlib.Path(args.root_dir), pathlib.Path(args.run_dir)
     )
     return await processor.process_combination(
         app_name, service, fault, run, semaphore, args
