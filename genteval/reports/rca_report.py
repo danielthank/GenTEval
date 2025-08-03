@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from genteval.bin.utils import get_dir_with_root
+
 from .base_report import BaseReport
 
 
@@ -42,13 +44,11 @@ class RCAReport(BaseReport):
             for compressor in self.compressors:
                 report_group = f"{app_name}_{compressor}"
 
-                results_path = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    compressor,
-                    "evaluated",
-                    self.results_filename,
+                results_path = (
+                    get_dir_with_root(self.root_dir, app_name, service, fault, run)
+                    / compressor
+                    / "evaluated"
+                    / self.results_filename
                 )
 
                 if not self.file_exists(results_path):
@@ -58,7 +58,9 @@ class RCAReport(BaseReport):
                     continue
 
                 results = self.load_json_file(results_path)
-                ranks = results.get("ranks", [])
+                if "ranks" not in results:
+                    continue
+                ranks = results["ranks"]
 
                 for rank in ranks:
                     services.add(rank)

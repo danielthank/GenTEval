@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import wasserstein_distance
 
+from genteval.bin.utils import get_dir_with_root
+
 from .base_report import BaseReport
 
 
@@ -79,20 +81,18 @@ class SpanCountReport(BaseReport):
         """Generate span count report with Wasserstein distance calculations and visualizations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
-                if compressor == "original" or compressor == "head_sampling_1":
+                if compressor in {"original", "head_sampling_1"}:
                     self.print_skip_message(
                         f"Compressor {compressor} is not supported for span count evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."
                     )
                     continue
 
-                original_results_path = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    "head_sampling_1",
-                    "evaluated",
-                    "span_count_results.json",
+                original_results_path = (
+                    get_dir_with_root(self.root_dir, app_name, service, fault, run)
+                    / "head_sampling_1"
+                    / "evaluated"
+                    / "span_count_results.json"
                 )
 
                 if not self.file_exists(original_results_path):
@@ -101,13 +101,11 @@ class SpanCountReport(BaseReport):
                     )
                     continue
 
-                results_path = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    compressor,
-                    "evaluated",
-                    "span_count_results.json",
+                results_path = (
+                    get_dir_with_root(self.root_dir, app_name, service, fault, run)
+                    / compressor
+                    / "evaluated"
+                    / "span_count_results.json"
                 )
 
                 if not self.file_exists(results_path):

@@ -22,28 +22,24 @@ def main():
         "--apps",
         type=str,
         nargs="*",
-        default=None,
         help="Application to run (e.g., RE2-OB, RE2-TT)",
     )
     argparser.add_argument(
         "--services",
         type=str,
         nargs="*",
-        default=None,
         help="Specific services to include (e.g., checkoutservice, ts-auth-service)",
     )
     argparser.add_argument(
         "--faults",
         type=str,
         nargs="*",
-        default=None,
         help="Specific fault types to include (e.g., cpu, delay, disk, loss, mem, socket)",
     )
     argparser.add_argument(
         "--runs",
         type=int,
         nargs="*",
-        default=None,
         help="Specific run numbers to include (default: [1, 2, 3])",
     )
     argparser.add_argument(

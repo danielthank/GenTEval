@@ -510,5 +510,7 @@ def microrank(data, inject_time=None, dataset=None, **kwargs):
 
 class MicroRankEvaluator(Evaluator):
     def evaluate(self, dataset: Dataset, labels):
+        if "inject_time" not in labels:
+            return {}
         dataset = RCAEvalDataset.from_dataset(dataset)
         return microrank(dataset.spans, labels["inject_time"])

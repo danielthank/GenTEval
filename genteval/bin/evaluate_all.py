@@ -12,6 +12,7 @@ from .all_utils import (
     create_standard_parser,
     display_configuration,
 )
+from .utils import get_dir_with_root
 
 
 async def evaluate_task(
@@ -28,10 +29,14 @@ async def evaluate_task(
 ):
     """Evaluate a single dataset with a specific compressor and evaluator."""
     dataset_dir = (
-        root_dir / app_name / f"{service}_{fault}" / str(run) / compressor / "dataset"
+        get_dir_with_root(root_dir, app_name, service, fault, run)
+        / compressor
+        / "dataset"
     )
     evaluated_dir = (
-        root_dir / app_name / f"{service}_{fault}" / str(run) / compressor / "evaluated"
+        get_dir_with_root(root_dir, app_name, service, fault, run)
+        / compressor
+        / "evaluated"
     )
     result_file = evaluated_dir / f"{evaluator}_results.json"
 
@@ -142,10 +147,7 @@ async def evaluate_all():
                 continue
 
             labels_path = (
-                root_dir
-                / app_name
-                / f"{service}_{fault}"
-                / str(run)
+                get_dir_with_root(root_dir, app_name, service, fault, run)
                 / "original"
                 / "dataset"
                 / "labels.pkl"

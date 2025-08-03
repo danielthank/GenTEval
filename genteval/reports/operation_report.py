@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from genteval.bin.utils import get_dir_with_root
+
 from .base_report import BaseReport
 
 
@@ -44,20 +46,18 @@ class OperationReport(BaseReport):
         """Generate operation report with F1 score calculations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
-                if compressor == "original" or compressor == "head_sampling_1":
+                if compressor in {"original", "head_sampling_1"}:
                     self.print_skip_message(
                         f"Compressor {compressor} is not supported for operation evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."
                     )
                     continue
 
-                original_results_path = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    "head_sampling_1",
-                    "evaluated",
-                    "operation_results.json",
+                original_results_path = (
+                    get_dir_with_root(self.root_dir, app_name, service, fault, run)
+                    / "head_sampling_1"
+                    / "evaluated"
+                    / "operation_results.json"
                 )
 
                 if not self.file_exists(original_results_path):
@@ -66,13 +66,11 @@ class OperationReport(BaseReport):
                     )
                     continue
 
-                results_path = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    compressor,
-                    "evaluated",
-                    "operation_results.json",
+                results_path = (
+                    get_dir_with_root(self.root_dir, app_name, service, fault, run)
+                    / compressor
+                    / "evaluated"
+                    / "operation_results.json"
                 )
 
                 if not self.file_exists(results_path):

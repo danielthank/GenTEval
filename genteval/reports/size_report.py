@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from genteval.bin.utils import get_dir_with_root
+
 from .base_report import BaseReport
 
 
@@ -16,13 +18,11 @@ class SizeReport(BaseReport):
                 report_group = f"{app_name}_{compressor}"
 
                 # Calculate compressed size
-                compressed_dir = self.root_dir.joinpath(
-                    app_name,
-                    f"{service}_{fault}",
-                    str(run),
-                    compressor,
-                    "compressed",
-                    "data",
+                compressed_dir = (
+                    get_dir_with_root(self.root_dir, app_name, service, fault, run)
+                    / compressor
+                    / "compressed"
+                    / "data"
                 )
 
                 if not compressed_dir.exists():

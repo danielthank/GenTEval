@@ -131,5 +131,7 @@ def tracerca(data, inject_time=None):
 
 class TraceRCAEvaluator(Evaluator):
     def evaluate(self, dataset: Dataset, labels):
+        if "inject_time" not in labels:
+            return {}
         dataset = RCAEvalDataset.from_dataset(dataset)
         return tracerca(dataset.spans, labels["inject_time"])
