@@ -12,6 +12,8 @@ class WassersteinDistanceMetric:
         """Initialize with output directories."""
         self.duration_all_dir = output_dirs["duration_all_dir"]
         self.duration_pair_dir = output_dirs["duration_pair_dir"]
+        self.duration_depth_0_dir = output_dirs["duration_depth_0_dir"]
+        self.duration_depth_1_dir = output_dirs["duration_depth_1_dir"]
 
     def visualize_wasserstein_distributions(
         self,
@@ -86,7 +88,7 @@ class WassersteinDistanceMetric:
         if is_duration_pair:
             ax.set_xlim(0, 1)
         else:
-            ax.set_xlim(0, 100000)  # 0 to 500 milliseconds (was 500,000 μs)
+            ax.set_xlim(0, 10000000)  # 0 to 500 milliseconds (was 500,000 μs)
 
         # Set title with Wasserstein distance
         fig.suptitle(
@@ -103,6 +105,10 @@ class WassersteinDistanceMetric:
         # Choose the correct subdirectory based on the group type
         if "duration_pair" in group_name:
             filepath = self.duration_pair_dir / filename
+        elif "duration_depth_0" in group_name:
+            filepath = self.duration_depth_0_dir / filename
+        elif "duration_depth_1" in group_name:
+            filepath = self.duration_depth_1_dir / filename
         else:
             filepath = self.duration_all_dir / filename
 

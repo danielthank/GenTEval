@@ -230,15 +230,22 @@ class PercentileComparisonMetric:
         rows = (num_services + cols - 1) // cols  # Ceiling division
 
         fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows))
+
+        # Handle axes indexing for different subplot configurations
         if num_services == 1:
-            axes = [axes]
+            # Single subplot case
+            axes_flat = [axes]
         elif rows == 1:
-            axes = axes.reshape(1, -1)
+            # Single row case
+            axes_flat = (
+                axes if isinstance(axes, np.ndarray) and axes.ndim == 1 else [axes]
+            )
+        else:
+            # Multiple rows case
+            axes_flat = axes.flatten()
 
         for idx, service in enumerate(sorted(common_services)):
-            row = idx // cols
-            col = idx % cols
-            ax = axes[row, col] if rows > 1 else axes[col]
+            ax = axes_flat[idx]
 
             # Use pre-calculated data for this service
             if service not in service_data:
@@ -292,12 +299,8 @@ class PercentileComparisonMetric:
 
         # Hide unused subplots
         for idx in range(num_services, rows * cols):
-            row = idx // cols
-            col = idx % cols
-            if rows > 1:
-                axes[row, col].set_visible(False)
-            else:
-                axes[col].set_visible(False)
+            if idx < len(axes_flat):
+                axes_flat[idx].set_visible(False)
 
         plt.tight_layout()
 
