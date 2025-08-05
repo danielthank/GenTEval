@@ -2,10 +2,10 @@ import logging
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 import wandb
 from sklearn.preprocessing import LabelEncoder
 from torch import nn
+from torch.nn import functional
 from tqdm import tqdm
 
 from genteval.compressors import CompressedDataset, SerializationFormat
@@ -13,7 +13,7 @@ from genteval.compressors import CompressedDataset, SerializationFormat
 
 class MetadataVAE(nn.Module):
     def __init__(self, vocab_size: int, hidden_dim: int = 128, latent_dim: int = 32):
-        super(MetadataVAE, self).__init__()
+        super().__init__()
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
@@ -21,7 +21,6 @@ class MetadataVAE(nn.Module):
         # Embedding for node names
         self.node_embedding = nn.Embedding(vocab_size, 32)
 
-        # Input: [parent_start_time, parent_duration, parent_embedding, child_embedding]
         input_dim = 2 + 32 + 32  # 2 numerical + 2 embeddings of size 32
 
         # Encoder (single layer)
@@ -104,7 +103,7 @@ class MetadataVAE(nn.Module):
         logvar: torch.Tensor,
     ) -> torch.Tensor:
         # Reconstruction loss
-        recon_loss = F.mse_loss(recon_x, x, reduction="sum")
+        recon_loss = functional.mse_loss(recon_x, x, reduction="sum")
 
         # KL divergence loss
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
@@ -117,7 +116,6 @@ class MetadataVAE(nn.Module):
         parent_duration: torch.Tensor,
         parent_node_idx: torch.Tensor,
         child_node_idx: torch.Tensor,
-        num_samples: int = 1,
     ) -> torch.Tensor:
         """
         Generate samples by sampling from the prior distribution (no encoder needed).
@@ -127,10 +125,9 @@ class MetadataVAE(nn.Module):
             parent_duration: Tensor of shape (batch_size,)
             parent_node_idx: Tensor of shape (batch_size,) - node name indices
             child_node_idx: Tensor of shape (batch_size,) - node name indices
-            num_samples: Number of samples to generate for each input
 
         Returns:
-            Tensor of shape (batch_size, num_samples, 2) containing sampled outputs
+            Tensor of shape (batch_size, 2) containing sampled outputs
         """
         batch_size = parent_start_time.shape[0]
 
@@ -148,17 +145,11 @@ class MetadataVAE(nn.Module):
             dim=1,
         )  # (batch_size, 66)
 
-        samples = []
-        for _ in range(num_samples):
-            # Sample from prior distribution (standard normal)
-            z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
+        # Sample from prior distribution (standard normal)
+        z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
 
-            # Decode with conditioning
-            sample = self.decode(z, conditioning)
-            samples.append(sample)
-
-        # Stack samples: (batch_size, num_samples, 2)
-        return torch.stack(samples, dim=1)
+        # Decode with conditioning
+        return self.decode(z, conditioning)
 
 
 class MetadataSynthesizer:
@@ -183,7 +174,7 @@ class MetadataSynthesizer:
         # Collect all node names for encoding
         all_node_names = set()
         for trace in traces:
-            for span_id, span_data in trace.spans.items():
+            for span_data in trace.spans.values():
                 node_name = span_data["nodeName"]
                 all_node_names.add(node_name)
 
@@ -204,7 +195,7 @@ class MetadataSynthesizer:
         for trace in tqdm(traces, desc="Processing traces for metadata training"):
             try:
                 # Build parent-child relationships
-                for span_id, span_data in trace.spans.items():
+                for span_data in trace.spans.values():
                     parent_id = span_data["parentSpanId"]
                     if parent_id and parent_id in trace.spans:
                         parent_data = trace.spans[parent_id]
@@ -247,7 +238,7 @@ class MetadataSynthesizer:
                         all_start_times.append(parent_start_time)
                         all_durations.append(parent_duration)
 
-            except Exception as e:
+            except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
                 self.logger.warning(f"Error processing trace: {e}")
                 continue
 
@@ -386,7 +377,6 @@ class MetadataSynthesizer:
         parent_durations: list[float],
         parent_nodes: list[str],
         child_nodes: list[str],
-        num_samples: int = 1,
     ) -> list[tuple[float, float]]:
         """
         Generate child start_times and durations for multiple parent-child pairs at once.
@@ -396,11 +386,9 @@ class MetadataSynthesizer:
             parent_durations: List of parent durations
             parent_nodes: List of parent node names
             child_nodes: List of child node names
-            num_samples: Number of samples to generate per input (default: 1)
 
         Returns:
-            List of tuples (child_start_time, child_duration). If num_samples > 1,
-            returns num_samples results for each input concatenated in order.
+            List of tuples (child_start_time, child_duration).
         """
         if not self.is_fitted:
             raise ValueError("Model must be fitted before synthesis")
@@ -429,7 +417,8 @@ class MetadataSynthesizer:
                     try:
                         parent_node_idx = self.node_encoder.transform([parent_node])[0]
                     except ValueError:
-                        parent_node_idx = np.random.randint(
+                        rng = np.random.default_rng()
+                        parent_node_idx = rng.integers(
                             0, len(self.node_encoder.classes_)
                         )
                     parent_node_indices.append(parent_node_idx)
@@ -443,7 +432,8 @@ class MetadataSynthesizer:
                     try:
                         child_node_idx = self.node_encoder.transform([child_node])[0]
                     except ValueError:
-                        child_node_idx = np.random.randint(
+                        rng = np.random.default_rng()
+                        child_node_idx = rng.integers(
                             0, len(self.node_encoder.classes_)
                         )
                     child_node_indices.append(child_node_idx)
@@ -472,26 +462,24 @@ class MetadataSynthesizer:
                 parent_duration_tensor,
                 parent_node_tensor,
                 child_node_tensor,
-                num_samples=num_samples,
             )
 
             # Process batch results
             results = []
             for i in range(batch_size):
-                for j in range(num_samples):
-                    # Get ratio outputs (already bounded [0,1] by sigmoid)
-                    gap_from_parent_ratio = samples[i, j, 0].item()
-                    child_duration_ratio = samples[i, j, 1].item()
+                # Get ratio outputs (already bounded [0,1] by sigmoid)
+                gap_from_parent_ratio = samples[i, 0].item()
+                child_duration_ratio = samples[i, 1].item()
 
-                    # Convert ratios back to absolute values
-                    gap_from_parent = gap_from_parent_ratio * parent_durations[i]
-                    child_duration = child_duration_ratio * parent_durations[i]
+                # Convert ratios back to absolute values
+                gap_from_parent = gap_from_parent_ratio * parent_durations[i]
+                child_duration = child_duration_ratio * parent_durations[i]
 
-                    # Compute child start time
-                    child_start_time = parent_start_times[i] + max(0, gap_from_parent)
-                    child_duration = max(1, child_duration)
+                # Compute child start time
+                child_start_time = parent_start_times[i] + max(0, gap_from_parent)
+                child_duration = max(1, child_duration)
 
-                    results.append((child_start_time, child_duration))
+                results.append((child_start_time, child_duration))
 
             return results
 
@@ -534,8 +522,9 @@ class MetadataSynthesizer:
             metadata_vae = {
                 k: v
                 for k, v in self.model.state_dict().items()
-                if k.startswith("decoder")
-                or k.startswith("node_embedding")  # Keep embeddings for conditioning
+                if k.startswith(
+                    ("decoder", "node_embedding")
+                )  # Keep embeddings for conditioning
             }
         else:
             metadata_vae = self.model.state_dict()
