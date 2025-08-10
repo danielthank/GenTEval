@@ -19,7 +19,7 @@ class RootVAE(nn.Module):
         hidden_dim: int = 128,
         latent_dim: int = 32,
     ):
-        super(RootVAE, self).__init__()
+        super().__init__()
         self.vocab_size = vocab_size
         self.time_bucket_vocab_size = time_bucket_vocab_size
         self.hidden_dim = hidden_dim
@@ -153,7 +153,7 @@ class RootDurationVAESynthesizer:
         self.logger = logging.getLogger(__name__)
 
         # Time bucketing configuration (hardcoded, same as root_mlp)
-        self.bucket_size_us = 60 * 1000000  # 1 minute in microseconds
+        self.bucket_size_us = 6000000 * 1000000  # 1 minute in microseconds
 
         # Initialize placeholder model (will be properly initialized after fitting)
         self.model = None
@@ -179,10 +179,11 @@ class RootDurationVAESynthesizer:
 
         for trace in traces:
             # Find root spans (spans with no parent)
-            root_spans = []
-            for span_id, span_data in trace.spans.items():
-                if span_data["parentSpanId"] is None:
-                    root_spans.append(span_data)
+            root_spans = [
+                span_data
+                for span_data in trace.spans.values()
+                if span_data["parentSpanId"] is None
+            ]
 
             for root_span in root_spans:
                 root_start_times.append(root_span["startTime"])
@@ -424,9 +425,7 @@ class RootDurationVAESynthesizer:
             root_vae = {
                 k: v
                 for k, v in self.model.state_dict().items()
-                if k.startswith("decoder")
-                or k.startswith("node_embedding")
-                or k.startswith("time_embedding")
+                if k.startswith(("decoder", "node_embedding", "time_embedding"))
             }
         else:
             root_vae = self.model.state_dict()
