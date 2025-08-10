@@ -28,7 +28,11 @@ class MarkovGenTConfig:
     # Metadata VAE/NN
     metadata_latent_dim: int = 32
     metadata_hidden_dim: int = 128
-    metadata_epochs: int = 10
+    metadata_epochs: int = 500
+    early_stopping_patience: int = 10
+
+    # Beta scheduling for VAE
+    beta: float = 0.01
 
     # General
     batch_size: int = 64

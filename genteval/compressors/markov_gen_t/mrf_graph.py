@@ -7,6 +7,7 @@ from scipy.special import logsumexp
 
 from genteval.compressors import CompressedDataset, SerializationFormat
 from genteval.compressors.trace import Trace
+from genteval.utils.data_structures import count_spans_per_tree
 
 
 class TreeNode:
@@ -56,12 +57,13 @@ class MarkovRandomField:
         self.root_features = (
             Counter()
         )  # (node_name, child_cnt) -> count for root nodes only
-        self.edge_features = Counter()  # (parent_node_name, parent_child_cnt, child_node_name, child_child_cnt, depth_diff) -> count
+        self.edge_features = Counter()  # (parent_node_name, parent_child_cnt, parent_child_idx, child_node_name, child_child_cnt) -> count
 
         # MRF parameters (learned via maximum likelihood)
         self.root_potentials = {}  # Unary potentials for root nodes
         self.edge_potentials = {}  # Pairwise potentials for edges
         self.node_potentials = {}  # Global node type potentials
+        self.child_candidates_cache = {}  # Pre-computed child candidates with probabilities
         self.is_trained = False
 
     def _extract_graph_features(self, trace: Trace):
@@ -70,13 +72,13 @@ class MarkovRandomField:
         graph = nx.DiGraph()
         root_spans = []
 
-        for span_id, span_data in trace._spans.items():
+        for span_id, span_data in trace.spans.items():
             graph.add_node(span_id, **span_data)
             if span_data.get("parentSpanId") is None:
                 root_spans.append(span_id)
             else:
                 parent_id = span_data["parentSpanId"]
-                if parent_id in trace._spans:
+                if parent_id in trace.spans:
                     graph.add_edge(parent_id, span_id)
 
         # Extract features for each connected component
@@ -102,7 +104,13 @@ class MarkovRandomField:
                     self.root_features[root_features] += 1
                 self.node_names.add(node_name)
 
-                for child in children:
+                # Sort children by startTime to get correct indices
+                children_with_time = [
+                    (child, trace.spans[child]["startTime"]) for child in children
+                ]
+                children_with_time.sort(key=lambda x: x[1])  # Sort by startTime
+
+                for parent_child_idx, (child, _) in enumerate(children_with_time):
                     if child not in visited:
                         visited.add(child)
                         queue.append((child, depth + 1))
@@ -110,14 +118,13 @@ class MarkovRandomField:
                         child_name = trace.spans[child]["nodeName"]
                         child_children = list(graph.successors(child))
                         child_child_cnt = min(len(child_children), self.max_children)
-                        depth_diff = 1  # Always 1 for parent-child relationship
 
                         edge_features = (
                             node_name,
                             child_cnt,
+                            parent_child_idx,
                             child_name,
                             child_child_cnt,
-                            depth_diff,
                         )
 
                         self.edge_features[edge_features] += 1
@@ -130,17 +137,18 @@ class MarkovRandomField:
         """Learn MRF parameters from traces."""
         self.logger.info("Training Markov Random Field for graph structure modeling")
 
-        # Calculate min and max node counts from the dataset
-        node_counts = []
+        # Calculate min and max node counts from the dataset using Union-Find
+        all_tree_sizes = []
         for trace in traces:
-            node_count = len(trace)
-            node_counts.append(node_count)
+            tree_sizes = count_spans_per_tree(trace.spans)
+            all_tree_sizes.extend(tree_sizes)
 
-        if node_counts:
-            self.min_nodes_count = min(node_counts)
-            self.max_nodes_count = max(node_counts)
+        if all_tree_sizes:
+            self.min_nodes_count = min(all_tree_sizes)
+            self.max_nodes_count = max(all_tree_sizes)
             self.logger.info(
-                f"Dataset node count range: {self.min_nodes_count} - {self.max_nodes_count}"
+                f"Dataset tree size range: {self.min_nodes_count} - {self.max_nodes_count} "
+                f"(calculated from {len(all_tree_sizes)} trees)"
             )
         else:
             # Fallback defaults if no traces
@@ -180,14 +188,16 @@ class MarkovRandomField:
             parent_key = (
                 edge_features[0],
                 edge_features[1],
-            )  # (parent_node_name, parent_child_cnt)
+                edge_features[2],
+            )  # (parent_node_name, parent_child_cnt, parent_child_idx)
             parent_counts[parent_key] += self.edge_features[edge_features]
 
         for edge_features, count in self.edge_features.items():
             parent_key = (
                 edge_features[0],
                 edge_features[1],
-            )  # (parent_node_name, parent_child_cnt)
+                edge_features[2],
+            )  # (parent_node_name, parent_child_cnt, parent_child_idx)
             parent_total = parent_counts[parent_key]
             if parent_total > 0:
                 self.edge_potentials[edge_features] = np.log(count / parent_total)
@@ -198,7 +208,7 @@ class MarkovRandomField:
 
         # Count all nodes from edge features (children)
         for edge_features, count in self.edge_features.items():
-            child_name, child_cnt = edge_features[2], edge_features[3]
+            child_name, child_cnt = edge_features[3], edge_features[4]
             node_key = (child_name, child_cnt)
             node_counts[node_key] += count
             total_nodes += count
@@ -215,68 +225,97 @@ class MarkovRandomField:
         for node_key, count in node_counts.items():
             self.node_potentials[node_key] = np.log(count / total_nodes)
 
-    def generate_tree_structure(self, max_nodes: int = None) -> TreeNode:
-        """Generate tree structure using MRF sampling with reject sampling for node count constraints."""
+        # Build child candidates cache for fast lookup during generation
+        self._build_child_candidates_cache()
+
+    def _build_child_candidates_cache(self):
+        """Build cache of child candidates with pre-computed probabilities."""
+        self.child_candidates_cache = {}
+
+        # Group edge features by parent key (parent_node_name, parent_child_cnt, parent_child_idx)
+        parent_groups = defaultdict(list)
+
+        for edge_features in self.edge_potentials:
+            p_node_name, p_child_cnt, p_child_idx, c_node_name, c_child_cnt = (
+                edge_features
+            )
+            parent_key = (p_node_name, p_child_cnt, p_child_idx)
+            parent_groups[parent_key].append((c_node_name, c_child_cnt))
+
+        # For each parent key, pre-compute child candidates with probabilities
+        for parent_key, child_list in parent_groups.items():
+            p_node_name, p_child_cnt, p_child_idx = parent_key
+
+            # Calculate potentials for all children of this parent
+            potentials = []
+            child_candidates = []
+
+            for c_node_name, c_child_cnt in child_list:
+                # Edge potential (conditional probability)
+                edge_key = (
+                    p_node_name,
+                    p_child_cnt,
+                    p_child_idx,
+                    c_node_name,
+                    c_child_cnt,
+                )
+                edge_potential = self.edge_potentials.get(edge_key, -np.inf)
+
+                # Node potential (global probability)
+                node_key = (c_node_name, c_child_cnt)
+                node_potential = self.node_potentials.get(node_key, -np.inf)
+
+                # Combine with lambda weighting (self.node_weight)
+                combined_potential = edge_potential + self.node_weight * node_potential
+                potentials.append(combined_potential)
+                child_candidates.append((c_node_name, c_child_cnt))
+
+            # Convert to probabilities and cache
+            if potentials:
+                potentials = np.array(potentials)
+                if np.all(np.isinf(potentials)):
+                    # Uniform sampling as fallback
+                    probs = np.ones(len(child_candidates)) / len(child_candidates)
+                else:
+                    potentials = potentials - logsumexp(potentials)
+                    probs = np.exp(potentials)
+
+                self.child_candidates_cache[parent_key] = (child_candidates, probs)
+
+    def generate_tree_structure(self, max_nodes: int | None = None) -> TreeNode:
+        """Generate tree structure using MRF sampling with node count tracking during generation."""
         if not self.is_trained:
             self.logger.warning("MRF not trained, cannot generate tree structure")
             return None
 
-        # Use calculated or default values for constraints
-        min_count = self.min_nodes_count if self.min_nodes_count is not None else 1
-        max_count = self.max_nodes_count if self.max_nodes_count is not None else 50
+        # Use provided max_nodes or default to dataset constraints
+        if max_nodes is None:
+            max_nodes = self.max_nodes_count if self.max_nodes_count is not None else 50
 
-        # Reject sampling to ensure generated tree meets node count constraints
-        max_attempts = 100  # Prevent infinite loops
-        attempt = 0
+        # Generate tree with node count tracking (single pass, no reject sampling)
+        return self._sample_tree_structure(max_nodes)
 
-        while attempt < max_attempts:
-            tree, node_count = self._sample_tree_structure(max_nodes)
-            if tree is None:
-                attempt += 1
-                continue
-
-            # Check if the tree meets our constraints
-            if min_count <= node_count <= max_count:
-                self.logger.debug(
-                    f"Generated tree with {node_count} nodes (attempt {attempt + 1})"
-                )
-                return tree
-
-            self.logger.debug(
-                f"Rejecting tree with {node_count} nodes (attempt {attempt + 1})"
-            )
-            attempt += 1
-
-        # If we couldn't generate a valid tree, log warning and return the last attempt
-        self.logger.warning(
-            f"Could not generate tree within node count constraints "
-            f"({min_count}-{max_count}) after {max_attempts} attempts"
-        )
-        return tree if "tree" in locals() else None
-
-    def _sample_tree_structure(self, max_nodes: int) -> tuple[TreeNode, int]:
-        """Sample tree structure from MRF using Gibbs sampling approach.
+    def _sample_tree_structure(self, max_nodes: int) -> TreeNode:
+        """Sample tree structure from MRF using Gibbs sampling approach with node count tracking.
 
         Returns:
-            tuple: (tree_root, node_count) or (None, 0) if failed
+            TreeNode: tree_root or None if failed
         """
-        # Use class default if max_nodes not provided
-        if max_nodes is None:
-            max_nodes = self.max_nodes_count
-
         # Sample root node based on node potentials
         root_features = self._sample_root_node()
         if root_features is None:
-            return None, 0
+            return None
 
         node_name, child_cnt, depth = root_features
         root = TreeNode(node_name, depth, child_cnt)
         nodes_generated = 1
 
-        # Build tree using recursive sampling
+        # Build tree using recursive sampling with node count tracking
         final_node_count = self._sample_subtree(root, max_nodes, nodes_generated)
 
-        return root, final_node_count
+        self.logger.debug(f"Generated tree with {final_node_count} nodes")
+
+        return root
 
     def _sample_root_node(self):
         """Sample root node (depth 0) from learned distribution."""
@@ -298,12 +337,12 @@ class MarkovRandomField:
         try:
             idx = np.random.choice(len(root_candidates), p=probs)
             node_name, child_cnt = root_candidates[idx]
-            return (node_name, child_cnt, 0)  # Add depth 0 for root
         except Exception:
             node_name, child_cnt = (
                 root_candidates[0] if root_candidates else (None, None)
             )
-            return (node_name, child_cnt, 0) if node_name is not None else None
+
+        return (node_name, child_cnt, 0) if node_name is not None else None
 
     def _sample_subtree(
         self, parent_node: TreeNode, max_nodes: int, nodes_generated: int
@@ -322,12 +361,12 @@ class MarkovRandomField:
             parent_node.depth,
         )
 
-        # Sample children based on edge potentials
-        for _ in range(parent_node.get_expected_child_count()):
+        # Sample children based on edge potentials, considering child indices
+        for child_idx in range(parent_node.get_expected_child_count()):
             if nodes_generated >= max_nodes:
                 break
 
-            child_features = self._sample_child_node(parent_features)
+            child_features = self._sample_child_node(parent_features, child_idx)
             if child_features is None:
                 continue
 
@@ -343,58 +382,29 @@ class MarkovRandomField:
 
         return nodes_generated
 
-    def _sample_child_node(self, parent_features):
-        """Sample child node given parent features."""
+    def _sample_child_node(self, parent_features, child_idx):
+        """Sample child node given parent features and child index using cached lookups."""
         parent_node_name, parent_child_cnt, parent_depth = parent_features
 
-        # Find all possible child features with correct depth difference from edge potentials
-        child_candidates = []
-        for edge_features in self.edge_potentials.keys():
-            p_node_name, p_child_cnt, c_node_name, c_child_cnt, depth_diff = (
-                edge_features
-            )
-            if (
-                p_node_name == parent_node_name
-                and p_child_cnt == parent_child_cnt
-                and depth_diff == 1
-            ):  # depth_diff is always 1 for parent-child
-                child_candidates.append((c_node_name, c_child_cnt, parent_depth + 1))
+        # Use cached child candidates for fast lookup
+        parent_key = (parent_node_name, parent_child_cnt, child_idx)
+
+        if parent_key not in self.child_candidates_cache:
+            return None
+
+        child_candidates, probs = self.child_candidates_cache[parent_key]
 
         if not child_candidates:
             return None
 
-        # Sample based on BOTH edge potentials AND node potentials (lambda weighting)
-        potentials = []
-        for c_features in child_candidates:
-            c_node_name, c_child_cnt, c_depth = c_features
-
-            # Edge potential (conditional probability)
-            edge_key = (parent_node_name, parent_child_cnt, c_node_name, c_child_cnt, 1)
-            edge_potential = self.edge_potentials.get(edge_key, -np.inf)
-
-            # Node potential (global probability)
-            node_key = (c_node_name, c_child_cnt)
-            node_potential = self.node_potentials.get(node_key, -np.inf)
-
-            # Combine with lambda weighting (self.node_weight)
-            combined_potential = edge_potential + self.node_weight * node_potential
-            potentials.append(combined_potential)
-
-        potentials = np.array(potentials)
-
-        # Convert to probabilities
-        if np.all(np.isinf(potentials)):
-            # Uniform sampling as fallback
-            probs = np.ones(len(child_candidates)) / len(child_candidates)
-        else:
-            potentials = potentials - logsumexp(potentials)
-            probs = np.exp(potentials)
-
         try:
             idx = np.random.choice(len(child_candidates), p=probs)
-            return child_candidates[idx]
+            c_node_name, c_child_cnt = child_candidates[idx]
+            return (c_node_name, c_child_cnt, parent_depth + 1)
         except Exception:
-            return child_candidates[0] if child_candidates else None
+            # Fallback to first candidate
+            c_node_name, c_child_cnt = child_candidates[0]
+            return (c_node_name, c_child_cnt, parent_depth + 1)
 
     def save_state_dict(self, compressed_data: CompressedDataset):
         """Save MRF state to compressed dataset - only generation essentials."""
@@ -458,3 +468,6 @@ class MarkovRandomField:
         # Initialize empty training data structures (not needed for generation)
         self.root_features = Counter()
         self.edge_features = Counter()
+
+        # Build child candidates cache for fast generation from loaded potentials
+        self._build_child_candidates_cache()

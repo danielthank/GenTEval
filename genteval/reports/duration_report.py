@@ -41,6 +41,12 @@ class DurationReport(BaseReport):
         self.duration_depth_1_before_after_dir = (
             self.viz_output_dir / "duration_depth_1_before_after_incident"
         )
+        self.duration_depth_0_by_service_dir = (
+            self.viz_output_dir / "duration_depth_0_by_service_wasserstein_dist"
+        )
+        self.duration_depth_1_by_service_dir = (
+            self.viz_output_dir / "duration_depth_1_by_service_wasserstein_dist"
+        )
 
         # Create all subdirectories only if plotting is enabled
         if self.plot:
@@ -54,6 +60,8 @@ class DurationReport(BaseReport):
             self.duration_depth_1_p90_dir.mkdir(parents=True, exist_ok=True)
             self.duration_depth_0_before_after_dir.mkdir(parents=True, exist_ok=True)
             self.duration_depth_1_before_after_dir.mkdir(parents=True, exist_ok=True)
+            self.duration_depth_0_by_service_dir.mkdir(parents=True, exist_ok=True)
+            self.duration_depth_1_by_service_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize metric classes
         self.output_dirs = {
@@ -68,6 +76,8 @@ class DurationReport(BaseReport):
             "duration_depth_1_p90_dir": self.duration_depth_1_p90_dir,
             "duration_depth_0_before_after_dir": self.duration_depth_0_before_after_dir,
             "duration_depth_1_before_after_dir": self.duration_depth_1_before_after_dir,
+            "duration_depth_0_by_service_dir": self.duration_depth_0_by_service_dir,
+            "duration_depth_1_by_service_dir": self.duration_depth_1_by_service_dir,
         }
 
         self.wasserstein_metric = WassersteinDistanceMetric(self.output_dirs)
@@ -201,6 +211,50 @@ class DurationReport(BaseReport):
                         self.report[report_group]["duration_depth_1_wdist"].append(
                             wdist
                         )
+
+                # Process duration_depth_0_by_service data
+                if (
+                    "duration_depth_0_by_service" in original
+                    and "duration_depth_0_by_service" in results
+                ):
+                    # Visualize and calculate weighted average Wasserstein distance
+                    weighted_wdist = (
+                        self.wasserstein_metric.visualize_wasserstein_by_service(
+                            original["duration_depth_0_by_service"],
+                            results["duration_depth_0_by_service"],
+                            "duration_depth_0_by_service",
+                            compressor,
+                            f"{app_name}_{service}_{fault}_{run}",
+                            plot=self.plot,
+                        )
+                    )
+
+                    report_group = f"{app_name}_{compressor}"
+                    self.report[report_group][
+                        "duration_depth_0_by_service_wdist"
+                    ].append(weighted_wdist)
+
+                # Process duration_depth_1_by_service data
+                if (
+                    "duration_depth_1_by_service" in original
+                    and "duration_depth_1_by_service" in results
+                ):
+                    # Visualize and calculate weighted average Wasserstein distance
+                    weighted_wdist = (
+                        self.wasserstein_metric.visualize_wasserstein_by_service(
+                            original["duration_depth_1_by_service"],
+                            results["duration_depth_1_by_service"],
+                            "duration_depth_1_by_service",
+                            compressor,
+                            f"{app_name}_{service}_{fault}_{run}",
+                            plot=self.plot,
+                        )
+                    )
+
+                    report_group = f"{app_name}_{compressor}"
+                    self.report[report_group][
+                        "duration_depth_1_by_service_wdist"
+                    ].append(weighted_wdist)
 
                 # Process duration_depth_0_p90_by_service data if available
                 if (
@@ -419,6 +473,18 @@ class DurationReport(BaseReport):
                     self.report[group]["duration_depth_1_wdist"]
                 ) / len(self.report[group]["duration_depth_1_wdist"])
                 del self.report[group]["duration_depth_1_wdist"]
+
+            if "duration_depth_0_by_service_wdist" in self.report[group]:
+                self.report[group]["duration_depth_0_by_service_wdist_avg"] = sum(
+                    self.report[group]["duration_depth_0_by_service_wdist"]
+                ) / len(self.report[group]["duration_depth_0_by_service_wdist"])
+                del self.report[group]["duration_depth_0_by_service_wdist"]
+
+            if "duration_depth_1_by_service_wdist" in self.report[group]:
+                self.report[group]["duration_depth_1_by_service_wdist_avg"] = sum(
+                    self.report[group]["duration_depth_1_by_service_wdist"]
+                ) / len(self.report[group]["duration_depth_1_by_service_wdist"])
+                del self.report[group]["duration_depth_1_by_service_wdist"]
 
             if "duration_depth_0_p90_mape_runs" in self.report[group]:
                 # Calculate weighted average MAPE across all runs and all services

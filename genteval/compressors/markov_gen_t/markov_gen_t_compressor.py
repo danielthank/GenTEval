@@ -1,6 +1,7 @@
 import logging
 import multiprocessing as mp
 import uuid
+from collections import defaultdict
 
 import cloudpickle
 import numpy as np
@@ -9,6 +10,7 @@ from tqdm import tqdm
 from genteval.compressors import CompressedDataset, SerializationFormat
 from genteval.compressors.trace import Trace
 from genteval.dataset import Dataset
+from genteval.utils.data_structures import count_spans_per_tree
 
 from .config import MarkovGenTConfig, RootModel
 from .metadata_vae import MetadataSynthesizer
@@ -76,7 +78,7 @@ def _generate_traces_worker(args):
             if trace_idx < len(start_times_chunk):
                 start_time = float(start_times_chunk[trace_idx])
 
-                # Generate tree structure using Markov chain
+                # Generate tree structure using Markov Random Field
                 root_node = compressor.depth_markov_chain.generate_tree_structure(
                     max_nodes=10000
                 )
@@ -100,37 +102,43 @@ def _generate_traces_worker(args):
                             "root_node": root_node,
                             "spans": {},
                             "node_to_span_id": {},
-                            "spans_by_level": {},
+                            "spans_by_level": defaultdict(list),
                         }
                     )
 
         # Traverse all trees and organize spans by level across all traces
         for trace_data in batch_traces:
 
-            def traverse_tree_by_level(node, depth=0, parent_span_id=None):
+            def traverse_tree_by_level(
+                data, node, depth=0, parent_span_id=None, child_idx=0, parent_node=None
+            ):
                 span_id = _get_random_span_id()
-                trace_data["node_to_span_id"][node] = span_id
+                data["node_to_span_id"][node] = span_id
 
-                # Group spans by depth level
-                if depth not in trace_data["spans_by_level"]:
-                    trace_data["spans_by_level"][depth] = []
+                # Calculate normalized child index
+                if parent_node and len(parent_node.children) > 0:
+                    normalized_child_idx = child_idx / len(parent_node.children)
+                else:
+                    normalized_child_idx = 0  # For root node or edge cases
 
-                trace_data["spans_by_level"][depth].append(
-                    (span_id, node, parent_span_id)
+                data["spans_by_level"][depth].append(
+                    (span_id, node, parent_span_id, normalized_child_idx)
                 )
 
                 # Traverse children at next depth level
-                for child in node.children:
-                    traverse_tree_by_level(child, depth + 1, span_id)
+                for i, child in enumerate(node.children):
+                    traverse_tree_by_level(data, child, depth + 1, span_id, i, node)
 
             # Start traversal from root
-            traverse_tree_by_level(trace_data["root_node"])
+            traverse_tree_by_level(
+                trace_data, trace_data["root_node"], parent_node=None
+            )
 
         # Find maximum depth across all traces
         max_depth = 0
         for trace_data in batch_traces:
             if trace_data["spans_by_level"]:
-                max_depth = max(max_depth, max(trace_data["spans_by_level"].keys()))
+                max_depth = max(max_depth, *trace_data["spans_by_level"].keys())
 
         # Process spans level by level across all traces for mega-batching
         for level in range(max_depth + 1):
@@ -139,20 +147,16 @@ def _generate_traces_worker(args):
                 # Collect root spans from all traces
                 all_root_start_times = []
                 all_root_node_names = []
-                root_span_mapping = []  # (trace_idx, span_idx_in_trace, span_id, node)
+                root_span_mapping = []  # (trace_idx, span_id, node)
 
                 for trace_idx, trace_data in enumerate(batch_traces):
                     if level in trace_data["spans_by_level"]:
-                        for span_idx, (
-                            span_id,
-                            node,
-                            parent_span_id,
-                        ) in enumerate(trace_data["spans_by_level"][level]):
+                        for span_id, node, _parent_span_id, _child_idx in trace_data[
+                            "spans_by_level"
+                        ][level]:
                             all_root_start_times.append(trace_data["start_time"])
                             all_root_node_names.append(node.node_name)
-                            root_span_mapping.append(
-                                (trace_idx, span_idx, span_id, node)
-                            )
+                            root_span_mapping.append((trace_idx, span_id, node))
 
                 # Batch process all root spans across all traces
                 if all_root_start_times:
@@ -161,7 +165,7 @@ def _generate_traces_worker(args):
                     )
 
                     # Create root spans
-                    for (trace_idx, span_idx, span_id, node), duration in zip(
+                    for (trace_idx, span_id, node), duration in zip(
                         root_span_mapping, root_durations, strict=False
                     ):
                         trace_data = batch_traces[trace_idx]
@@ -176,31 +180,30 @@ def _generate_traces_worker(args):
                 # Collect child spans from all traces at this level
                 all_parent_start_times = []
                 all_parent_durations = []
+                all_normalized_child_indices = []
                 all_parent_node_names = []
                 all_child_node_names = []
-                child_span_mapping = []  # (trace_idx, span_idx_in_trace, span_id, node, parent_span_id)
+                child_span_mapping = []  # (trace_idx, span_id, node, parent_span_id)
 
                 for trace_idx, trace_data in enumerate(batch_traces):
                     if level in trace_data["spans_by_level"]:
-                        for span_idx, (
+                        for (
                             span_id,
                             node,
                             parent_span_id,
-                        ) in enumerate(trace_data["spans_by_level"][level]):
+                            normalized_child_idx,
+                        ) in trace_data["spans_by_level"][level]:
                             if parent_span_id in trace_data["spans"]:
                                 parent_span = trace_data["spans"][parent_span_id]
                                 all_parent_start_times.append(parent_span["startTime"])
                                 all_parent_durations.append(parent_span["duration"])
+                                all_normalized_child_indices.append(
+                                    normalized_child_idx
+                                )
                                 all_parent_node_names.append(parent_span["nodeName"])
                                 all_child_node_names.append(node.node_name)
                                 child_span_mapping.append(
-                                    (
-                                        trace_idx,
-                                        span_idx,
-                                        span_id,
-                                        node,
-                                        parent_span_id,
-                                    )
+                                    (trace_idx, span_id, node, parent_span_id)
                                 )
 
                 # Batch process all child spans across all traces at this level
@@ -209,13 +212,14 @@ def _generate_traces_worker(args):
                         compressor.metadata_synthesizer.synthesize_metadata_batch(
                             all_parent_start_times,
                             all_parent_durations,
+                            all_normalized_child_indices,
                             all_parent_node_names,
                             all_child_node_names,
                         )
                     )
 
                     # Create child spans
-                    for (trace_idx, span_idx, span_id, node, parent_span_id), (
+                    for (trace_idx, span_id, node, parent_span_id), (
                         child_start_time,
                         child_duration,
                     ) in zip(child_span_mapping, child_metadata, strict=False):
@@ -306,6 +310,12 @@ class MarkovGenTCompressor:
         # Train metadata neural network
         self.metadata_synthesizer.fit(traces)
 
+        # Calculate total number of trees (root nodes) across all traces
+        total_trees = 0
+        for trace in traces:
+            tree_sizes = count_spans_per_tree(trace.spans)
+            total_trees += len(tree_sizes)
+
         # Create compressed dataset
         compressed_data = CompressedDataset()
 
@@ -333,10 +343,10 @@ class MarkovGenTCompressor:
             compressed_data, decoder_only=decoder_only
         )
 
-        # Save number of traces for reconstruction
+        # Save number of trees (root nodes) for reconstruction
         compressed_data.add(
             "num_traces",
-            len(traces),
+            total_trees,
             SerializationFormat.MSGPACK,
         )
 

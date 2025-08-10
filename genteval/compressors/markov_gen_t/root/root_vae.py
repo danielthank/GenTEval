@@ -99,14 +99,15 @@ class RootVAE(nn.Module):
         x: torch.Tensor,
         mu: torch.Tensor,
         logvar: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Reconstruction loss (MSE)
         recon_loss = F.mse_loss(recon_x, x, reduction="sum")
 
         # KL divergence loss
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-        return recon_loss + kl_loss
+        total_loss = recon_loss + kl_loss
+        return total_loss, recon_loss, kl_loss
 
     def sample(
         self,
@@ -244,7 +245,9 @@ class RootDurationVAESynthesizer:
 
         pbar = tqdm(range(self.config.root_epochs), desc="Training Root Duration VAE")
         for epoch in pbar:
-            total_loss = 0
+            epoch_total_loss = 0
+            epoch_recon_loss = 0
+            epoch_kl_loss = 0
             num_batches = 0
 
             # Create batches
@@ -263,23 +266,40 @@ class RootDurationVAESynthesizer:
                 # Compute loss - ensure shapes match
                 recon_duration_flat = recon_duration.view(-1)
                 batch_durations_flat = batch_durations.view(-1)
-                loss = self.model.loss_function(
+                total_loss, recon_loss, kl_loss = self.model.loss_function(
                     recon_duration_flat, batch_durations_flat, mu, logvar
                 )
 
-                loss.backward()
+                total_loss.backward()
                 self.optimizer.step()
 
-                total_loss += loss.item()
+                epoch_total_loss += total_loss.item()
+                epoch_recon_loss += recon_loss.item()
+                epoch_kl_loss += kl_loss.item()
                 num_batches += 1
 
             # Update progress bar
-            avg_loss = total_loss / max(num_batches, 1)
-            pbar.set_postfix({"Loss": f"{avg_loss:.4f}"})
+            avg_total_loss = epoch_total_loss / max(num_batches, 1)
+            avg_recon_loss = epoch_recon_loss / max(num_batches, 1)
+            avg_kl_loss = epoch_kl_loss / max(num_batches, 1)
+            pbar.set_postfix(
+                {
+                    "Total": f"{avg_total_loss:.4f}",
+                    "Recon": f"{avg_recon_loss:.4f}",
+                    "KL": f"{avg_kl_loss:.4f}",
+                }
+            )
 
             # Log to wandb
             if wandb.run is not None:
-                wandb.log({"root_vae_loss": avg_loss, "root_vae_epoch": epoch})
+                wandb.log(
+                    {
+                        "root_vae_total_loss": avg_total_loss,
+                        "root_vae_recon_loss": avg_recon_loss,
+                        "root_vae_kl_loss": avg_kl_loss,
+                        "root_vae_epoch": epoch,
+                    }
+                )
 
     def synthesize_root_duration_batch(
         self, start_times: list[float], node_names: list[str], num_samples: int = 1

@@ -14,6 +14,9 @@ class DurationEvaluator(Evaluator):
         # duration distribution at specific depths
         duration_depth_0 = defaultdict(list)
         duration_depth_1 = defaultdict(list)
+        # duration distribution by service at specific depths
+        duration_depth_0_by_service = defaultdict(list)
+        duration_depth_1_by_service = defaultdict(list)
         # depth 0 (root) span duration by service and time bucket for p50/p90 calculation
         depth_0_span_time_durations = defaultdict(lambda: defaultdict(list))
         # depth 1 span duration by service and time bucket for p50/p90 calculation
@@ -65,6 +68,7 @@ class DurationEvaluator(Evaluator):
 
                     # collect depth 0 duration distribution
                     duration_depth_0["all"].append(span_duration)
+                    duration_depth_0_by_service[service].append(span_duration)
 
                     # collect depth 0 span duration by service and time bucket for p50/p90
                     depth_0_span_time_durations[service][start_time].append(
@@ -89,6 +93,7 @@ class DurationEvaluator(Evaluator):
 
                     # collect depth 1 duration distribution
                     duration_depth_1["all"].append(span_duration)
+                    duration_depth_1_by_service[service].append(span_duration)
 
                     # collect depth 1 span duration by service and time bucket for p50/p90
                     depth_1_span_time_durations[service][start_time].append(
@@ -150,6 +155,8 @@ class DurationEvaluator(Evaluator):
             "duration_pair": duration_pair_distribution,
             "duration_depth_0": duration_depth_0,
             "duration_depth_1": duration_depth_1,
+            "duration_depth_0_by_service": duration_depth_0_by_service,
+            "duration_depth_1_by_service": duration_depth_1_by_service,
             "duration_depth_0_p50_by_service": duration_depth_0_p50_by_service,
             "duration_depth_0_p90_by_service": duration_depth_0_p90_by_service,
             "duration_depth_1_p50_by_service": duration_depth_1_p50_by_service,

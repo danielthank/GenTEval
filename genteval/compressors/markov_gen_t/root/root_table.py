@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 
 import numpy as np
+from sklearn.mixture import GaussianMixture
 
 from genteval.compressors import CompressedDataset, SerializationFormat
 
@@ -19,15 +20,11 @@ class RootDurationTableSynthesizer:
         # Time bucketing configuration (hardcoded)
         self.bucket_size_us = 60 * 1000000  # 1 minute in microseconds
 
-        # Hashtable to store statistics: {(time_bucket, operation_type): (mean, variance, min_z, max_z)}
-        self.stats_table = defaultdict(
-            lambda: [0.0, 0.0, 0.0, 0.0]
-        )  # [mean, variance, min_z, max_z]
+        # Hashtable to store GMM models: {(time_bucket, operation_type): GaussianMixture}
+        self.stats_table = defaultdict(lambda: None)
 
-        # Temporary storage during fitting: {(time_bucket, operation_type): (count, sum_x, sum_x2, min_value, max_value)}
-        self._temp_stats = defaultdict(
-            lambda: [0, 0.0, 0.0, float("inf"), float("-inf")]
-        )
+        # Temporary storage during fitting: {(time_bucket, operation_type): list of log durations}
+        self._temp_stats = defaultdict(list)
 
     def fit(self, traces):
         """Build the hashtable from root span data."""
@@ -40,10 +37,11 @@ class RootDurationTableSynthesizer:
 
         for trace in traces:
             # Find root spans (spans with no parent)
-            root_spans = []
-            for span_id, span_data in trace.spans.items():
-                if span_data["parentSpanId"] is None:
-                    root_spans.append(span_data)
+            root_spans = [
+                span_data
+                for span_data in trace.spans.values()
+                if span_data["parentSpanId"] is None
+            ]
 
             for root_span in root_spans:
                 root_start_times.append(root_span["startTime"])
@@ -66,39 +64,43 @@ class RootDurationTableSynthesizer:
         # Use log-transformed durations directly (no normalization needed)
         log_durations = np.log(root_durations + 1)  # +1 to avoid log(0)
 
-        # First pass: collect temporary statistics
+        # First pass: collect log duration samples for each key
         for i in range(len(time_buckets)):
             key = (int(time_buckets[i]), root_node_names[i])
             x = log_durations[i]
+            self._temp_stats[key].append(x)
 
-            # Update temporary statistics: count, sum_x, sum_x2, min_value, max_value
-            self._temp_stats[key][0] += 1  # count
-            self._temp_stats[key][1] += x  # sum_x
-            self._temp_stats[key][2] += x * x  # sum_x2
-            self._temp_stats[key][3] = min(self._temp_stats[key][3], x)  # min_value
-            self._temp_stats[key][4] = max(self._temp_stats[key][4], x)  # max_value
+        # Second pass: fit GMM for each key
+        for key, samples in self._temp_stats.items():
+            if len(samples) >= 2:  # Need at least 2 samples for GMM
+                samples_array = np.array(samples).reshape(-1, 1)
 
-        # Second pass: compute final statistics
-        for key, (
-            count,
-            sum_x,
-            sum_x2,
-            min_value,
-            max_value,
-        ) in self._temp_stats.items():
-            if count > 0:
-                mean = sum_x / count
-                variance = max(0, (sum_x2 / count) - (mean**2))  # Ensure non-negative
-                std = (
-                    np.sqrt(variance) if variance > 0 else 1e-6
-                )  # Avoid division by zero
+                # Choose number of components (max 3, min 1, based on data size)
+                n_components = min(3, max(1, len(samples) // 10))
 
-                # Compute normalized z-scores
-                min_z = (min_value - mean) / std if std > 0 else 0.0
-                max_z = (max_value - mean) / std if std > 0 else 0.0
-
-                # Store final statistics
-                self.stats_table[key] = [mean, variance, min_z, max_z]
+                try:
+                    gmm = GaussianMixture(
+                        n_components=n_components,
+                        covariance_type="full",
+                    )
+                    gmm.fit(samples_array)
+                    self.stats_table[key] = gmm
+                except Exception as e:
+                    # Fallback to single component if fitting fails
+                    self.logger.warning(
+                        f"GMM fitting failed for {key}: {e}. Using single component."
+                    )
+                    gmm = GaussianMixture(n_components=1)
+                    gmm.fit(samples_array)
+                    self.stats_table[key] = gmm
+            elif len(samples) == 1:
+                # Single sample: create degenerate GMM by duplicating the sample
+                value = samples[0]
+                # Add tiny noise to create 2 samples for GMM fitting
+                samples_array = np.array([value, value + 1e-6]).reshape(-1, 1)
+                gmm = GaussianMixture(n_components=1)
+                gmm.fit(samples_array)
+                self.stats_table[key] = gmm
 
         # Clear temporary storage
         self._temp_stats.clear()
@@ -107,37 +109,33 @@ class RootDurationTableSynthesizer:
             f"Built hashtable with {len(self.stats_table)} unique (time_bucket, operation_type) combinations"
         )
 
-    def _get_statistics(
-        self, time_bucket: int, node_name: str
-    ) -> tuple[float, float, float, float]:
-        """Get mean, variance, min_z, and max_z for a given (time_bucket, operation_type) combination."""
+    def _get_gmm_model(self, time_bucket: int, node_name: str) -> GaussianMixture:
+        """Get GMM model for a given (time_bucket, operation_type) combination."""
         key = (time_bucket, node_name)
 
-        if key in self.stats_table:
-            mean, variance, min_z, max_z = self.stats_table[key]
-            return mean, variance, min_z, max_z
-        # Fallback: use global statistics or return default values
+        if key in self.stats_table and self.stats_table[key] is not None:
+            return self.stats_table[key]
+
+        # Fallback: create a default GMM from all available models
         if self.stats_table:
-            # Compute global statistics as fallback
-            all_means = []
-            all_variances = []
-            all_min_zs = []
-            all_max_zs = []
+            all_samples = []
+            for gmm in self.stats_table.values():
+                if gmm is not None:
+                    # Sample from existing GMMs to create fallback data
+                    samples = gmm.sample(100)[0].flatten()
+                    all_samples.extend(samples)
 
-            for mean, variance, min_z, max_z in self.stats_table.values():
-                all_means.append(mean)
-                all_variances.append(variance)
-                all_min_zs.append(min_z)
-                all_max_zs.append(max_z)
+            if all_samples:
+                all_samples_array = np.array(all_samples).reshape(-1, 1)
+                fallback_gmm = GaussianMixture(n_components=1)
+                fallback_gmm.fit(all_samples_array)
+                return fallback_gmm
 
-            global_mean = np.mean(all_means)
-            global_variance = np.mean(all_variances)
-            global_min_z = np.min(all_min_zs)
-            global_max_z = np.max(all_max_zs)
-
-            return global_mean, global_variance, global_min_z, global_max_z
-        # Default fallback if no data
-        return 0.0, 1.0, -3.0, 3.0
+        # Default fallback: single component with mean=0, std=1
+        default_samples = np.random.normal(0, 1, 100).reshape(-1, 1)
+        default_gmm = GaussianMixture(n_components=1)
+        default_gmm.fit(default_samples)
+        return default_gmm
 
     def synthesize_root_duration_batch(
         self, start_times: list[float], node_names: list[str], num_samples: int = 1
@@ -150,7 +148,7 @@ class RootDurationTableSynthesizer:
             num_samples: Number of samples to generate per input (default: 1)
 
         Returns:
-            List of durations using reject sampling within the observed z-score bounds.
+            List of durations sampled from GMM.
         """
         if not self.stats_table:
             raise ValueError("Hashtable not built. Call fit() first.")
@@ -167,55 +165,18 @@ class RootDurationTableSynthesizer:
             # Convert start time to time bucket
             time_bucket = int(start_time // self.bucket_size_us)
 
-            # Get statistics from hashtable
-            mean, variance, min_z, max_z = self._get_statistics(time_bucket, node_name)
+            # Get GMM model from hashtable
+            gmm = self._get_gmm_model(time_bucket, node_name)
 
-            # Ensure variance is non-negative (numerical stability)
-            variance = max(1e-12, variance)
-            std = np.sqrt(variance)
-
-            # Generate samples using reject sampling
+            # Generate samples from GMM
             for _ in range(num_samples):
-                # Check if min_z == 0 and max_z == 0 (all values were at the mean)
-                if min_z == 0.0 and max_z == 0.0:
-                    # Just use the mean directly
-                    duration = np.exp(mean) - 1
-                    duration = max(1, float(duration))
-                    results.append(duration)
-                    continue
+                # Sample from GMM (returns shape (1, 1))
+                log_duration = gmm.sample(1)[0][0, 0]
 
-                max_attempts = 1000  # Prevent infinite loops
-                attempt = 0
-
-                while attempt < max_attempts:
-                    # Sample from normal distribution
-                    log_duration = np.random.normal(mean, std)
-
-                    # Compute z-score
-                    z_score = (log_duration - mean) / std
-
-                    # Accept if within observed bounds
-                    if min_z <= z_score <= max_z:
-                        # Convert back to actual duration
-                        duration = np.exp(log_duration) - 1  # Reverse log transform
-                        duration = max(1, float(duration))  # Ensure positive duration
-                        results.append(duration)
-                        break
-
-                    attempt += 1
-
-                # Fallback if reject sampling fails (shouldn't happen often)
-                if attempt >= max_attempts:
-                    # Just use the mean
-                    duration = np.exp(mean) - 1
-                    duration = max(1, float(duration))
-                    results.append(duration)
-                    self.logger.warning(
-                        f"Reject sampling failed for time_bucket={time_bucket}, node_name={node_name}. Using mean."
-                    )
-                    self.logger.warning(
-                        f"Mean: {mean}, Variance: {variance}, Min Z: {min_z}, Max Z: {max_z}"
-                    )
+                # Convert back to actual duration
+                duration = np.exp(log_duration) - 1  # Reverse log transform
+                duration = max(1, float(duration))  # Ensure positive duration
+                results.append(duration)
 
         return results
 
@@ -225,6 +186,7 @@ class RootDurationTableSynthesizer:
         """Save state dictionary."""
 
         # Convert defaultdict to regular dict for serialization
+        # GMM models are serializable with cloudpickle
         stats_dict = dict(self.stats_table)
 
         compressed_data.add(
@@ -247,9 +209,9 @@ class RootDurationTableSynthesizer:
         # Load root synthesizer data
         root_synthesizer_data = compressed_dataset["root_table_synthesizer"]
 
-        # Convert back to defaultdict
+        # Convert back to defaultdict with GMM models
         stats_dict = root_synthesizer_data["stats_table"]
-        self.stats_table = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])
+        self.stats_table = defaultdict(lambda: None)
         self.stats_table.update(stats_dict)
 
         logger.info(f"Loaded root hashtable with {len(self.stats_table)} entries")
