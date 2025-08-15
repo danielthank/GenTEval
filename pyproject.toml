@@ -10,6 +10,8 @@ dependencies = [
   "msgpack>=1.1.0",
   "numpy>=2.2.6",
   "playwright>=1.53.0",
+  "protobuf>=6.32.0",
+  "grpcio-tools>=1.74.0",
   "rich>=14.0.0",
   "scipy>=1.15.3",
   "sdv>=1.21.0",
@@ -38,6 +40,9 @@ remove_query_param = "genteval.data_collection.utils.remove_query_param:main"
 
 convert_trajectory = "genteval.data_collection.ai_agent.cli:main"
 batch_convert_trajectory = "genteval.data_collection.ai_agent.batch_convert_cli:main"
+
+# Development tools
+generate-proto = "genteval.bin.generate_proto:main"
 
 [build-system]
 requires = ["hatchling"]

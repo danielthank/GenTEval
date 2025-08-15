@@ -1,0 +1,1 @@
+# OpenTelemetry protobuf generated modules

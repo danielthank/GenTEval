@@ -1,6 +1,5 @@
 import gzip
 import json
-import os
 import pathlib
 import shutil
 from enum import Enum
@@ -15,6 +14,7 @@ class SerializationFormat(Enum):
 
     MSGPACK = "msgpack"
     CLOUDPICKLE = "cloudpickle"
+    GRPC = "grpc"
 
 
 class CompressedDataset:
@@ -45,6 +45,7 @@ class CompressedDataset:
         self.formats: dict[
             str, SerializationFormat
         ] = {}  # Track format used for each key
+        self.proto_specs: dict[str, Any] = {}  # Track protobuf specs for GRPC format
         self.compression_level = compression_level
 
         # Initialize with batch data if provided
@@ -60,20 +61,28 @@ class CompressedDataset:
     def __contains__(self, key: str) -> bool:
         return key in self.data
 
-    def add(self, key: str, value: Any, format: SerializationFormat) -> None:
+    def add(
+        self, key: str, value: Any, fmt: SerializationFormat, proto_spec: Any = None
+    ) -> None:
         """
         Add an item to the dataset with specified serialization format.
 
         Args:
             key: The key to store the value under
             value: The value to store
-            format: Serialization format (SerializationFormat enum)
+            fmt: Serialization format (SerializationFormat enum)
+            proto_spec: Protobuf message class for GRPC format (required for GRPC)
         """
-        if not isinstance(format, SerializationFormat):
-            raise TypeError("format must be a SerializationFormat enum value")
+        if not isinstance(fmt, SerializationFormat):
+            raise TypeError("fmt must be a SerializationFormat enum value")
+
+        if fmt == SerializationFormat.GRPC and proto_spec is None:
+            raise ValueError("proto_spec is required for GRPC format")
 
         self.data[key] = value
-        self.formats[key] = format
+        self.formats[key] = fmt
+        if proto_spec is not None:
+            self.proto_specs[key] = proto_spec
 
     def add_batch(self, data_dict: dict[str, tuple]) -> None:
         """
@@ -81,13 +90,13 @@ class CompressedDataset:
 
         Args:
             data_dict: Dictionary where keys are the dataset keys and values are tuples
-                      of (data, format) where format is a SerializationFormat enum
+                      of (data, fmt) or (data, fmt, proto_spec) where fmt is a SerializationFormat enum
 
         Example:
             dataset.add_batch({
                 "model_weights": (model.state_dict(), SerializationFormat.CLOUDPICKLE),
                 "config": (config_data, SerializationFormat.MSGPACK),
-                "metadata": (meta_info, SerializationFormat.CLOUDPICKLE)
+                "traces": (trace_data, SerializationFormat.GRPC, TracesData)
             })
         """
         if not isinstance(data_dict, dict):
@@ -95,20 +104,30 @@ class CompressedDataset:
 
         # Validate all entries first before adding any
         for key, value in data_dict.items():
-            if not isinstance(value, tuple) or len(value) != 2:
+            if not isinstance(value, tuple) or len(value) not in (2, 3):
                 raise ValueError(
-                    f"Value for key '{key}' must be a tuple of (data, format)"
+                    f"Value for key '{key}' must be a tuple of (data, fmt) or (data, fmt, proto_spec)"
                 )
 
-            data, format = value
-            if not isinstance(format, SerializationFormat):
+            if len(value) == 2:
+                data, fmt = value
+                proto_spec = None
+            else:
+                data, fmt, proto_spec = value
+
+            if not isinstance(fmt, SerializationFormat):
                 raise TypeError(
                     f"Format for key '{key}' must be a SerializationFormat enum value"
                 )
 
         # Add all items
-        for key, (data, format) in data_dict.items():
-            self.add(key, data, format)
+        for key, value in data_dict.items():
+            if len(value) == 2:
+                data, fmt = value
+                self.add(key, data, fmt)
+            else:
+                data, fmt, proto_spec = value
+                self.add(key, data, fmt, proto_spec)
 
     def remove(self, key: str) -> None:
         """Remove an item from the dataset."""
@@ -116,6 +135,8 @@ class CompressedDataset:
             del self.data[key]
         if key in self.formats:
             del self.formats[key]
+        if key in self.proto_specs:
+            del self.proto_specs[key]
 
     def keys(self):
         """Return all keys in the dataset."""
@@ -134,7 +155,8 @@ class CompressedDataset:
                 raise ValueError(f"No format specified for key '{key}'")
 
             # Serialize and compress to get accurate size
-            serialized = self._serialize(value, self.formats[key])
+            proto_spec = self.proto_specs.get(key)
+            serialized = self._serialize(value, self.formats[key], proto_spec)
             compressed = self._compress(serialized)
             total_size += len(compressed) + len(key.encode("utf-8"))
 
@@ -153,23 +175,51 @@ class CompressedDataset:
         for key, value in other.data.items():
             if key in self.data:
                 raise KeyError(f"Key '{key}' already exists in the dataset")
-            self.add(key, value, other.formats[key])
+            proto_spec = other.proto_specs.get(key)
+            self.add(key, value, other.formats[key], proto_spec)
 
-    def _serialize(self, obj: Any, format: SerializationFormat) -> bytes:
+    def _serialize(
+        self, obj: Any, fmt: SerializationFormat, proto_spec: Any = None
+    ) -> bytes:
         """Serialize an object based on the selected format."""
-        if format == SerializationFormat.MSGPACK:
+        if fmt == SerializationFormat.MSGPACK:
             return msgpack.packb(obj, use_bin_type=True)
-        if format == SerializationFormat.CLOUDPICKLE:
+        if fmt == SerializationFormat.CLOUDPICKLE:
             return cloudpickle.dumps(obj)
-        raise ValueError(f"Unsupported serialization format: {format}")
+        if fmt == SerializationFormat.GRPC:
+            if proto_spec is None:
+                raise ValueError("proto_spec is required for GRPC serialization")
+            # obj should be a protobuf message instance or convertible to one
+            if hasattr(obj, "SerializeToString"):
+                return obj.SerializeToString()
+            # Try to create protobuf message from obj data
+            message = proto_spec()
+            if hasattr(message, "CopyFrom") and hasattr(obj, "__dict__"):
+                # Handle simple object conversion
+                for key, value in obj.__dict__.items():
+                    if hasattr(message, key):
+                        setattr(message, key, value)
+            else:
+                # Direct assignment for simple types
+                message = obj
+            return message.SerializeToString()
+        raise ValueError(f"Unsupported serialization format: {fmt}")
 
-    def _deserialize(self, data: bytes, format: SerializationFormat) -> Any:
+    def _deserialize(
+        self, data: bytes, fmt: SerializationFormat, proto_spec: Any = None
+    ) -> Any:
         """Deserialize data based on the selected format."""
-        if format == SerializationFormat.MSGPACK:
+        if fmt == SerializationFormat.MSGPACK:
             return msgpack.unpackb(data, raw=False)
-        if format == SerializationFormat.CLOUDPICKLE:
+        if fmt == SerializationFormat.CLOUDPICKLE:
             return cloudpickle.loads(data)
-        raise ValueError(f"Unsupported serialization format: {format}")
+        if fmt == SerializationFormat.GRPC:
+            if proto_spec is None:
+                raise ValueError("proto_spec is required for GRPC deserialization")
+            message = proto_spec()
+            message.ParseFromString(data)
+            return message
+        raise ValueError(f"Unsupported serialization format: {fmt}")
 
     def _compress(self, data: bytes) -> bytes:
         """Compress serialized data."""
@@ -179,20 +229,20 @@ class CompressedDataset:
         """Decompress data."""
         return gzip.decompress(data)
 
-    def save(self, dir: pathlib.Path):
+    def save(self, directory: pathlib.Path):
         """
         Clean the directory and save the dataset to the specified directory.
 
         Args:
-            dir: Directory path where the dataset will be saved
+            directory: Directory path where the dataset will be saved
         """
         # Delete existing directory if it exists
-        if dir.exists():
-            shutil.rmtree(dir)
-        dir.mkdir(parents=True, exist_ok=True)
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True, exist_ok=True)
 
         # Verify all items have formats
-        missing_formats = [key for key in self.data.keys() if key not in self.formats]
+        missing_formats = [key for key in self.data if key not in self.formats]
         if missing_formats:
             raise ValueError(
                 f"Missing format specification for keys: {missing_formats}"
@@ -200,44 +250,58 @@ class CompressedDataset:
 
         # Convert enum values to strings for JSON serialization
         formats_serializable = {k: v.value for k, v in self.formats.items()}
+        # Convert proto specs to module.class names for JSON serialization
+        proto_specs_serializable = {}
+        for k, v in self.proto_specs.items():
+            if v is not None:
+                # Handle protobuf classes specially to use the correct module path
+                if hasattr(v, "__module__") and "pb2" in v.__module__:
+                    # For generated protobuf classes, use the full qualified name with genteval.proto prefix
+                    proto_specs_serializable[k] = (
+                        f"genteval.proto.{v.__module__}.{v.__name__}"
+                    )
+                else:
+                    proto_specs_serializable[k] = f"{v.__module__}.{v.__name__}"
 
         # Save metadata
         metadata = {
             "compression_level": self.compression_level,
             "keys": list(self.data.keys()),
             "formats": formats_serializable,
+            "proto_specs": proto_specs_serializable,
         }
 
-        with open(dir / "metadata.json", "w") as f:
+        with (directory / "metadata.json").open("w") as f:
             json.dump(metadata, f)
 
         # Create data directory
-        data_dir = dir / "data"
+        data_dir = directory / "data"
         if not data_dir.exists():
             data_dir.mkdir()
 
         # Save each item separately
         for key, value in self.data.items():
             format_to_use = self.formats[key]
-            serialized = self._serialize(value, format_to_use)
+            proto_spec = self.proto_specs.get(key)
+            serialized = self._serialize(value, format_to_use, proto_spec)
             compressed = self._compress(serialized)
 
-            with open(data_dir / key, "wb") as f:
+            with (data_dir / key).open("wb") as f:
                 f.write(compressed)
 
     @classmethod
-    def load(cls, dir: pathlib.Path) -> "CompressedDataset":
+    def load(cls, directory: pathlib.Path) -> "CompressedDataset":
         """
         Load a dataset from the specified directory.
 
         Args:
-            dir: Directory path where the dataset is stored
+            directory: Directory path where the dataset is stored
 
         Returns:
             Loaded CompressedDataset instance
         """
         # Load metadata
-        with open(dir / "metadata.json") as f:
+        with (directory / "metadata.json").open() as f:
             metadata = json.load(f)
 
         # Create new instance
@@ -248,18 +312,33 @@ class CompressedDataset:
         formats_enum = {k: SerializationFormat(v) for k, v in formats_str.items()}
         dataset.formats = formats_enum
 
+        # Convert proto spec strings back to classes
+        proto_specs_str = metadata.get("proto_specs", {})
+        proto_specs = {}
+        for k, v in proto_specs_str.items():
+            if v:
+                # Import the class from module.class string
+                module_name, class_name = v.rsplit(".", 1)
+                import importlib
+
+                module = importlib.import_module(module_name)
+                proto_specs[k] = getattr(module, class_name)
+        dataset.proto_specs = proto_specs
+
         keys = metadata["keys"]
 
         # Load data
-        data_dir = dir / "data"
-        for filename in os.listdir(data_dir):
+        data_dir = directory / "data"
+        for file_path in data_dir.iterdir():
+            filename = file_path.name
             if filename in keys:
-                with open(data_dir / filename, "rb") as f:
+                with file_path.open("rb") as f:
                     compressed = f.read()
 
                 decompressed = dataset._decompress(compressed)
                 format_to_use = dataset.formats[filename]
-                value = dataset._deserialize(decompressed, format_to_use)
+                proto_spec = dataset.proto_specs.get(filename)
+                value = dataset._deserialize(decompressed, format_to_use, proto_spec)
                 dataset.data[filename] = value
 
         return dataset

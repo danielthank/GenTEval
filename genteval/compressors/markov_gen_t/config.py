@@ -10,7 +10,6 @@ class RootModel(Enum):
 
 class MetadataModel(Enum):
     VAE = "VAE"
-    GAN = "GAN"
 
 
 class MrfEdgeApproach(Enum):
