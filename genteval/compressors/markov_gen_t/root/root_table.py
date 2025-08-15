@@ -20,12 +20,12 @@ class RootDurationTableSynthesizer:
         # Time bucketing configuration (hardcoded)
         self.bucket_size_us = 60 * 1000000  # 1 minute in microseconds
 
-        # Hashtable to store GMM models and duration bounds: {(time_bucket, operation_type): (GaussianMixture, min_duration, max_duration)}
+        # Hashtable to store GMM models and duration bounds: {(time_bucket, operation_type, child_cnt): (GaussianMixture, min_duration, max_duration)}
         self.stats_table = defaultdict(lambda: None)
 
-        # Temporary storage during fitting: {(time_bucket, operation_type): list of log durations}
+        # Temporary storage during fitting: {(time_bucket, operation_type, child_cnt): list of log durations}
         self._temp_stats = defaultdict(list)
-        # Store original durations for min/max calculation: {(time_bucket, operation_type): list of original durations}
+        # Store original durations for min/max calculation: {(time_bucket, operation_type, child_cnt): list of original durations}
         self._temp_original_durations = defaultdict(list)
 
     def fit(self, traces):
@@ -36,19 +36,30 @@ class RootDurationTableSynthesizer:
         root_start_times = []
         root_durations = []
         root_node_names = []
+        root_child_counts = []
+
+        def get_child_count(span_id, spans_dict):
+            """Count direct children of a span."""
+            child_count = 0
+            for span in spans_dict.values():
+                if span["parentSpanId"] == span_id:
+                    child_count += 1
+            return child_count
 
         for trace in traces:
             # Find root spans (spans with no parent)
             root_spans = [
-                span_data
-                for span_data in trace.spans.values()
+                (span_id, span_data)
+                for span_id, span_data in trace.spans.items()
                 if span_data["parentSpanId"] is None
             ]
 
-            for root_span in root_spans:
+            for span_id, root_span in root_spans:
+                child_count = get_child_count(span_id, trace.spans)
                 root_start_times.append(root_span["startTime"])
                 root_durations.append(root_span["duration"])
                 root_node_names.append(root_span["nodeName"])
+                root_child_counts.append(child_count)
 
         if not root_start_times:
             raise ValueError("No root spans found in traces")
@@ -59,6 +70,7 @@ class RootDurationTableSynthesizer:
         root_start_times = np.array(root_start_times)
         root_durations = np.array(root_durations)
         root_node_names = np.array(root_node_names)
+        root_child_counts = np.array(root_child_counts)
 
         # Convert start times to time buckets
         time_buckets = root_start_times // self.bucket_size_us
@@ -68,7 +80,7 @@ class RootDurationTableSynthesizer:
 
         # First pass: collect log duration samples and original durations for each key
         for i in range(len(time_buckets)):
-            key = (int(time_buckets[i]), root_node_names[i])
+            key = (int(time_buckets[i]), root_node_names[i], int(root_child_counts[i]))
             x = log_durations[i]
             original_duration = root_durations[i]
             self._temp_stats[key].append(x)
@@ -115,36 +127,50 @@ class RootDurationTableSynthesizer:
         self._temp_original_durations.clear()
 
         self.logger.info(
-            f"Built hashtable with {len(self.stats_table)} unique (time_bucket, operation_type) combinations"
+            f"Built hashtable with {len(self.stats_table)} unique (time_bucket, operation_type, child_cnt) combinations"
         )
 
     def _get_gmm_model(
-        self, time_bucket: int, node_name: str
+        self, time_bucket: int, node_name: str, child_cnt: int
     ) -> tuple[GaussianMixture, float, float]:
-        """Get GMM model, min_duration, and max_duration for a given (time_bucket, operation_type) combination."""
-        key = (time_bucket, node_name)
+        """Get GMM model, min_duration, and max_duration for a given (time_bucket, operation_type, child_cnt) combination."""
+        key = (time_bucket, node_name, child_cnt)
 
         if key in self.stats_table and self.stats_table[key] is not None:
             return self.stats_table[key]  # Returns (gmm, min_duration, max_duration)
 
-        # First fallback: find same node_name with closest time_bucket
+        # First fallback: find same node_name and child_cnt with closest time_bucket
         if self.stats_table:
-            # Find entries with the same node_name
-            same_node_entries = {}
-            for (tb, nn), entry in self.stats_table.items():
-                if nn == node_name and entry is not None:
-                    same_node_entries[tb] = entry
+            # Find entries with the same node_name and child_cnt
+            same_node_child_entries = {}
+            for (tb, nn, cc), entry in self.stats_table.items():
+                if nn == node_name and cc == child_cnt and entry is not None:
+                    same_node_child_entries[tb] = entry
 
-            if same_node_entries:
+            if same_node_child_entries:
                 # Find the closest time_bucket
                 closest_time_bucket = min(
-                    same_node_entries.keys(), key=lambda tb: abs(tb - time_bucket)
+                    same_node_child_entries.keys(), key=lambda tb: abs(tb - time_bucket)
                 )
-                return same_node_entries[
+                return same_node_child_entries[
                     closest_time_bucket
                 ]  # Returns (gmm, min_duration, max_duration)
 
-            # Second fallback: use all available samples if no same node_name found
+            # Second fallback: find same node_name with any child_cnt and closest time_bucket
+            same_node_entries = {}
+            for (tb, nn, cc), entry in self.stats_table.items():
+                if nn == node_name and entry is not None:
+                    same_node_entries[(tb, cc)] = entry
+
+            if same_node_entries:
+                # Find the closest time_bucket and child_cnt combination
+                closest_key = min(
+                    same_node_entries.keys(),
+                    key=lambda x: (abs(x[0] - time_bucket), abs(x[1] - child_cnt)),
+                )
+                return same_node_entries[closest_key]
+
+            # Third fallback: use all available samples if no same node_name found
             all_samples = []
             all_min_durations = []
             all_max_durations = []
@@ -177,13 +203,14 @@ class RootDurationTableSynthesizer:
         return default_gmm, 1.0, float("inf")
 
     def synthesize_root_duration_batch(
-        self, start_times: list[float], node_names: list[str]
+        self, start_times: list[float], node_names: list[str], child_counts: list[int]
     ) -> list[float]:
-        """Generate root span durations for multiple start times and node names at once.
+        """Generate root span durations for multiple start times, node names, and child counts at once.
 
         Args:
             start_times: List of start times
             node_names: List of node names
+            child_counts: List of child counts
 
         Returns:
             List of durations sampled from GMM.
@@ -191,21 +218,25 @@ class RootDurationTableSynthesizer:
         if not self.stats_table:
             raise ValueError("Hashtable not built. Call fit() first.")
 
-        if len(start_times) != len(node_names):
-            raise ValueError("start_times and node_names must have the same length")
+        if len(start_times) != len(node_names) or len(start_times) != len(child_counts):
+            raise ValueError(
+                "start_times, node_names, and child_counts must have the same length"
+            )
 
         if not start_times:
             return []
 
         results = []
 
-        for start_time, node_name in zip(start_times, node_names, strict=False):
+        for start_time, node_name, child_count in zip(
+            start_times, node_names, child_counts, strict=False
+        ):
             # Convert start time to time bucket
             time_bucket = int(start_time // self.bucket_size_us)
 
             # Get GMM model and duration bounds from hashtable
             gmm, min_duration, max_duration = self._get_gmm_model(
-                time_bucket, node_name
+                time_bucket, node_name, child_count
             )
 
             if min_duration == max_duration:
@@ -236,7 +267,7 @@ class RootDurationTableSynthesizer:
                 fallback_duration = np.random.uniform(min_duration, max_duration)
                 results.append(float(fallback_duration))
                 self.logger.warning(
-                    f"Reject sampling failed for time_bucket={time_bucket}, node_name={node_name}. Using random fallback between {min_duration:.2f} and {max_duration:.2f}."
+                    f"Reject sampling failed for time_bucket={time_bucket}, node_name={node_name}, child_count={child_count}. Using random fallback between {min_duration:.2f} and {max_duration:.2f}."
                 )
 
         return results

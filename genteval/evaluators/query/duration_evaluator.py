@@ -40,8 +40,16 @@ class DurationEvaluator(Evaluator):
                 return depth
             return get_span_depth(span["parentSpanId"], trace, depth + 1)
 
+        def get_child_count(span_id, trace):
+            """Count the number of direct children for a span"""
+            child_count = 0
+            for other_span in trace.values():
+                if other_span["parentSpanId"] == span_id:
+                    child_count += 1
+            return child_count
+
         for trace in dataset.traces.values():
-            for span in trace.values():
+            for span_id, span in trace.items():
                 duration = span["duration"]
 
                 duration_distribution["all"].append(duration)
@@ -62,6 +70,7 @@ class DurationEvaluator(Evaluator):
             for span_id, span in trace.items():
                 if get_span_depth(span_id, trace) == 0:
                     service = span["nodeName"].split("!@#")[0]
+                    # child_cnt = get_child_count(span_id, trace)
                     span_start_time = span["startTime"]
                     span_duration = span["duration"]
                     start_time = span_start_time // (60 * 1000000)  # minute bucket

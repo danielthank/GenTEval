@@ -12,8 +12,8 @@ from genteval.compressors.trace import Trace
 from genteval.dataset import Dataset
 from genteval.utils.data_structures import count_spans_per_tree
 
-from .config import MarkovGenTConfig, RootModel
-from .metadata_vae import MetadataSynthesizer
+from .config import MarkovGenTConfig, MetadataModel, RootModel
+from .metadata_vae import MetadataSynthesizer as MetadataVAESynthesizer
 from .mrf_graph import MarkovRandomField
 from .root import (
     RootDurationMLPSynthesizer,
@@ -147,6 +147,7 @@ def _generate_traces_worker(args):
                 # Collect root spans from all traces
                 all_root_start_times = []
                 all_root_node_names = []
+                all_root_child_counts = []
                 root_span_mapping = []  # (trace_idx, span_id, node)
 
                 for trace_idx, trace_data in enumerate(batch_traces):
@@ -156,12 +157,13 @@ def _generate_traces_worker(args):
                         ][level]:
                             all_root_start_times.append(trace_data["start_time"])
                             all_root_node_names.append(node.node_name)
+                            all_root_child_counts.append(len(node.children))
                             root_span_mapping.append((trace_idx, span_id, node))
 
                 # Batch process all root spans across all traces
                 if all_root_start_times:
                     root_durations = compressor.root_duration_synthesizer.synthesize_root_duration_batch(
-                        all_root_start_times, all_root_node_names
+                        all_root_start_times, all_root_node_names, all_root_child_counts
                     )
 
                     # Create root spans
@@ -252,6 +254,7 @@ class MarkovGenTCompressor:
             order=self.config.markov_order,
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,
+            edge_approach=self.config.mrf_edge_approach,
         )
 
         # Choose root duration synthesis model
@@ -264,7 +267,11 @@ class MarkovGenTCompressor:
         else:
             raise ValueError(f"Unknown root model: {self.config.root_model}")
 
-        self.metadata_synthesizer = MetadataSynthesizer(self.config)
+        # Initialize metadata synthesizer based on config
+        if self.config.metadata_model == MetadataModel.VAE:
+            self.metadata_synthesizer = MetadataVAESynthesizer(self.config)
+        else:
+            raise ValueError(f"Unknown metadata model: {self.config.metadata_model}")
 
     def compress(self, dataset: Dataset) -> CompressedDataset:
         """Learn models from the dataset."""
@@ -391,7 +398,11 @@ class MarkovGenTCompressor:
             raise ValueError(f"Unknown root model: {self.config.root_model}")
         self.root_duration_synthesizer.load_state_dict(compressed_dataset)
 
-        self.metadata_synthesizer = MetadataSynthesizer(self.config)
+        # Initialize metadata synthesizer based on config
+        if self.config.metadata_model == MetadataModel.VAE:
+            self.metadata_synthesizer = MetadataVAESynthesizer(self.config)
+        else:
+            raise ValueError(f"Unknown metadata model: {self.config.metadata_model}")
         self.metadata_synthesizer.load_state_dict(compressed_dataset)
 
         # Load depth Markov chain
@@ -399,6 +410,7 @@ class MarkovGenTCompressor:
             order=self.config.markov_order,
             max_depth=self.config.max_depth,
             max_children=self.config.max_children,
+            edge_approach=self.config.mrf_edge_approach,
         )
         self.depth_markov_chain.load_state_dict(compressed_dataset)
 

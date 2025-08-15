@@ -7,41 +7,191 @@ import wandb
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from torch import nn
+from torch.distributions import Beta, Categorical, Normal
 from torch.nn import functional
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from genteval.compressors import CompressedDataset, SerializationFormat
 
 
+class CouplingLayer(nn.Module):
+    """Coupling layer for normalizing flows (RealNVP style)."""
+
+    def __init__(
+        self, dim, hidden_dim=64, mask_type="checkerboard", conditioning_dim=0
+    ):
+        super().__init__()
+        self.dim = dim
+        self.conditioning_dim = conditioning_dim
+
+        # Create mask
+        if mask_type == "checkerboard":
+            self.register_buffer("mask", torch.arange(dim) % 2)
+        else:  # split
+            mask = torch.zeros(dim)
+            mask[dim // 2 :] = 1
+            self.register_buffer("mask", mask)
+
+        # Input dimension includes masked variables + conditioning
+        input_dim = dim + conditioning_dim
+
+        # Scale and translation networks
+        self.scale_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, dim),
+            nn.Tanh(),
+        )
+
+        self.translate_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, dim),
+        )
+
+    def forward(self, x, conditioning=None, reverse=False):
+        """Forward pass through coupling layer."""
+        masked_x = x * self.mask
+
+        # Concatenate masked input with conditioning
+        if conditioning is not None and self.conditioning_dim > 0:
+            net_input = torch.cat([masked_x, conditioning], dim=-1)
+        else:
+            net_input = masked_x
+
+        scale = self.scale_net(net_input)
+        translate = self.translate_net(net_input)
+
+        if reverse:
+            # Inverse transformation
+            y = (x - translate * (1 - self.mask)) / torch.exp(scale * (1 - self.mask))
+            log_det = -torch.sum(scale * (1 - self.mask), dim=-1)
+        else:
+            # Forward transformation
+            y = x * torch.exp(scale * (1 - self.mask)) + translate * (1 - self.mask)
+            log_det = torch.sum(scale * (1 - self.mask), dim=-1)
+
+        return y, log_det
+
+
+class NormalizingFlow(nn.Module):
+    """Normalizing flow for flow-based prior."""
+
+    def __init__(self, dim, num_layers=4, hidden_dim=64):
+        super().__init__()
+        self.dim = dim
+        self.num_layers = num_layers
+
+        # Create coupling layers with alternating masks
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            mask_type = "checkerboard" if i % 2 == 0 else "split"
+            self.layers.append(CouplingLayer(dim, hidden_dim, mask_type))
+
+    def forward(self, z, reverse=False):
+        """Transform samples through the flow."""
+        log_det_total = torch.zeros(z.shape[0], device=z.device)
+
+        if reverse:
+            # Go through layers in reverse order
+            for layer in reversed(self.layers):
+                z, log_det = layer(z, reverse=True)
+                log_det_total += log_det
+        else:
+            # Go through layers in forward order
+            for layer in self.layers:
+                z, log_det = layer(z, reverse=False)
+                log_det_total += log_det
+
+        return z, log_det_total
+
+    def log_prob(self, z):
+        """Compute log probability of samples under the flow."""
+        # Transform to base distribution
+        z0, log_det = self.forward(z, reverse=True)
+
+        # Base distribution is standard normal
+        base_log_prob = Normal(0, 1).log_prob(z0).sum(dim=-1)
+
+        # Apply change of variables
+        return base_log_prob + log_det
+
+    def sample(self, batch_size, device):
+        """Sample from the flow-based prior."""
+        # Sample from base distribution (standard normal)
+        z0 = torch.randn(batch_size, self.dim, device=device)
+
+        # Transform through the flow
+        z, _ = self.forward(z0, reverse=False)
+
+        return z
+
+
 class MetadataVAE(nn.Module):
-    def __init__(self, vocab_size: int, hidden_dim: int = 128, latent_dim: int = 32):
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_dim: int = 128,
+        latent_dim: int = 32,
+        use_flow_prior: bool = False,
+        prior_flow_layers: int = 4,
+        prior_flow_hidden_dim: int = 64,
+        num_beta_components: int = 3,
+    ):
         super().__init__()
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
+        self.embed_dim = self.hidden_dim
+        self.use_flow_prior = use_flow_prior
+        self.num_beta_components = num_beta_components
 
         # Embedding for node names
-        self.node_embedding = nn.Embedding(vocab_size, 32)
+        self.node_embedding = nn.Embedding(vocab_size, self.embed_dim)
 
         input_dim = (
-            3 + 32 + 32
-        )  # 3 numerical (start_time, duration, child_idx) + 2 embeddings of size 32
+            3 + 2 * self.embed_dim
+        )  # 3 numerical (start_time, duration, child_idx) + 2 embeddings
 
-        # Encoder (single layer)
+        # Encoder
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
 
-        # Decoder (single layer) - takes both latent and conditioning info
-        decoder_input_dim = latent_dim + input_dim  # latent + conditioning variables
+        # Flow-based prior
+        if self.use_flow_prior:
+            self.flow_prior = NormalizingFlow(
+                latent_dim,
+                num_layers=prior_flow_layers,
+                hidden_dim=prior_flow_hidden_dim,
+            )
+
+        # Decoder: mixture Beta likelihood
+        # Output: [gap_from_parent_ratio, x_scale, π_1...π_K, α_1...α_K, β_1...β_K]
+        decoder_input_dim = latent_dim + input_dim
+        beta_output_dim = (
+            2 + 3 * num_beta_components
+        )  # gap, x_scale, K mixture weights, K alphas, K betas
         self.decoder = nn.Sequential(
-            nn.Linear(
-                decoder_input_dim, 2
-            ),  # Output: [gap_from_parent_ratio, child_duration_ratio]
-            nn.Sigmoid(),  # Bound outputs to [0, 1]
+            nn.Linear(decoder_input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, beta_output_dim),
         )
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -55,10 +205,132 @@ class MetadataVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z: torch.Tensor, conditioning: torch.Tensor) -> torch.Tensor:
+    def _sample_mixture_beta(
+        self,
+        mixture_weights: torch.Tensor,
+        alphas: torch.Tensor,
+        betas: torch.Tensor,
+        x_scale: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample from mixture of Beta distributions with shared scale.
+
+        Args:
+            mixture_weights: (batch_size, K) mixture probabilities
+            alphas: (batch_size, K) alpha parameters
+            betas: (batch_size, K) beta parameters
+            x_scale: (batch_size,) scaling factor
+
+        Returns:
+            child_duration_ratio: (batch_size,) sampled values
+        """
+        batch_size = mixture_weights.shape[0]
+        K = mixture_weights.shape[1]
+
+        # Sample component indices from categorical distribution
+        component_dist = Categorical(mixture_weights)
+        components = component_dist.sample()  # (batch_size,)
+
+        # Gather selected alpha and beta parameters
+        selected_alphas = alphas.gather(1, components.unsqueeze(1)).squeeze(
+            1
+        )  # (batch_size,)
+        selected_betas = betas.gather(1, components.unsqueeze(1)).squeeze(
+            1
+        )  # (batch_size,)
+
+        # Sample from selected Beta distributions
+        beta_dists = Beta(selected_alphas, selected_betas)
+        beta_samples = beta_dists.sample()  # (batch_size,)
+
+        # Scale by x_scale
+        return x_scale * beta_samples
+
+    def _mixture_beta_log_prob(
+        self,
+        target: torch.Tensor,
+        mixture_weights: torch.Tensor,
+        alphas: torch.Tensor,
+        betas: torch.Tensor,
+        x_scale: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute negative log-likelihood for mixture of Beta distributions.
+
+        Args:
+            target: (batch_size,) target values
+            mixture_weights: (batch_size, K) mixture probabilities
+            alphas: (batch_size, K) alpha parameters
+            betas: (batch_size, K) beta parameters
+            x_scale: (batch_size,) scaling factor
+
+        Returns:
+            Negative log-likelihood sum
+        """
+        batch_size = target.shape[0]
+        K = mixture_weights.shape[1]
+
+        # Unscale target: target / x_scale
+        unscaled_target = target / (x_scale + 1e-8)
+        unscaled_target_clamped = torch.clamp(unscaled_target, 1e-6, 1 - 1e-6)
+
+        # Compute log-probability for each component
+        log_probs = []
+        for k in range(K):
+            beta_dist = Beta(alphas[:, k], betas[:, k])
+            log_prob_k = beta_dist.log_prob(unscaled_target_clamped)
+            log_probs.append(log_prob_k)
+
+        log_probs = torch.stack(log_probs, dim=1)  # (batch_size, K)
+
+        # Weighted log-probabilities
+        weighted_log_probs = log_probs + torch.log(mixture_weights + 1e-8)
+
+        # Log-sum-exp for mixture
+        mixture_log_prob = torch.logsumexp(weighted_log_probs, dim=1)  # (batch_size,)
+
+        # Add Jacobian for scaling transformation
+        jacobian_log_det = torch.log(x_scale + 1e-8)
+        total_log_prob = mixture_log_prob + jacobian_log_det
+
+        return -total_log_prob.sum()
+
+    def decode(
+        self, z: torch.Tensor, conditioning: torch.Tensor
+    ) -> tuple[torch.Tensor, ...]:
         # Concatenate latent vector with conditioning information
         decoder_input = torch.cat([z, conditioning], dim=1)
-        return self.decoder(decoder_input)
+
+        # Beta mixture likelihood
+        output = self.decoder(decoder_input)
+        K = self.num_beta_components
+
+        # Parse output into mixture components
+        gap_from_parent_ratio = torch.sigmoid(output[:, 0])  # [0, 1]
+        x_scale = torch.sigmoid(output[:, 1])  # [0, 1] scaling factor
+
+        # Mixture weights: softmax to ensure they sum to 1
+        mixture_weights = torch.softmax(output[:, 2 : 2 + K], dim=1)  # (batch_size, K)
+
+        # Alpha and beta parameters: softplus to ensure positive
+        alphas = (
+            torch.nn.functional.softplus(output[:, 2 + K : 2 + 2 * K]) + 1e-6
+        )  # (batch_size, K)
+        betas = (
+            torch.nn.functional.softplus(output[:, 2 + 2 * K : 2 + 3 * K]) + 1e-6
+        )  # (batch_size, K)
+
+        # Sample child_duration_ratio from mixture of scaled Beta distributions
+        child_duration_ratio = self._sample_mixture_beta(
+            mixture_weights, alphas, betas, x_scale
+        )
+
+        return (
+            gap_from_parent_ratio,
+            x_scale,
+            mixture_weights,
+            alphas,
+            betas,
+            child_duration_ratio,
+        )
 
     def forward(
         self,
@@ -67,7 +339,7 @@ class MetadataVAE(nn.Module):
         child_idx: torch.Tensor,
         parent_node_idx: torch.Tensor,
         child_node_idx: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             parent_start_time: Tensor of shape (batch_size,)
@@ -77,8 +349,11 @@ class MetadataVAE(nn.Module):
             child_node_idx: Tensor of shape (batch_size,) - node name indices
 
         Returns:
-            Tuple of (reconstruction, mu, logvar)
+            Tuple of (reconstruction, x_scale, alpha, beta, mu, logvar, z)
             reconstruction contains [gap_from_parent_ratio, child_duration_ratio] in [0,1]
+            x_scale is the scaling factor for the beta distribution
+            alpha, beta are the beta distribution parameters for child_duration_ratio
+            z is the latent sample
         """
         # Get embeddings
         parent_emb = self.node_embedding(parent_node_idx)  # (batch_size, 32)
@@ -94,27 +369,72 @@ class MetadataVAE(nn.Module):
                 child_emb,
             ],
             dim=1,
-        )  # (batch_size, 67)
+        )  # (batch_size, 3 + 2 * embed)
 
         # VAE forward pass
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        recon = self.decode(z, x)  # Pass conditioning info to decoder
-        return recon, mu, logvar
+        decode_output = self.decode(z, x)
+
+        (
+            gap_from_parent_ratio,
+            x_scale,
+            mixture_weights,
+            alphas,
+            betas,
+            child_duration_ratio,
+        ) = decode_output
+        # Combine outputs for reconstruction
+        recon = torch.stack([gap_from_parent_ratio, child_duration_ratio], dim=1)
+        return recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z
 
     def loss_function(
         self,
         recon_x: torch.Tensor,
         x: torch.Tensor,
+        x_scale: torch.Tensor,
+        mixture_weights: torch.Tensor,
+        alphas: torch.Tensor,
+        betas: torch.Tensor,
         mu: torch.Tensor,
         logvar: torch.Tensor,
+        z: torch.Tensor,
         beta: float = 1.0,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Reconstruction loss
-        recon_loss = functional.mse_loss(recon_x, x, reduction="sum")
+        # Split reconstruction and targets
+        gap_target = x[:, 0]
+        child_duration_target = x[:, 1]
+        target_outputs = torch.stack([gap_target, child_duration_target], dim=1)
+
+        # Beta mixture likelihood
+        gap_recon = recon_x[:, 0]
+        child_duration_recon = recon_x[:, 1]
+
+        # MSE loss for gap_from_parent_ratio
+        gap_loss = functional.mse_loss(gap_recon, gap_target, reduction="sum")
+
+        # Mixture Beta distribution negative log-likelihood for child_duration_ratio
+        mixture_beta_nll = self._mixture_beta_log_prob(
+            child_duration_target, mixture_weights, alphas, betas, x_scale
+        )
+
+        # Total reconstruction loss
+        recon_loss = gap_loss + mixture_beta_nll
 
         # KL divergence loss
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        if self.use_flow_prior:
+            # For flow-based prior: KL[q(z|x) || p_flow(z)]
+            # q(z|x) log prob
+            posterior_log_prob = (
+                Normal(mu, torch.exp(0.5 * logvar)).log_prob(z).sum(dim=-1)
+            )
+            # p_flow(z) log prob
+            prior_log_prob = self.flow_prior.log_prob(z)
+            # KL divergence
+            kl_loss = (posterior_log_prob - prior_log_prob).sum()
+        else:
+            # Standard VAE KL divergence
+            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
         total_loss = recon_loss + kl_loss * beta
         return total_loss, recon_loss, kl_loss
@@ -157,11 +477,26 @@ class MetadataVAE(nn.Module):
             dim=1,
         )  # (batch_size, 67)
 
-        # Sample from prior distribution (standard normal)
-        z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
+        # Sample from prior distribution
+        if self.use_flow_prior:
+            z = self.flow_prior.sample(batch_size, conditioning.device)
+        else:
+            z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
 
         # Decode with conditioning
-        return self.decode(z, conditioning)
+        decode_output = self.decode(z, conditioning)
+
+        (
+            gap_from_parent_ratio,
+            x_scale,
+            mixture_weights,
+            alphas,
+            betas,
+            child_duration_ratio,
+        ) = decode_output
+
+        # Return combined output
+        return torch.stack([gap_from_parent_ratio, child_duration_ratio], dim=1)
 
 
 class MetadataSynthesizer:
@@ -332,19 +667,17 @@ class MetadataSynthesizer:
 
         return training_inputs, training_targets
 
-    def _evaluate_model(self, val_inputs_tensor, val_targets_tensor, beta=1.0):
+    def _evaluate_model(self, val_loader, beta=1.0):
         """Evaluate model on validation set and return average loss."""
         self.model.eval()
         total_val_loss = 0
         num_val_batches = 0
 
         with torch.no_grad():
-            for i in range(0, len(val_inputs_tensor), self.config.batch_size):
-                batch_inputs = val_inputs_tensor[i : i + self.config.batch_size]
-                batch_targets = val_targets_tensor[i : i + self.config.batch_size]
-
-                if len(batch_inputs) == 0:
-                    continue
+            for batch_inputs, batch_targets in val_loader:
+                # Move to device
+                batch_inputs = batch_inputs.to(self.device)
+                batch_targets = batch_targets.to(self.device)
 
                 # Extract features
                 parent_start_time = batch_inputs[:, 0]
@@ -353,7 +686,7 @@ class MetadataSynthesizer:
                 parent_node_idx = batch_inputs[:, 3].long()
                 child_node_idx = batch_inputs[:, 4].long()
 
-                recon, mu, logvar = self.model(
+                model_output = self.model(
                     parent_start_time,
                     parent_duration,
                     normalized_child_idx,
@@ -361,11 +694,21 @@ class MetadataSynthesizer:
                     child_node_idx,
                 )
 
-                # Ensure consistent shapes for loss computation
-                recon_flat = recon.view(-1)
-                batch_targets_flat = batch_targets.view(-1)
+                # Unpack model output
+                recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
+                    model_output
+                )
                 val_loss, _, _ = self.model.loss_function(
-                    recon_flat, batch_targets_flat, mu, logvar, beta
+                    recon,
+                    batch_targets,
+                    x_scale,
+                    mixture_weights,
+                    alphas,
+                    betas,
+                    mu,
+                    logvar,
+                    z,
+                    beta,
                 )
 
                 total_val_loss += val_loss.item()
@@ -392,18 +735,33 @@ class MetadataSynthesizer:
         # Initialize model
         vocab_size = len(self.node_encoder.classes_)
         self.model = MetadataVAE(
-            vocab_size, self.config.metadata_hidden_dim, self.config.metadata_latent_dim
+            vocab_size,
+            self.config.metadata_hidden_dim,
+            self.config.metadata_latent_dim,
+            self.config.use_flow_prior,
+            self.config.prior_flow_layers,
+            self.config.prior_flow_hidden_dim,
+            self.config.num_beta_components,
         )
         self.model.to(self.device)  # Move model to GPU
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.config.learning_rate
         )
 
-        # Convert to tensors and move to device
-        train_inputs_tensor = torch.FloatTensor(train_inputs).to(self.device)
-        train_targets_tensor = torch.FloatTensor(train_targets).to(self.device)
-        val_inputs_tensor = torch.FloatTensor(val_inputs).to(self.device)
-        val_targets_tensor = torch.FloatTensor(val_targets).to(self.device)
+        # Create DataLoaders
+        train_dataset = TensorDataset(
+            torch.FloatTensor(train_inputs), torch.FloatTensor(train_targets)
+        )
+        train_loader = DataLoader(
+            train_dataset, batch_size=self.config.batch_size, shuffle=True
+        )
+
+        val_dataset = TensorDataset(
+            torch.FloatTensor(val_inputs), torch.FloatTensor(val_targets)
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=self.config.batch_size, shuffle=False
+        )
 
         # Early stopping parameters
         best_val_loss = float("inf")
@@ -424,12 +782,10 @@ class MetadataSynthesizer:
             epoch_kl_loss = 0
             num_batches = 0
 
-            for i in range(0, len(train_inputs_tensor), self.config.batch_size):
-                batch_inputs = train_inputs_tensor[i : i + self.config.batch_size]
-                batch_targets = train_targets_tensor[i : i + self.config.batch_size]
-
-                if len(batch_inputs) == 0:
-                    continue
+            for batch_inputs, batch_targets in train_loader:
+                # Move to device
+                batch_inputs = batch_inputs.to(self.device)
+                batch_targets = batch_targets.to(self.device)
 
                 # Extract features
                 parent_start_time = batch_inputs[:, 0]
@@ -439,7 +795,7 @@ class MetadataSynthesizer:
                 child_node_idx = batch_inputs[:, 4].long()
 
                 self.optimizer.zero_grad()
-                recon, mu, logvar = self.model(
+                model_output = self.model(
                     parent_start_time,
                     parent_duration,
                     normalized_child_idx,
@@ -447,11 +803,21 @@ class MetadataSynthesizer:
                     child_node_idx,
                 )
 
-                # Ensure consistent shapes for loss computation
-                recon_flat = recon.view(-1)
-                batch_targets_flat = batch_targets.view(-1)
+                # Unpack model output
+                recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
+                    model_output
+                )
                 total_loss, recon_loss, kl_loss = self.model.loss_function(
-                    recon_flat, batch_targets_flat, mu, logvar, current_beta
+                    recon,
+                    batch_targets,
+                    x_scale,
+                    mixture_weights,
+                    alphas,
+                    betas,
+                    mu,
+                    logvar,
+                    z,
+                    current_beta,
                 )
                 total_loss.backward()
                 self.optimizer.step()
@@ -467,9 +833,7 @@ class MetadataSynthesizer:
             avg_kl_loss = epoch_kl_loss / max(num_batches, 1)
 
             # Evaluate on validation set
-            val_loss = self._evaluate_model(
-                val_inputs_tensor, val_targets_tensor, current_beta
-            )
+            val_loss = self._evaluate_model(val_loader, current_beta)
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -743,6 +1107,10 @@ class MetadataSynthesizer:
             vocab_size,
             self.config.metadata_hidden_dim,
             self.config.metadata_latent_dim,
+            self.config.use_flow_prior,
+            self.config.prior_flow_layers,
+            self.config.prior_flow_hidden_dim,
+            self.config.num_beta_components,
         )
         self.model.to(self.device)
 

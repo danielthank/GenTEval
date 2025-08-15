@@ -9,6 +9,8 @@ from genteval.compressors import CompressedDataset, SerializationFormat
 from genteval.compressors.trace import Trace
 from genteval.utils.data_structures import count_spans_per_tree
 
+from .config import MrfEdgeApproach
+
 
 class TreeNode:
     """Represents a node in the generated tree structure."""
@@ -43,11 +45,13 @@ class MarkovRandomField:
         max_depth: int = 10,
         max_children: int = 5000,
         node_weight: float = 0,  # Lambda parameter for balancing edge vs node potentials
+        edge_approach: MrfEdgeApproach = MrfEdgeApproach.BASIC,
     ):
         self.order = order
         self.max_depth = max_depth
         self.max_children = max_children
         self.node_weight = node_weight
+        self.edge_approach = edge_approach
         self.min_nodes_count = None
         self.max_nodes_count = None
         self.logger = logging.getLogger(__name__)
@@ -57,7 +61,7 @@ class MarkovRandomField:
         self.root_features = (
             Counter()
         )  # (node_name, child_cnt) -> count for root nodes only
-        self.edge_features = Counter()  # (parent_node_name, parent_child_cnt, parent_child_idx, child_node_name, child_child_cnt) -> count
+        self.edge_features = Counter()  # Edge features -> count (5-tuple for BASIC, 6-tuple with prev_child_name for PREV_SIBLING_AWARE)
 
         # MRF parameters (learned via maximum likelihood)
         self.root_potentials = {}  # Unary potentials for root nodes
@@ -119,13 +123,30 @@ class MarkovRandomField:
                         child_children = list(graph.successors(child))
                         child_child_cnt = min(len(child_children), self.max_children)
 
-                        edge_features = (
-                            node_name,
-                            child_cnt,
-                            parent_child_idx,
-                            child_name,
-                            child_child_cnt,
-                        )
+                        if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                            # Get previous sibling name (None for first child)
+                            prev_child_name = None
+                            if parent_child_idx > 0:
+                                prev_child_id, _ = children_with_time[
+                                    parent_child_idx - 1
+                                ]
+                                prev_child_name = trace.spans[prev_child_id]["nodeName"]
+
+                            edge_features = (
+                                node_name,
+                                child_cnt,
+                                parent_child_idx,
+                                prev_child_name,
+                                child_name,
+                                child_child_cnt,
+                            )
+                        else:  # BASIC approach
+                            edge_features = (
+                                node_name,
+                                child_cnt,
+                                child_name,
+                                child_child_cnt,
+                            )
 
                         self.edge_features[edge_features] += 1
 
@@ -185,19 +206,33 @@ class MarkovRandomField:
         # Compute edge potentials (log conditional probabilities)
         parent_counts = defaultdict(int)
         for edge_features in self.edge_features:
-            parent_key = (
-                edge_features[0],
-                edge_features[1],
-                edge_features[2],
-            )  # (parent_node_name, parent_child_cnt, parent_child_idx)
+            if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                parent_key = (
+                    edge_features[0],
+                    edge_features[1],
+                    edge_features[2],
+                    edge_features[3],
+                )  # (parent_node_name, parent_child_cnt, parent_child_idx, prev_child_name)
+            else:  # BASIC approach
+                parent_key = (
+                    edge_features[0],
+                    edge_features[1],
+                )  # (parent_node_name, parent_child_cnt)
             parent_counts[parent_key] += self.edge_features[edge_features]
 
         for edge_features, count in self.edge_features.items():
-            parent_key = (
-                edge_features[0],
-                edge_features[1],
-                edge_features[2],
-            )  # (parent_node_name, parent_child_cnt, parent_child_idx)
+            if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                parent_key = (
+                    edge_features[0],
+                    edge_features[1],
+                    edge_features[2],
+                    edge_features[3],
+                )  # (parent_node_name, parent_child_cnt, parent_child_idx, prev_child_name)
+            else:  # BASIC approach
+                parent_key = (
+                    edge_features[0],
+                    edge_features[1],
+                )  # (parent_node_name, parent_child_cnt)
             parent_total = parent_counts[parent_key]
             if parent_total > 0:
                 self.edge_potentials[edge_features] = np.log(count / parent_total)
@@ -208,7 +243,12 @@ class MarkovRandomField:
 
         # Count all nodes from edge features (children)
         for edge_features, count in self.edge_features.items():
-            child_name, child_cnt = edge_features[3], edge_features[4]
+            if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                # PREV_SIBLING_AWARE: (parent_node_name, parent_child_cnt, parent_child_idx, prev_child_name, child_name, child_cnt)
+                child_name, child_cnt = edge_features[4], edge_features[5]
+            else:  # BASIC approach
+                # BASIC: (parent_node_name, parent_child_cnt, child_name, child_cnt)
+                child_name, child_cnt = edge_features[2], edge_features[3]
             node_key = (child_name, child_cnt)
             node_counts[node_key] += count
             total_nodes += count
@@ -232,19 +272,38 @@ class MarkovRandomField:
         """Build cache of child candidates with pre-computed probabilities."""
         self.child_candidates_cache = {}
 
-        # Group edge features by parent key (parent_node_name, parent_child_cnt, parent_child_idx)
+        # Group edge features by parent key
         parent_groups = defaultdict(list)
 
         for edge_features in self.edge_potentials:
-            p_node_name, p_child_cnt, p_child_idx, c_node_name, c_child_cnt = (
-                edge_features
-            )
-            parent_key = (p_node_name, p_child_cnt, p_child_idx)
+            if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                (
+                    p_node_name,
+                    p_child_cnt,
+                    p_child_idx,
+                    prev_child_name,
+                    c_node_name,
+                    c_child_cnt,
+                ) = edge_features
+                parent_key = (p_node_name, p_child_cnt, p_child_idx, prev_child_name)
+            else:  # BASIC approach
+                (
+                    p_node_name,
+                    p_child_cnt,
+                    c_node_name,
+                    c_child_cnt,
+                ) = edge_features
+                parent_key = (p_node_name, p_child_cnt)
             parent_groups[parent_key].append((c_node_name, c_child_cnt))
 
         # For each parent key, pre-compute child candidates with probabilities
         for parent_key, child_list in parent_groups.items():
-            p_node_name, p_child_cnt, p_child_idx = parent_key
+            if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                p_node_name, p_child_cnt, p_child_idx, prev_child_name = parent_key
+            else:  # BASIC approach
+                p_node_name, p_child_cnt = parent_key
+                p_child_idx = None
+                prev_child_name = None
 
             # Calculate potentials for all children of this parent
             potentials = []
@@ -252,13 +311,22 @@ class MarkovRandomField:
 
             for c_node_name, c_child_cnt in child_list:
                 # Edge potential (conditional probability)
-                edge_key = (
-                    p_node_name,
-                    p_child_cnt,
-                    p_child_idx,
-                    c_node_name,
-                    c_child_cnt,
-                )
+                if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+                    edge_key = (
+                        p_node_name,
+                        p_child_cnt,
+                        p_child_idx,
+                        prev_child_name,
+                        c_node_name,
+                        c_child_cnt,
+                    )
+                else:  # BASIC approach
+                    edge_key = (
+                        p_node_name,
+                        p_child_cnt,
+                        c_node_name,
+                        c_child_cnt,
+                    )
                 edge_potential = self.edge_potentials.get(edge_key, -np.inf)
 
                 # Node potential (global probability)
@@ -361,12 +429,19 @@ class MarkovRandomField:
             parent_node.depth,
         )
 
-        # Sample children based on edge potentials, considering child indices
+        # Sample children based on edge potentials, considering child indices and previous siblings
         for child_idx in range(parent_node.get_expected_child_count()):
             if nodes_generated >= max_nodes:
                 break
 
-            child_features = self._sample_child_node(parent_features, child_idx)
+            # Get previous sibling name for conditioning (used only in PREV_SIBLING_AWARE mode)
+            prev_child_name = None
+            if child_idx > 0 and parent_node.children:
+                prev_child_name = parent_node.children[child_idx - 1].node_name
+
+            child_features = self._sample_child_node(
+                parent_features, child_idx, prev_child_name
+            )
             if child_features is None:
                 continue
 
@@ -382,12 +457,20 @@ class MarkovRandomField:
 
         return nodes_generated
 
-    def _sample_child_node(self, parent_features, child_idx):
-        """Sample child node given parent features and child index using cached lookups."""
+    def _sample_child_node(self, parent_features, child_idx, prev_child_name):
+        """Sample child node given parent features, child index, and previous sibling using cached lookups."""
         parent_node_name, parent_child_cnt, parent_depth = parent_features
 
         # Use cached child candidates for fast lookup
-        parent_key = (parent_node_name, parent_child_cnt, child_idx)
+        if self.edge_approach == MrfEdgeApproach.PREV_SIBLING_AWARE:
+            parent_key = (
+                parent_node_name,
+                parent_child_cnt,
+                child_idx,
+                prev_child_name,
+            )
+        else:  # BASIC approach
+            parent_key = (parent_node_name, parent_child_cnt)
 
         if parent_key not in self.child_candidates_cache:
             return None
