@@ -254,12 +254,24 @@ class CompressedDataset:
         proto_specs_serializable = {}
         for k, v in self.proto_specs.items():
             if v is not None:
-                # Handle protobuf classes specially to use the correct module path
+                # Get the actual imported module name from the current context
+                full_module_name = None
+
+                # Check if this is a protobuf class by looking at the qualified name
                 if hasattr(v, "__module__") and "pb2" in v.__module__:
-                    # For generated protobuf classes, use the full qualified name with genteval.proto prefix
-                    proto_specs_serializable[k] = (
-                        f"genteval.proto.{v.__module__}.{v.__name__}"
-                    )
+                    # Try to find the full module path by checking sys.modules
+                    import sys
+
+                    for module_name, module in sys.modules.items():
+                        if (
+                            hasattr(module, v.__name__)
+                            and getattr(module, v.__name__) is v
+                        ):
+                            full_module_name = module_name
+                            break
+
+                if full_module_name:
+                    proto_specs_serializable[k] = f"{full_module_name}.{v.__name__}"
                 else:
                     proto_specs_serializable[k] = f"{v.__module__}.{v.__name__}"
 

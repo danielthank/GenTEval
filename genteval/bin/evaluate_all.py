@@ -143,6 +143,7 @@ async def evaluate_all():
                 and not compressor.startswith("head_sampling")
                 and not compressor.startswith("gent")
                 and not compressor.startswith("markov_gent")
+                and not compressor.startswith("simple_gent")
             ):
                 continue
 

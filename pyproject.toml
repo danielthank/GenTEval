@@ -31,6 +31,8 @@ markov_gent_all = "genteval.bin.markov_gent_all:main"
 markov_gent = "genteval.bin.markov_gent:main"
 normalize_all = "genteval.bin.normalize_all:main"
 normalize = "genteval.bin.normalize:main"
+simple_gent_all = "genteval.bin.simple_gent_all:main"
+simple_gent = "genteval.bin.simple_gent:main"
 
 pickle_analyzer = "genteval.bin.pickle_analyzer:main"
 

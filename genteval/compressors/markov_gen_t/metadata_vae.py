@@ -1,502 +1,15 @@
 import logging
-import time
 
 import numpy as np
 import torch
 import wandb
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from torch import nn
-from torch.distributions import Beta, Categorical, Normal
-from torch.nn import functional
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from genteval.compressors import CompressedDataset, SerializationFormat
-
-
-class CouplingLayer(nn.Module):
-    """Coupling layer for normalizing flows (RealNVP style)."""
-
-    def __init__(
-        self, dim, hidden_dim=64, mask_type="checkerboard", conditioning_dim=0
-    ):
-        super().__init__()
-        self.dim = dim
-        self.conditioning_dim = conditioning_dim
-
-        # Create mask
-        if mask_type == "checkerboard":
-            self.register_buffer("mask", torch.arange(dim) % 2)
-        else:  # split
-            mask = torch.zeros(dim)
-            mask[dim // 2 :] = 1
-            self.register_buffer("mask", mask)
-
-        # Input dimension includes masked variables + conditioning
-        input_dim = dim + conditioning_dim
-
-        # Scale and translation networks
-        self.scale_net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, dim),
-            nn.Tanh(),
-        )
-
-        self.translate_net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, dim),
-        )
-
-    def forward(self, x, conditioning=None, reverse=False):
-        """Forward pass through coupling layer."""
-        masked_x = x * self.mask
-
-        # Concatenate masked input with conditioning
-        if conditioning is not None and self.conditioning_dim > 0:
-            net_input = torch.cat([masked_x, conditioning], dim=-1)
-        else:
-            net_input = masked_x
-
-        scale = self.scale_net(net_input)
-        translate = self.translate_net(net_input)
-
-        if reverse:
-            # Inverse transformation
-            y = (x - translate * (1 - self.mask)) / torch.exp(scale * (1 - self.mask))
-            log_det = -torch.sum(scale * (1 - self.mask), dim=-1)
-        else:
-            # Forward transformation
-            y = x * torch.exp(scale * (1 - self.mask)) + translate * (1 - self.mask)
-            log_det = torch.sum(scale * (1 - self.mask), dim=-1)
-
-        return y, log_det
-
-
-class NormalizingFlow(nn.Module):
-    """Normalizing flow for flow-based prior."""
-
-    def __init__(self, dim, num_layers=4, hidden_dim=64):
-        super().__init__()
-        self.dim = dim
-        self.num_layers = num_layers
-
-        # Create coupling layers with alternating masks
-        self.layers = nn.ModuleList()
-        for i in range(num_layers):
-            mask_type = "checkerboard" if i % 2 == 0 else "split"
-            self.layers.append(CouplingLayer(dim, hidden_dim, mask_type))
-
-    def forward(self, z, reverse=False):
-        """Transform samples through the flow."""
-        log_det_total = torch.zeros(z.shape[0], device=z.device)
-
-        if reverse:
-            # Go through layers in reverse order
-            for layer in reversed(self.layers):
-                z, log_det = layer(z, reverse=True)
-                log_det_total += log_det
-        else:
-            # Go through layers in forward order
-            for layer in self.layers:
-                z, log_det = layer(z, reverse=False)
-                log_det_total += log_det
-
-        return z, log_det_total
-
-    def log_prob(self, z):
-        """Compute log probability of samples under the flow."""
-        # Transform to base distribution
-        z0, log_det = self.forward(z, reverse=True)
-
-        # Base distribution is standard normal
-        base_log_prob = Normal(0, 1).log_prob(z0).sum(dim=-1)
-
-        # Apply change of variables
-        return base_log_prob + log_det
-
-    def sample(self, batch_size, device):
-        """Sample from the flow-based prior."""
-        # Sample from base distribution (standard normal)
-        z0 = torch.randn(batch_size, self.dim, device=device)
-
-        # Transform through the flow
-        z, _ = self.forward(z0, reverse=False)
-
-        return z
-
-
-class MetadataVAE(nn.Module):
-    def __init__(
-        self,
-        vocab_size: int,
-        hidden_dim: int = 128,
-        latent_dim: int = 32,
-        use_flow_prior: bool = False,
-        prior_flow_layers: int = 4,
-        prior_flow_hidden_dim: int = 64,
-        num_beta_components: int = 3,
-    ):
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.hidden_dim = hidden_dim
-        self.latent_dim = latent_dim
-        self.embed_dim = self.hidden_dim
-        self.use_flow_prior = use_flow_prior
-        self.num_beta_components = num_beta_components
-
-        # Embedding for node names
-        self.node_embedding = nn.Embedding(vocab_size, self.embed_dim)
-
-        input_dim = (
-            3 + 2 * self.embed_dim
-        )  # 3 numerical (start_time, duration, child_idx) + 2 embeddings
-
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
-
-        # Flow-based prior
-        if self.use_flow_prior:
-            self.flow_prior = NormalizingFlow(
-                latent_dim,
-                num_layers=prior_flow_layers,
-                hidden_dim=prior_flow_hidden_dim,
-            )
-
-        # Decoder: mixture Beta likelihood
-        # Output: [gap_from_parent_ratio, x_scale, π_1...π_K, α_1...α_K, β_1...β_K]
-        decoder_input_dim = latent_dim + input_dim
-        beta_output_dim = (
-            2 + 3 * num_beta_components
-        )  # gap, x_scale, K mixture weights, K alphas, K betas
-        self.decoder = nn.Sequential(
-            nn.Linear(decoder_input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, beta_output_dim),
-        )
-
-    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        h = self.encoder(x)
-        mu = self.fc_mu(h)
-        logvar = self.fc_logvar(h)
-        return mu, logvar
-
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def _sample_mixture_beta(
-        self,
-        mixture_weights: torch.Tensor,
-        alphas: torch.Tensor,
-        betas: torch.Tensor,
-        x_scale: torch.Tensor,
-    ) -> torch.Tensor:
-        """Sample from mixture of Beta distributions with shared scale.
-
-        Args:
-            mixture_weights: (batch_size, K) mixture probabilities
-            alphas: (batch_size, K) alpha parameters
-            betas: (batch_size, K) beta parameters
-            x_scale: (batch_size,) scaling factor
-
-        Returns:
-            child_duration_ratio: (batch_size,) sampled values
-        """
-        batch_size = mixture_weights.shape[0]
-        K = mixture_weights.shape[1]
-
-        # Sample component indices from categorical distribution
-        component_dist = Categorical(mixture_weights)
-        components = component_dist.sample()  # (batch_size,)
-
-        # Gather selected alpha and beta parameters
-        selected_alphas = alphas.gather(1, components.unsqueeze(1)).squeeze(
-            1
-        )  # (batch_size,)
-        selected_betas = betas.gather(1, components.unsqueeze(1)).squeeze(
-            1
-        )  # (batch_size,)
-
-        # Sample from selected Beta distributions
-        beta_dists = Beta(selected_alphas, selected_betas)
-        beta_samples = beta_dists.sample()  # (batch_size,)
-
-        # Scale by x_scale
-        return x_scale * beta_samples
-
-    def _mixture_beta_log_prob(
-        self,
-        target: torch.Tensor,
-        mixture_weights: torch.Tensor,
-        alphas: torch.Tensor,
-        betas: torch.Tensor,
-        x_scale: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute negative log-likelihood for mixture of Beta distributions.
-
-        Args:
-            target: (batch_size,) target values
-            mixture_weights: (batch_size, K) mixture probabilities
-            alphas: (batch_size, K) alpha parameters
-            betas: (batch_size, K) beta parameters
-            x_scale: (batch_size,) scaling factor
-
-        Returns:
-            Negative log-likelihood sum
-        """
-        batch_size = target.shape[0]
-        K = mixture_weights.shape[1]
-
-        # Unscale target: target / x_scale
-        unscaled_target = target / (x_scale + 1e-8)
-        unscaled_target_clamped = torch.clamp(unscaled_target, 1e-6, 1 - 1e-6)
-
-        # Compute log-probability for each component
-        log_probs = []
-        for k in range(K):
-            beta_dist = Beta(alphas[:, k], betas[:, k])
-            log_prob_k = beta_dist.log_prob(unscaled_target_clamped)
-            log_probs.append(log_prob_k)
-
-        log_probs = torch.stack(log_probs, dim=1)  # (batch_size, K)
-
-        # Weighted log-probabilities
-        weighted_log_probs = log_probs + torch.log(mixture_weights + 1e-8)
-
-        # Log-sum-exp for mixture
-        mixture_log_prob = torch.logsumexp(weighted_log_probs, dim=1)  # (batch_size,)
-
-        # Add Jacobian for scaling transformation
-        jacobian_log_det = torch.log(x_scale + 1e-8)
-        total_log_prob = mixture_log_prob + jacobian_log_det
-
-        return -total_log_prob.sum()
-
-    def decode(
-        self, z: torch.Tensor, conditioning: torch.Tensor
-    ) -> tuple[torch.Tensor, ...]:
-        # Concatenate latent vector with conditioning information
-        decoder_input = torch.cat([z, conditioning], dim=1)
-
-        # Beta mixture likelihood
-        output = self.decoder(decoder_input)
-        K = self.num_beta_components
-
-        # Parse output into mixture components
-        gap_from_parent_ratio = torch.sigmoid(output[:, 0])  # [0, 1]
-        x_scale = torch.sigmoid(output[:, 1])  # [0, 1] scaling factor
-
-        # Mixture weights: softmax to ensure they sum to 1
-        mixture_weights = torch.softmax(output[:, 2 : 2 + K], dim=1)  # (batch_size, K)
-
-        # Alpha and beta parameters: softplus to ensure positive
-        alphas = (
-            torch.nn.functional.softplus(output[:, 2 + K : 2 + 2 * K]) + 1e-6
-        )  # (batch_size, K)
-        betas = (
-            torch.nn.functional.softplus(output[:, 2 + 2 * K : 2 + 3 * K]) + 1e-6
-        )  # (batch_size, K)
-
-        # Sample child_duration_ratio from mixture of scaled Beta distributions
-        child_duration_ratio = self._sample_mixture_beta(
-            mixture_weights, alphas, betas, x_scale
-        )
-
-        return (
-            gap_from_parent_ratio,
-            x_scale,
-            mixture_weights,
-            alphas,
-            betas,
-            child_duration_ratio,
-        )
-
-    def forward(
-        self,
-        parent_start_time: torch.Tensor,
-        parent_duration: torch.Tensor,
-        child_idx: torch.Tensor,
-        parent_node_idx: torch.Tensor,
-        child_node_idx: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            parent_start_time: Tensor of shape (batch_size,)
-            parent_duration: Tensor of shape (batch_size,)
-            child_idx: Tensor of shape (batch_size,) - index of child among siblings (ordered by startTime)
-            parent_node_idx: Tensor of shape (batch_size,) - node name indices
-            child_node_idx: Tensor of shape (batch_size,) - node name indices
-
-        Returns:
-            Tuple of (reconstruction, x_scale, alpha, beta, mu, logvar, z)
-            reconstruction contains [gap_from_parent_ratio, child_duration_ratio] in [0,1]
-            x_scale is the scaling factor for the beta distribution
-            alpha, beta are the beta distribution parameters for child_duration_ratio
-            z is the latent sample
-        """
-        # Get embeddings
-        parent_emb = self.node_embedding(parent_node_idx)  # (batch_size, 32)
-        child_emb = self.node_embedding(child_node_idx)  # (batch_size, 32)
-
-        # Concatenate all inputs
-        x = torch.cat(
-            [
-                parent_start_time.unsqueeze(1),
-                parent_duration.unsqueeze(1),
-                child_idx.unsqueeze(1),
-                parent_emb,
-                child_emb,
-            ],
-            dim=1,
-        )  # (batch_size, 3 + 2 * embed)
-
-        # VAE forward pass
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        decode_output = self.decode(z, x)
-
-        (
-            gap_from_parent_ratio,
-            x_scale,
-            mixture_weights,
-            alphas,
-            betas,
-            child_duration_ratio,
-        ) = decode_output
-        # Combine outputs for reconstruction
-        recon = torch.stack([gap_from_parent_ratio, child_duration_ratio], dim=1)
-        return recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z
-
-    def loss_function(
-        self,
-        recon_x: torch.Tensor,
-        x: torch.Tensor,
-        x_scale: torch.Tensor,
-        mixture_weights: torch.Tensor,
-        alphas: torch.Tensor,
-        betas: torch.Tensor,
-        mu: torch.Tensor,
-        logvar: torch.Tensor,
-        z: torch.Tensor,
-        beta: float = 1.0,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Split reconstruction and targets
-        gap_target = x[:, 0]
-        child_duration_target = x[:, 1]
-        target_outputs = torch.stack([gap_target, child_duration_target], dim=1)
-
-        # Beta mixture likelihood
-        gap_recon = recon_x[:, 0]
-        child_duration_recon = recon_x[:, 1]
-
-        # MSE loss for gap_from_parent_ratio
-        gap_loss = functional.mse_loss(gap_recon, gap_target, reduction="sum")
-
-        # Mixture Beta distribution negative log-likelihood for child_duration_ratio
-        mixture_beta_nll = self._mixture_beta_log_prob(
-            child_duration_target, mixture_weights, alphas, betas, x_scale
-        )
-
-        # Total reconstruction loss
-        recon_loss = gap_loss + mixture_beta_nll
-
-        # KL divergence loss
-        if self.use_flow_prior:
-            # For flow-based prior: KL[q(z|x) || p_flow(z)]
-            # q(z|x) log prob
-            posterior_log_prob = (
-                Normal(mu, torch.exp(0.5 * logvar)).log_prob(z).sum(dim=-1)
-            )
-            # p_flow(z) log prob
-            prior_log_prob = self.flow_prior.log_prob(z)
-            # KL divergence
-            kl_loss = (posterior_log_prob - prior_log_prob).sum()
-        else:
-            # Standard VAE KL divergence
-            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-        total_loss = recon_loss + kl_loss * beta
-        return total_loss, recon_loss, kl_loss
-
-    def sample(
-        self,
-        parent_start_time: torch.Tensor,
-        parent_duration: torch.Tensor,
-        child_idx: torch.Tensor,
-        parent_node_idx: torch.Tensor,
-        child_node_idx: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Generate samples by sampling from the prior distribution (no encoder needed).
-
-        Args:
-            parent_start_time: Tensor of shape (batch_size,)
-            parent_duration: Tensor of shape (batch_size,)
-            child_idx: Tensor of shape (batch_size,) - index of child among siblings
-            parent_node_idx: Tensor of shape (batch_size,) - node name indices
-            child_node_idx: Tensor of shape (batch_size,) - node name indices
-
-        Returns:
-            Tensor of shape (batch_size, 2) containing sampled outputs
-        """
-        batch_size = parent_start_time.shape[0]
-
-        # Get embeddings and create conditioning vector
-        parent_emb = self.node_embedding(parent_node_idx)  # (batch_size, 32)
-        child_emb = self.node_embedding(child_node_idx)  # (batch_size, 32)
-
-        conditioning = torch.cat(
-            [
-                parent_start_time.unsqueeze(1),
-                parent_duration.unsqueeze(1),
-                child_idx.unsqueeze(1),
-                parent_emb,
-                child_emb,
-            ],
-            dim=1,
-        )  # (batch_size, 67)
-
-        # Sample from prior distribution
-        if self.use_flow_prior:
-            z = self.flow_prior.sample(batch_size, conditioning.device)
-        else:
-            z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
-
-        # Decode with conditioning
-        decode_output = self.decode(z, conditioning)
-
-        (
-            gap_from_parent_ratio,
-            x_scale,
-            mixture_weights,
-            alphas,
-            betas,
-            child_duration_ratio,
-        ) = decode_output
-
-        # Return combined output
-        return torch.stack([gap_from_parent_ratio, child_duration_ratio], dim=1)
+from genteval.models import MetadataVAE
 
 
 class MetadataSynthesizer:
@@ -504,19 +17,25 @@ class MetadataSynthesizer:
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.node_encoder = LabelEncoder()
-        self.model = None
-        self.optimizer = None
+
+        # Dictionary to store models per time bucket: {time_bucket: model}
+        self.models = {}
+        self.optimizers = {}
+
         self.start_time_scaler = {"mean": 0, "std": 1}
         self.duration_scaler = {"mean": 0, "std": 1}
         self.is_fitted = False
 
+        # Time bucketing configuration (same as RootDurationTableSynthesizer)
+        self.bucket_size_us = 60 * 1000000 * 100  # 1 minute in microseconds
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger.info(f"Using device: {self.device}")
 
-    def _prepare_training_data(self, traces: list) -> tuple[np.ndarray, np.ndarray]:
-        """Prepare training data from traces."""
-        training_inputs = []
-        training_targets = []
+    def _prepare_training_data(
+        self, traces: list
+    ) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+        """Prepare training data from traces, grouped by time bucket."""
 
         # Collect all node names for encoding
         all_node_names = set()
@@ -535,8 +54,8 @@ class MetadataSynthesizer:
         all_start_times = []
         all_durations = []
 
-        # First pass: collect all training examples with node names as strings
-        raw_training_data = []
+        # Dictionary to store raw training data by time bucket
+        raw_training_data_by_bucket = {}
 
         self.logger.info("Collecting training data from traces")
         for trace in tqdm(traces, desc="Processing traces for metadata training"):
@@ -571,6 +90,9 @@ class MetadataSynthesizer:
                         if parent_duration <= 0 or child_duration <= 0:
                             continue
 
+                        # Calculate time bucket
+                        time_bucket = int(parent_start_time // self.bucket_size_us)
+
                         # Calculate ratios and ensure they're bounded [0, 1]
                         gap_from_parent_ratio = max(
                             0, min(1, gap_from_parent / parent_duration)
@@ -582,8 +104,12 @@ class MetadataSynthesizer:
                         # Normalize child_idx by total number of children
                         normalized_child_idx = child_idx / len(children)
 
+                        # Initialize bucket if not exists
+                        if time_bucket not in raw_training_data_by_bucket:
+                            raw_training_data_by_bucket[time_bucket] = []
+
                         # Store raw data (with string node names and normalized child_idx)
-                        raw_training_data.append(
+                        raw_training_data_by_bucket[time_bucket].append(
                             {
                                 "parent_start_time": parent_start_time,
                                 "parent_duration": parent_duration,
@@ -603,46 +129,8 @@ class MetadataSynthesizer:
                 self.logger.warning(f"Error processing trace: {e}")
                 continue
 
-        if not raw_training_data:
+        if not raw_training_data_by_bucket:
             raise ValueError("No valid training data found")
-
-        # Second pass: batch transform all node names
-        self.logger.info(
-            "Encoding node names for %d training examples", len(raw_training_data)
-        )
-        all_parent_nodes = [item["parent_node"] for item in raw_training_data]
-        all_child_nodes = [item["child_node"] for item in raw_training_data]
-
-        parent_node_indices = self.node_encoder.transform(all_parent_nodes)
-        child_node_indices = self.node_encoder.transform(all_child_nodes)
-
-        # Third pass: create final training arrays using vectorized operations
-        self.logger.info(
-            "Creating training tensors for %d examples", len(raw_training_data)
-        )
-
-        # Pre-allocate arrays for much faster performance
-        num_examples = len(raw_training_data)
-        training_inputs = np.zeros((num_examples, 5))  # Added normalized_child_idx
-        training_targets = np.zeros((num_examples, 2))
-
-        # Extract all data at once using list comprehensions (vectorized)
-        training_inputs[:, 0] = [
-            item["parent_start_time"] for item in raw_training_data
-        ]
-        training_inputs[:, 1] = [item["parent_duration"] for item in raw_training_data]
-        training_inputs[:, 2] = [
-            item["normalized_child_idx"] for item in raw_training_data
-        ]
-        training_inputs[:, 3] = parent_node_indices
-        training_inputs[:, 4] = child_node_indices
-
-        training_targets[:, 0] = [
-            item["gap_from_parent_ratio"] for item in raw_training_data
-        ]
-        training_targets[:, 1] = [
-            item["child_duration_ratio"] for item in raw_training_data
-        ]
 
         # Compute scaling parameters
         self.start_time_scaler = {
@@ -654,39 +142,78 @@ class MetadataSynthesizer:
             "std": np.std(all_durations) + 1e-8,
         }
 
-        # Apply scaling to inputs only (targets are already bounded ratios [0,1])
-        # Scale inputs (but not child_idx which is already an index)
-        training_inputs[:, 0] = (
-            training_inputs[:, 0] - self.start_time_scaler["mean"]
-        ) / self.start_time_scaler["std"]
-        training_inputs[:, 1] = (
-            training_inputs[:, 1] - self.duration_scaler["mean"]
-        ) / self.duration_scaler["std"]
+        # Process data for each time bucket
+        training_data_by_bucket = {}
 
-        # No scaling needed for targets (ratios are already [0,1])
+        for time_bucket, raw_training_data in raw_training_data_by_bucket.items():
+            self.logger.info(
+                f"Processing time bucket {time_bucket} with {len(raw_training_data)} examples"
+            )
 
-        return training_inputs, training_targets
+            # Batch transform all node names for this bucket
+            all_parent_nodes = [item["parent_node"] for item in raw_training_data]
+            all_child_nodes = [item["child_node"] for item in raw_training_data]
 
-    def _evaluate_model(self, val_loader, beta=1.0):
-        """Evaluate model on validation set and return average loss."""
-        self.model.eval()
+            parent_node_indices = self.node_encoder.transform(all_parent_nodes)
+            child_node_indices = self.node_encoder.transform(all_child_nodes)
+
+            # Create training arrays for this bucket
+            num_examples = len(raw_training_data)
+            training_inputs = np.zeros((num_examples, 5))
+            training_targets = np.zeros((num_examples, 2))
+
+            # Extract all data at once using list comprehensions (vectorized)
+            training_inputs[:, 0] = [
+                item["parent_start_time"] for item in raw_training_data
+            ]
+            training_inputs[:, 1] = [
+                item["parent_duration"] for item in raw_training_data
+            ]
+            training_inputs[:, 2] = [
+                item["normalized_child_idx"] for item in raw_training_data
+            ]
+            training_inputs[:, 3] = parent_node_indices
+            training_inputs[:, 4] = child_node_indices
+
+            training_targets[:, 0] = [
+                item["gap_from_parent_ratio"] for item in raw_training_data
+            ]
+            training_targets[:, 1] = [
+                item["child_duration_ratio"] for item in raw_training_data
+            ]
+
+            # Apply scaling to inputs only (targets are already bounded ratios [0,1])
+            training_inputs[:, 0] = (
+                training_inputs[:, 0] - self.start_time_scaler["mean"]
+            ) / self.start_time_scaler["std"]
+            training_inputs[:, 1] = (
+                training_inputs[:, 1] - self.duration_scaler["mean"]
+            ) / self.duration_scaler["std"]
+
+            training_data_by_bucket[time_bucket] = (training_inputs, training_targets)
+
+        return training_data_by_bucket
+
+    def _evaluate_model(self, model, val_loader, beta=1.0):
+        """Evaluate a specific model on validation set and return average loss."""
+        model.eval()
         total_val_loss = 0
         num_val_batches = 0
 
         with torch.no_grad():
             for batch_inputs, batch_targets in val_loader:
                 # Move to device
-                batch_inputs = batch_inputs.to(self.device)
-                batch_targets = batch_targets.to(self.device)
+                inputs_device = batch_inputs.to(self.device)
+                targets_device = batch_targets.to(self.device)
 
                 # Extract features
-                parent_start_time = batch_inputs[:, 0]
-                parent_duration = batch_inputs[:, 1]
-                normalized_child_idx = batch_inputs[:, 2]
-                parent_node_idx = batch_inputs[:, 3].long()
-                child_node_idx = batch_inputs[:, 4].long()
+                parent_start_time = inputs_device[:, 0]
+                parent_duration = inputs_device[:, 1]
+                normalized_child_idx = inputs_device[:, 2]
+                parent_node_idx = inputs_device[:, 3].long()
+                child_node_idx = inputs_device[:, 4].long()
 
-                model_output = self.model(
+                model_output = model(
                     parent_start_time,
                     parent_duration,
                     normalized_child_idx,
@@ -698,9 +225,9 @@ class MetadataSynthesizer:
                 recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
                     model_output
                 )
-                val_loss, _, _ = self.model.loss_function(
+                val_loss, _, _ = model.loss_function(
                     recon,
-                    batch_targets,
+                    targets_device,
                     x_scale,
                     mixture_weights,
                     alphas,
@@ -717,169 +244,242 @@ class MetadataSynthesizer:
         return total_val_loss / max(num_val_batches, 1)
 
     def fit(self, traces: list):
-        """Train the metadata synthesis model with train/val split and early stopping."""
-        self.logger.info("Training Metadata Neural Network")
-
-        # Prepare data
-        inputs, targets = self._prepare_training_data(traces)
-
-        # Train/validation split (80/20)
-        train_inputs, val_inputs, train_targets, val_targets = train_test_split(
-            inputs, targets, test_size=0.2, random_state=42
-        )
-
+        """Train separate metadata synthesis models for each time bucket sequentially with train/val split and early stopping."""
         self.logger.info(
-            f"Training with {len(train_inputs)} examples, validating with {len(val_inputs)} examples"
+            "Training Metadata Neural Networks per time bucket sequentially"
         )
 
-        # Initialize model
+        # Prepare data grouped by time bucket
+        training_data_by_bucket = self._prepare_training_data(traces)
+
+        # Initialize vocab size once
         vocab_size = len(self.node_encoder.classes_)
-        self.model = MetadataVAE(
-            vocab_size,
-            self.config.metadata_hidden_dim,
-            self.config.metadata_latent_dim,
-            self.config.use_flow_prior,
-            self.config.prior_flow_layers,
-            self.config.prior_flow_hidden_dim,
-            self.config.num_beta_components,
-        )
-        self.model.to(self.device)  # Move model to GPU
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.config.learning_rate
+
+        # Sort time buckets for sequential training
+        sorted_time_buckets = sorted(training_data_by_bucket.keys())
+        self.logger.info(
+            f"Training models sequentially for time buckets: {sorted_time_buckets}"
         )
 
-        # Create DataLoaders
-        train_dataset = TensorDataset(
-            torch.FloatTensor(train_inputs), torch.FloatTensor(train_targets)
-        )
-        train_loader = DataLoader(
-            train_dataset, batch_size=self.config.batch_size, shuffle=True
-        )
+        previous_model = None
 
-        val_dataset = TensorDataset(
-            torch.FloatTensor(val_inputs), torch.FloatTensor(val_targets)
-        )
-        val_loader = DataLoader(
-            val_dataset, batch_size=self.config.batch_size, shuffle=False
-        )
-
-        # Early stopping parameters
-        best_val_loss = float("inf")
-        patience = self.config.early_stopping_patience
-        patience_counter = 0
-        best_model_state = None
-
-        # Training loop
-        self.model.train()
-        pbar = tqdm(range(self.config.metadata_epochs), desc="Training Metadata NN")
-        for epoch in pbar:
-            # Get current beta value for this epoch
-            current_beta = self.config.beta
-
-            self.model.train()
-            epoch_total_loss = 0
-            epoch_recon_loss = 0
-            epoch_kl_loss = 0
-            num_batches = 0
-
-            for batch_inputs, batch_targets in train_loader:
-                # Move to device
-                batch_inputs = batch_inputs.to(self.device)
-                batch_targets = batch_targets.to(self.device)
-
-                # Extract features
-                parent_start_time = batch_inputs[:, 0]
-                parent_duration = batch_inputs[:, 1]
-                normalized_child_idx = batch_inputs[:, 2]
-                parent_node_idx = batch_inputs[:, 3].long()
-                child_node_idx = batch_inputs[:, 4].long()
-
-                self.optimizer.zero_grad()
-                model_output = self.model(
-                    parent_start_time,
-                    parent_duration,
-                    normalized_child_idx,
-                    parent_node_idx,
-                    child_node_idx,
-                )
-
-                # Unpack model output
-                recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
-                    model_output
-                )
-                total_loss, recon_loss, kl_loss = self.model.loss_function(
-                    recon,
-                    batch_targets,
-                    x_scale,
-                    mixture_weights,
-                    alphas,
-                    betas,
-                    mu,
-                    logvar,
-                    z,
-                    current_beta,
-                )
-                total_loss.backward()
-                self.optimizer.step()
-
-                epoch_total_loss += total_loss.item()
-                epoch_recon_loss += recon_loss.item()
-                epoch_kl_loss += kl_loss.item()
-                num_batches += 1
-
-            # Calculate training losses
-            avg_total_loss = epoch_total_loss / max(num_batches, 1)
-            avg_recon_loss = epoch_recon_loss / max(num_batches, 1)
-            avg_kl_loss = epoch_kl_loss / max(num_batches, 1)
-
-            # Evaluate on validation set
-            val_loss = self._evaluate_model(val_loader, current_beta)
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                patience_counter = 0
-                # Save best model state
-                best_model_state = self.model.state_dict().copy()
-            else:
-                patience_counter += 1
-
-            # Update progress bar with current losses
-            pbar.set_postfix(
-                {
-                    "Train": f"{avg_total_loss:.4f}",
-                    "Val": f"{val_loss:.4f}",
-                    "Recon": f"{avg_recon_loss:.4f}",
-                    "KL": f"{avg_kl_loss:.4f}",
-                    "Beta": f"{current_beta:.4f}",
-                    "Patience": f"{patience_counter}/{patience}",
-                }
+        # Train models sequentially in time order
+        for time_bucket in sorted_time_buckets:
+            inputs, targets = training_data_by_bucket[time_bucket]
+            self.logger.info(
+                f"Training model for time bucket {time_bucket} with {len(inputs)} examples"
             )
 
-            if wandb.run is not None:
-                wandb.log(
+            # Skip time buckets with too few samples
+            if len(inputs) < 10:
+                self.logger.warning(
+                    f"Skipping time bucket {time_bucket} due to insufficient data ({len(inputs)} examples)"
+                )
+                continue
+
+            # Train/validation split (80/20)
+            train_inputs, val_inputs, train_targets, val_targets = train_test_split(
+                inputs, targets, test_size=0.2, random_state=42
+            )
+
+            self.logger.info(
+                f"Time bucket {time_bucket}: Training with {len(train_inputs)} examples, validating with {len(val_inputs)} examples"
+            )
+
+            # Initialize model for this time bucket
+            model = MetadataVAE(
+                vocab_size,
+                self.config.metadata_hidden_dim,
+                self.config.metadata_latent_dim,
+                self.config.use_flow_prior,
+                self.config.prior_flow_layers,
+                self.config.prior_flow_hidden_dim,
+                self.config.num_beta_components,
+            )
+
+            # If we have a previous model, initialize from its state
+            if previous_model is not None:
+                self.logger.info(
+                    f"Initializing time bucket {time_bucket} model from previous time bucket model"
+                )
+                model.load_state_dict(previous_model.state_dict())
+                # Use a lower learning rate for fine-tuning
+                fine_tune_lr_factor = self.config.sequential_training_lr_factor
+                learning_rate = self.config.learning_rate * fine_tune_lr_factor
+                self.logger.info(
+                    f"Using reduced learning rate {learning_rate} (factor: {fine_tune_lr_factor}) for fine-tuning"
+                )
+            else:
+                learning_rate = self.config.learning_rate
+                self.logger.info(
+                    f"Training first model from scratch with learning rate {learning_rate}"
+                )
+
+            model.to(self.device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+            # Store model and optimizer
+            self.models[time_bucket] = model
+            self.optimizers[time_bucket] = optimizer
+
+            # Create DataLoaders
+            train_dataset = TensorDataset(
+                torch.FloatTensor(train_inputs), torch.FloatTensor(train_targets)
+            )
+            train_loader = DataLoader(
+                train_dataset, batch_size=self.config.batch_size, shuffle=True
+            )
+
+            val_dataset = TensorDataset(
+                torch.FloatTensor(val_inputs), torch.FloatTensor(val_targets)
+            )
+            val_loader = DataLoader(
+                val_dataset, batch_size=self.config.batch_size, shuffle=False
+            )
+
+            # Early stopping parameters
+            best_val_loss = float("inf")
+            patience = self.config.early_stopping_patience
+            patience_counter = 0
+            best_model_state = None
+
+            # Training loop for this time bucket
+            model.train()
+            pbar = tqdm(
+                range(self.config.metadata_epochs),
+                desc=f"Training Metadata NN for bucket {time_bucket}",
+            )
+            for epoch in pbar:
+                # Get current beta value for this epoch
+                current_beta = self.config.beta
+
+                model.train()
+                epoch_total_loss = 0
+                epoch_recon_loss = 0
+                epoch_kl_loss = 0
+                num_batches = 0
+
+                for batch_inputs, batch_targets in train_loader:
+                    # Move to device
+                    inputs_device = batch_inputs.to(self.device)
+                    targets_device = batch_targets.to(self.device)
+
+                    # Extract features
+                    parent_start_time = inputs_device[:, 0]
+                    parent_duration = inputs_device[:, 1]
+                    normalized_child_idx = inputs_device[:, 2]
+                    parent_node_idx = inputs_device[:, 3].long()
+                    child_node_idx = inputs_device[:, 4].long()
+
+                    optimizer.zero_grad()
+                    model_output = model(
+                        parent_start_time,
+                        parent_duration,
+                        normalized_child_idx,
+                        parent_node_idx,
+                        child_node_idx,
+                    )
+
+                    # Unpack model output
+                    recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
+                        model_output
+                    )
+                    total_loss, recon_loss, kl_loss = model.loss_function(
+                        recon,
+                        targets_device,
+                        x_scale,
+                        mixture_weights,
+                        alphas,
+                        betas,
+                        mu,
+                        logvar,
+                        z,
+                        current_beta,
+                    )
+                    total_loss.backward()
+                    optimizer.step()
+
+                    epoch_total_loss += total_loss.item()
+                    epoch_recon_loss += recon_loss.item()
+                    epoch_kl_loss += kl_loss.item()
+                    num_batches += 1
+
+                # Calculate training losses
+                avg_total_loss = epoch_total_loss / max(num_batches, 1)
+                avg_recon_loss = epoch_recon_loss / max(num_batches, 1)
+                avg_kl_loss = epoch_kl_loss / max(num_batches, 1)
+
+                # Evaluate on validation set
+                val_loss = self._evaluate_model(model, val_loader, current_beta)
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                    # Save best model state
+                    best_model_state = model.state_dict().copy()
+                else:
+                    patience_counter += 1
+
+                # Update progress bar with current losses
+                pbar.set_postfix(
                     {
-                        "metadata_vae_train_loss": avg_total_loss,
-                        "metadata_vae_val_loss": val_loss,
-                        "metadata_vae_recon_loss": avg_recon_loss,
-                        "metadata_vae_kl_loss": avg_kl_loss,
-                        "metadata_vae_beta": current_beta,
-                        "metadata_vae_epoch": epoch,
+                        "Train": f"{avg_total_loss:.4f}",
+                        "Val": f"{val_loss:.4f}",
+                        "Recon": f"{avg_recon_loss:.4f}",
+                        "KL": f"{avg_kl_loss:.4f}",
+                        "Beta": f"{current_beta:.4f}",
+                        "Patience": f"{patience_counter}/{patience}",
                     }
                 )
 
-            # Early stopping
-            if patience_counter >= patience:
-                self.logger.info(f"Early stopping triggered at epoch {epoch + 1}")
-                break
+                if wandb.run is not None:
+                    wandb.log(
+                        {
+                            f"metadata_vae_bucket_{time_bucket}_train_loss": avg_total_loss,
+                            f"metadata_vae_bucket_{time_bucket}_val_loss": val_loss,
+                            f"metadata_vae_bucket_{time_bucket}_recon_loss": avg_recon_loss,
+                            f"metadata_vae_bucket_{time_bucket}_kl_loss": avg_kl_loss,
+                            f"metadata_vae_bucket_{time_bucket}_beta": current_beta,
+                            f"metadata_vae_bucket_{time_bucket}_epoch": epoch,
+                        }
+                    )
 
-        # Load best model state
-        if best_model_state is not None:
-            self.model.load_state_dict(best_model_state)
-            self.logger.info(
-                f"Restored best model with validation loss: {best_val_loss:.4f}"
-            )
+                # Early stopping
+                if patience_counter >= patience:
+                    self.logger.info(
+                        f"Early stopping triggered at epoch {epoch + 1} for time bucket {time_bucket}"
+                    )
+                    break
 
+            # Load best model state
+            if best_model_state is not None:
+                model.load_state_dict(best_model_state)
+                self.logger.info(
+                    f"Time bucket {time_bucket}: Restored best model with validation loss: {best_val_loss:.4f}"
+                )
+
+            # Set this model as the previous model for the next time bucket
+            previous_model = model
+
+        self.logger.info(
+            f"Trained {len(self.models)} models for {len(self.models)} time buckets"
+        )
         self.is_fitted = True
+
+    def _get_model_for_time_bucket(self, time_bucket: int) -> MetadataVAE:
+        """Get the appropriate model for a given time bucket, with fallback strategy."""
+        if time_bucket in self.models:
+            return self.models[time_bucket]
+
+        # Fallback: find the closest time bucket
+        if self.models:
+            closest_bucket = min(self.models.keys(), key=lambda b: abs(b - time_bucket))
+            self.logger.debug(
+                f"Using model from time bucket {closest_bucket} for bucket {time_bucket}"
+            )
+            return self.models[closest_bucket]
+
+        raise ValueError("No models available for inference")
 
     def synthesize_metadata_batch(
         self,
@@ -891,6 +491,7 @@ class MetadataSynthesizer:
     ) -> list[tuple[float, float]]:
         """
         Generate child start_times and durations for multiple parent-child pairs at once.
+        Uses the appropriate VAE model based on the time bucket of each parent start time.
 
         Args:
             parent_start_times: List of parent start times
@@ -903,7 +504,7 @@ class MetadataSynthesizer:
             List of tuples (child_start_time, child_duration).
         """
         if not self.is_fitted:
-            raise ValueError("Model must be fitted before synthesis")
+            raise ValueError("Models must be fitted before synthesis")
 
         if not (
             len(parent_start_times)
@@ -917,129 +518,140 @@ class MetadataSynthesizer:
         if not parent_start_times:
             return []
 
-        self.model.eval()
-        with torch.no_grad():
-            batch_size = len(parent_start_times)
+        # Group samples by time bucket
+        samples_by_bucket = {}
+        for i, parent_start_time in enumerate(parent_start_times):
+            time_bucket = int(parent_start_time // self.bucket_size_us)
+            if time_bucket not in samples_by_bucket:
+                samples_by_bucket[time_bucket] = []
+            samples_by_bucket[time_bucket].append(i)
 
-            # DEBUG: Start timing
-            start_time = time.perf_counter()
-            self.logger.debug(
-                f"[TIMING] Starting synthesize_metadata_batch with batch_size={batch_size}"
-            )
+        # Process each time bucket separately
+        results = [None] * len(parent_start_times)
 
-            # Encode all node names in batch
-            node_encoding_start = time.perf_counter()
-            try:
-                parent_node_indices = self.node_encoder.transform(parent_nodes)
-            except ValueError:
-                parent_node_indices = []
-                for parent_node in parent_nodes:
-                    try:
-                        parent_node_idx = self.node_encoder.transform([parent_node])[0]
-                    except ValueError:
-                        rng = np.random.default_rng()
-                        parent_node_idx = rng.integers(
-                            0, len(self.node_encoder.classes_)
-                        )
-                    parent_node_indices.append(parent_node_idx)
-                parent_node_indices = np.array(parent_node_indices)
+        for time_bucket, indices in samples_by_bucket.items():
+            # Get the appropriate model for this time bucket
+            model = self._get_model_for_time_bucket(time_bucket)
+            model.eval()
 
-            try:
-                child_node_indices = self.node_encoder.transform(child_nodes)
-            except ValueError:
-                child_node_indices = []
-                for child_node in child_nodes:
-                    try:
-                        child_node_idx = self.node_encoder.transform([child_node])[0]
-                    except ValueError:
-                        rng = np.random.default_rng()
-                        child_node_idx = rng.integers(
-                            0, len(self.node_encoder.classes_)
-                        )
-                    child_node_indices.append(child_node_idx)
-                child_node_indices = np.array(child_node_indices)
+            with torch.no_grad():
+                # Extract data for this time bucket
+                bucket_start_times = [parent_start_times[i] for i in indices]
+                bucket_durations = [parent_durations[i] for i in indices]
+                bucket_child_indices = [child_indices[i] for i in indices]
+                bucket_parent_nodes = [parent_nodes[i] for i in indices]
+                bucket_child_nodes = [child_nodes[i] for i in indices]
 
-            node_encoding_time = time.perf_counter() - node_encoding_start
-            self.logger.debug(f"[TIMING] Node encoding took: {node_encoding_time:.4f}s")
+                # Encode all node names in batch
+                try:
+                    parent_node_indices = self.node_encoder.transform(
+                        bucket_parent_nodes
+                    )
+                except ValueError:
+                    parent_node_indices = []
+                    for parent_node in bucket_parent_nodes:
+                        try:
+                            parent_node_idx = self.node_encoder.transform(
+                                [parent_node]
+                            )[0]
+                        except ValueError:
+                            rng = np.random.default_rng()
+                            parent_node_idx = rng.integers(
+                                0, len(self.node_encoder.classes_)
+                            )
+                        parent_node_indices.append(parent_node_idx)
+                    parent_node_indices = np.array(parent_node_indices)
 
-            # Scale all inputs
-            scaling_start = time.perf_counter()
-            scaled_start_times = [
-                (start_time - self.start_time_scaler["mean"])
-                / self.start_time_scaler["std"]
-                for start_time in parent_start_times
-            ]
-            scaled_durations = [
-                (duration - self.duration_scaler["mean"]) / self.duration_scaler["std"]
-                for duration in parent_durations
-            ]
+                try:
+                    child_node_indices = self.node_encoder.transform(bucket_child_nodes)
+                except ValueError:
+                    child_node_indices = []
+                    for child_node in bucket_child_nodes:
+                        try:
+                            child_node_idx = self.node_encoder.transform([child_node])[
+                                0
+                            ]
+                        except ValueError:
+                            rng = np.random.default_rng()
+                            child_node_idx = rng.integers(
+                                0, len(self.node_encoder.classes_)
+                            )
+                        child_node_indices.append(child_node_idx)
+                    child_node_indices = np.array(child_node_indices)
 
-            scaling_time = time.perf_counter() - scaling_start
-            self.logger.debug(f"[TIMING] Input scaling took: {scaling_time:.4f}s")
+                # Scale all inputs
+                scaled_start_times = [
+                    (start_time - self.start_time_scaler["mean"])
+                    / self.start_time_scaler["std"]
+                    for start_time in bucket_start_times
+                ]
+                scaled_durations = [
+                    (duration - self.duration_scaler["mean"])
+                    / self.duration_scaler["std"]
+                    for duration in bucket_durations
+                ]
 
-            # Prepare batch tensors and move to device
-            tensor_start = time.perf_counter()
-            parent_start_tensor = torch.FloatTensor(scaled_start_times).to(self.device)
-            parent_duration_tensor = torch.FloatTensor(scaled_durations).to(self.device)
-            normalized_child_idx_tensor = torch.FloatTensor(child_indices).to(
-                self.device
-            )
-            parent_node_tensor = torch.LongTensor(parent_node_indices).to(self.device)
-            child_node_tensor = torch.LongTensor(child_node_indices).to(self.device)
+                # Prepare batch tensors and move to device
+                parent_start_tensor = torch.FloatTensor(scaled_start_times).to(
+                    self.device
+                )
+                parent_duration_tensor = torch.FloatTensor(scaled_durations).to(
+                    self.device
+                )
+                normalized_child_idx_tensor = torch.FloatTensor(
+                    bucket_child_indices
+                ).to(self.device)
+                parent_node_tensor = torch.LongTensor(parent_node_indices).to(
+                    self.device
+                )
+                child_node_tensor = torch.LongTensor(child_node_indices).to(self.device)
 
-            tensor_time = time.perf_counter() - tensor_start
-            self.logger.debug(
-                f"[TIMING] Tensor creation and device transfer took: {tensor_time:.4f}s"
-            )
+                # Sample using VAE in batch (no encoder needed for generation)
+                samples = model.sample(
+                    parent_start_tensor,
+                    parent_duration_tensor,
+                    normalized_child_idx_tensor,
+                    parent_node_tensor,
+                    child_node_tensor,
+                )
 
-            # Sample using VAE in batch (no encoder needed for generation)
-            inference_start = time.perf_counter()
-            samples = self.model.sample(
-                parent_start_tensor,
-                parent_duration_tensor,
-                normalized_child_idx_tensor,
-                parent_node_tensor,
-                child_node_tensor,
-            )
+                # Process batch results and store in original order
+                for j, original_idx in enumerate(indices):
+                    # Get ratio outputs (already bounded [0,1] by sigmoid)
+                    gap_from_parent_ratio = samples[j, 0].item()
+                    child_duration_ratio = samples[j, 1].item()
 
-            inference_time = time.perf_counter() - inference_start
-            self.logger.debug(f"[TIMING] Model inference took: {inference_time:.4f}s")
+                    # Convert ratios back to absolute values
+                    gap_from_parent = gap_from_parent_ratio * bucket_durations[j]
+                    child_duration = child_duration_ratio * bucket_durations[j]
 
-            # Process batch results
-            processing_start = time.perf_counter()
-            results = []
-            for i in range(batch_size):
-                # Get ratio outputs (already bounded [0,1] by sigmoid)
-                gap_from_parent_ratio = samples[i, 0].item()
-                child_duration_ratio = samples[i, 1].item()
+                    # Compute child start time
+                    child_start_time = bucket_start_times[j] + max(0, gap_from_parent)
+                    child_duration = max(1, child_duration)
 
-                # Convert ratios back to absolute values
-                gap_from_parent = gap_from_parent_ratio * parent_durations[i]
-                child_duration = child_duration_ratio * parent_durations[i]
+                    results[original_idx] = (child_start_time, child_duration)
 
-                # Compute child start time
-                child_start_time = parent_start_times[i] + max(0, gap_from_parent)
-                child_duration = max(1, child_duration)
-
-                results.append((child_start_time, child_duration))
-
-            processing_time = time.perf_counter() - processing_start
-            total_time = time.perf_counter() - start_time
-            self.logger.debug(
-                f"[TIMING] Result processing took: {processing_time:.4f}s"
-            )
-            self.logger.debug(
-                f"[TIMING] Total synthesize_metadata_batch took: {total_time:.4f}s"
-            )
-
-            return results
+        return results
 
     def save_state_dict(
         self, compressed_data: CompressedDataset, decoder_only: bool = False
     ):
         """Save state dictionary with optional decoder-only mode."""
 
-        # Prepare common data to save
+        # Prepare models data to save
+        models_data = {}
+        for time_bucket, model in self.models.items():
+            if decoder_only:
+                model_state = {
+                    k: v
+                    for k, v in model.state_dict().items()
+                    if k.startswith(
+                        ("decoder", "node_embedding")
+                    )  # Keep embeddings for conditioning
+                }
+            else:
+                model_state = model.state_dict()
+            models_data[time_bucket] = model_state
 
         compressed_data.add(
             "metadata_synthesizer",
@@ -1064,25 +676,13 @@ class MetadataSynthesizer:
                         else 0,
                         SerializationFormat.MSGPACK,
                     ),
+                    "bucket_size_us": (
+                        self.bucket_size_us,
+                        SerializationFormat.MSGPACK,
+                    ),
+                    "models_data": (models_data, SerializationFormat.CLOUDPICKLE),
                 }
             ),
-            SerializationFormat.CLOUDPICKLE,
-        )
-
-        if decoder_only:
-            metadata_vae = {
-                k: v
-                for k, v in self.model.state_dict().items()
-                if k.startswith(
-                    ("decoder", "node_embedding")
-                )  # Keep embeddings for conditioning
-            }
-        else:
-            metadata_vae = self.model.state_dict()
-
-        compressed_data["metadata_synthesizer"].add(
-            "state_dict",
-            metadata_vae,
             SerializationFormat.CLOUDPICKLE,
         )
 
@@ -1102,26 +702,68 @@ class MetadataSynthesizer:
         self.is_fitted = metadata_synthesizer_data["is_fitted"]
         vocab_size = metadata_synthesizer_data["vocab_size"]
 
-        # Initialize model
-        self.model = MetadataVAE(
-            vocab_size,
-            self.config.metadata_hidden_dim,
-            self.config.metadata_latent_dim,
-            self.config.use_flow_prior,
-            self.config.prior_flow_layers,
-            self.config.prior_flow_hidden_dim,
-            self.config.num_beta_components,
-        )
-        self.model.to(self.device)
-
-        # Load model state dict
-        if "state_dict" in metadata_synthesizer_data:
-            model_state = metadata_synthesizer_data["state_dict"]
-            logger.info("Loading metadata synthesizer model")
-            self.model.load_state_dict(model_state, strict=False)
+        # Load bucket size (with backward compatibility)
+        if "bucket_size_us" in metadata_synthesizer_data:
+            self.bucket_size_us = metadata_synthesizer_data["bucket_size_us"]
         else:
-            raise ValueError("No state_dict found in metadata_synthesizer")
+            self.bucket_size_us = 60 * 1000000 * 5  # Default fallback
 
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.config.learning_rate
-        )
+        # Load models for each time bucket
+        if "models_data" in metadata_synthesizer_data:
+            models_data = metadata_synthesizer_data["models_data"]
+            self.models = {}
+            self.optimizers = {}
+
+            for time_bucket, model_state in models_data.items():
+                # Initialize model for this time bucket
+                model = MetadataVAE(
+                    vocab_size,
+                    self.config.metadata_hidden_dim,
+                    self.config.metadata_latent_dim,
+                    self.config.use_flow_prior,
+                    self.config.prior_flow_layers,
+                    self.config.prior_flow_hidden_dim,
+                    self.config.num_beta_components,
+                )
+                model.to(self.device)
+
+                # Load model state dict
+                model.load_state_dict(model_state, strict=False)
+
+                # Store model and optimizer
+                self.models[time_bucket] = model
+                self.optimizers[time_bucket] = torch.optim.Adam(
+                    model.parameters(), lr=self.config.learning_rate
+                )
+
+            logger.info(
+                f"Loaded {len(self.models)} models for time buckets: {sorted(self.models.keys())}"
+            )
+        elif "state_dict" in metadata_synthesizer_data:
+            # Backward compatibility: load single model as fallback
+            model_state = metadata_synthesizer_data["state_dict"]
+
+            # Initialize single model
+            model = MetadataVAE(
+                vocab_size,
+                self.config.metadata_hidden_dim,
+                self.config.metadata_latent_dim,
+                self.config.use_flow_prior,
+                self.config.prior_flow_layers,
+                self.config.prior_flow_hidden_dim,
+                self.config.num_beta_components,
+            )
+            model.to(self.device)
+            model.load_state_dict(model_state, strict=False)
+
+            # Store as bucket 0 for compatibility
+            self.models = {0: model}
+            self.optimizers = {
+                0: torch.optim.Adam(model.parameters(), lr=self.config.learning_rate)
+            }
+
+            logger.info("Loaded single model for backward compatibility")
+        else:
+            raise ValueError(
+                "No models_data or state_dict found in metadata_synthesizer"
+            )

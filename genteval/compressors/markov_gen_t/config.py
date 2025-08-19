@@ -52,6 +52,7 @@ class MarkovGenTConfig:
     # General
     batch_size: int = 256
     learning_rate: float = 0.001
+    sequential_training_lr_factor: float = 0.5
 
     # Compression options
     save_decoders_only: bool = True

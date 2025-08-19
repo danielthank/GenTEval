@@ -40,23 +40,20 @@ def fix_protobuf_imports(proto_dir: Path):
     print(f"Fixed imports in {len(pb2_files)} files")
 
 
-def main():
-    """Generate protobuf files."""
-    root = Path(__file__).parent.parent.parent
-    proto_dir = root / "genteval" / "proto"
-
+def generate_proto_for_directory(proto_dir: Path):
+    """Generate protobuf files for a specific directory."""
     if not proto_dir.exists():
         print(f"Proto directory not found: {proto_dir}")
-        sys.exit(1)
+        return False
 
-    print("Generating protobuf files...")
+    print(f"Generating protobuf files in: {proto_dir}")
 
     # Find all .proto files
     proto_files = list(proto_dir.glob("*.proto"))
 
     if not proto_files:
-        print("No .proto files found")
-        return
+        print(f"No .proto files found in {proto_dir}")
+        return False
 
     # Generate Python files from proto definitions
     cmd = [
@@ -71,16 +68,42 @@ def main():
 
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print("Protobuf files generated successfully")
+        print(f"Protobuf files generated successfully in {proto_dir}")
 
         # Fix import statements in generated files
         fix_protobuf_imports(proto_dir)
 
-        print(f"Generated files in: {proto_dir}")
+        print(f"Generated {len(proto_files)} proto files in: {proto_dir}")
+        return True
     except subprocess.CalledProcessError as e:
-        print(f"Error generating protobuf files: {e}")
+        print(f"Error generating protobuf files in {proto_dir}: {e}")
         print(f"stdout: {e.stdout}")
         print(f"stderr: {e.stderr}")
+        return False
+
+
+def main():
+    """Generate protobuf files."""
+    root = Path(__file__).parent.parent.parent
+    
+    # List of proto directories to process
+    proto_directories = [
+        root / "genteval" / "proto",
+        root / "genteval" / "compressors" / "simple_gent" / "proto",
+    ]
+
+    success_count = 0
+    total_count = 0
+
+    for proto_dir in proto_directories:
+        total_count += 1
+        if generate_proto_for_directory(proto_dir):
+            success_count += 1
+
+    print(f"\nCompleted: {success_count}/{total_count} directories processed successfully")
+    
+    if success_count == 0:
+        print("No protobuf files were generated")
         sys.exit(1)
 
 

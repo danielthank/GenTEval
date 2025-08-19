@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package simple_gent;
+
+// Main message containing all SimpleGenT models
+message SimpleGenTModels {
+  int64 time_bucket_duration = 1;  // Duration of each time bucket (e.g., 60 seconds in microseconds)
+  
+  // Models per time bucket
+  repeated TimeBucketModels time_buckets = 2;
+  
+  // Shared node encoder for all models and time buckets
+  bytes node_encoder = 3;  // LabelEncoder (serialized)
+}
+
+// Models for a specific time bucket
+message TimeBucketModels {
+  int64 time_bucket = 1;  // Time bucket identifier
+  int32 max_nodes_count = 2;  // Maximum number of nodes observed in this time bucket
+  
+  // Root count models: (node_idx, child_cnt) -> count
+  repeated RootCountModel root_models = 3;
+  
+  // Topology models: (parent_feature, child_feature) -> potential
+  repeated TopologyModel topology_models = 4;
+  
+  // Duration models with statistical distributions
+  repeated RootDurationModel root_duration_models = 5;
+  
+  // MetadataVAE models: neural networks for joint gap and duration ratio modeling
+  repeated MetadataVAEModel metadata_vae_models = 6;
+}
+
+// Node feature representation
+message NodeFeature {
+  int32 node_idx = 1;  // Index into the shared node encoder vocabulary
+  int32 child_count = 2;
+}
+
+// Root count model: maps node feature to occurrence count
+message RootCountModel {
+  NodeFeature feature = 1;
+  int32 count = 2;
+}
+
+// Topology model: maps parent-child feature pair to potential/probability
+message TopologyModel {
+  NodeFeature parent_feature = 1;
+  NodeFeature child_feature = 2;
+  double potential = 3;
+}
+
+// Root duration model: maps node feature to Gaussian mixture
+message RootDurationModel {
+  NodeFeature feature = 1;
+  GaussianMixtureParams distribution = 2;
+  double min_duration = 3;  // Original minimum duration for bounds checking
+  double max_duration = 4;  // Original maximum duration for bounds checking
+}
+
+// MetadataVAE model: neural network that jointly models gap and duration ratios
+message MetadataVAEModel {
+  int64 time_bucket = 1;        // Time bucket this model represents
+  
+  // Model architecture parameters
+  int32 vocab_size = 2;
+  int32 hidden_dim = 3;
+  int32 latent_dim = 4;
+  bool use_flow_prior = 5;
+  int32 prior_flow_layers = 6;
+  int32 prior_flow_hidden_dim = 7;
+  int32 num_beta_components = 8;
+  
+  // Serialized model weights
+  bytes model_state_dict = 9;   // PyTorch model weights (serialized)
+}
+
+// Gaussian mixture model parameters
+message GaussianMixtureParams {
+  repeated double weights = 1;     // Component weights (sum to 1)
+  repeated double means = 2;       // Component means
+  repeated double variances = 3;   // Component variances (for 1D case)
+  int32 n_components = 4;          // Number of components
+}
+
+// Beta mixture model parameters
+message BetaMixtureParams {
+  repeated double weights = 1;     // Component weights (sum to 1)
+  repeated double alphas = 2;      // Alpha parameters for Beta distributions
+  repeated double betas = 3;       // Beta parameters for Beta distributions
+  int32 n_components = 4;          // Number of components
+}
