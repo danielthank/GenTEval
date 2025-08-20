@@ -37,6 +37,7 @@ simple_gent = "genteval.bin.simple_gent:main"
 pickle_analyzer = "genteval.bin.pickle_analyzer:main"
 
 collect_request_data = "genteval.bin.collect_request_data:main"
+export_feb_traces = "genteval.bin.export_feb_traces:main"
 adjust_duration = "genteval.bin.adjust_duration:main"
 remove_query_param = "genteval.data_collection.utils.remove_query_param:main"
 

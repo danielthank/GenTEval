@@ -543,7 +543,7 @@ class MetadataVAEModel:
                 k: v
                 for k, v in model.state_dict().items()
                 if k.startswith(
-                    ("decoder", "node_embedding")
+                    ("decoder", "node_embedding", "flow_prior")
                 )  # Keep embeddings for conditioning
             }
             metadata_vae_model.model_state_dict = pickle.dumps(model_state)

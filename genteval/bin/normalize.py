@@ -24,6 +24,9 @@ def main():
     dataset = RCAEvalDataset(run_dir)
     dataset.save(dataset_dir)
     labels = {}
-    if run_dir.joinpath("labels.pkl").exists():
-        labels = pickle.load(open(run_dir.joinpath("labels.pkl"), "rb"))
-    pickle.dump(labels, open(dataset_dir.joinpath("labels.pkl"), "wb"))
+    if (run_dir / "inject_time.txt").exists():
+        with (run_dir / "inject_time.txt").open() as f:
+            inject_time = f.read().strip()
+            labels["inject_time"] = inject_time
+    with (dataset_dir / "labels.pkl").open("wb") as f:
+        pickle.dump(labels, f)

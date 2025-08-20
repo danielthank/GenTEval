@@ -1,7 +1,9 @@
 import logging
 from collections import defaultdict
+from datetime import datetime
 
 import numpy as np
+from tqdm import tqdm
 
 from genteval.compressors.simple_gent.proto import simple_gent_pb2
 
@@ -28,16 +30,25 @@ class RootModel:
 
     def fit(self, traces):
         """Learn root node counts from traces."""
-        self.logger.info("Training root model")
+        self.logger.info(f"Training root model on {len(traces)} traces")
 
         root_features_per_bucket = defaultdict(list)
+        total_root_spans = 0
+        min_start_time = float("inf")
+        max_start_time = float("-inf")
 
         # Extract root nodes from each trace
-        for trace in traces:
+        self.logger.info("Extracting root spans from traces")
+        for trace in tqdm(traces, desc="Processing traces for root features"):
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
 
+            # Track min/max start times
+            min_start_time = min(min_start_time, trace_start_time)
+            max_start_time = max(max_start_time, trace_start_time)
+
             # Find root spans (spans with no parent)
+            trace_root_count = 0
             for span_id, span_data in trace.spans.items():
                 if span_data.get("parentSpanId") is None:
                     # Count children of this root span
@@ -53,16 +64,50 @@ class RootModel:
                     )
 
                     root_features_per_bucket[time_bucket].append(root_feature)
+                    trace_root_count += 1
+
+            total_root_spans += trace_root_count
+
+        # Output min/max start times
+        if min_start_time != float("inf") and max_start_time != float("-inf"):
+            min_dt = datetime.fromtimestamp(min_start_time / 1_000_000)
+            max_dt = datetime.fromtimestamp(max_start_time / 1_000_000)
+            self.logger.info(f"Min start_time: {min_start_time} ({min_dt})")
+            self.logger.info(f"Max start_time: {max_start_time} ({max_dt})")
+        else:
+            self.logger.info("No traces processed - min/max start_time not available")
+
+        self.logger.info(
+            f"Extracted {total_root_spans} root spans from {len(traces)} traces"
+        )
+        self.logger.info(
+            f"Found root spans in {len(root_features_per_bucket)} time buckets"
+        )
 
         # Count occurrences per time bucket
-        for time_bucket, features in root_features_per_bucket.items():
+        self.logger.info("Computing root feature counts per time bucket")
+        total_unique_features = 0
+
+        for time_bucket, features in tqdm(
+            root_features_per_bucket.items(), desc="Processing time buckets"
+        ):
+            bucket_feature_count = 0
             for feature in features:
                 self.root_counts[time_bucket][feature] += 1
                 self.total_counts[time_bucket] += 1
+                bucket_feature_count += 1
+
+            unique_features_in_bucket = len(self.root_counts[time_bucket])
+            total_unique_features += unique_features_in_bucket
+            self.logger.debug(
+                f"Time bucket {time_bucket}: {bucket_feature_count} root spans, "
+                f"{unique_features_in_bucket} unique features"
+            )
 
         self.logger.info(
-            f"Learned root counts for {len(self.root_counts)} time buckets, "
-            f"total roots: {sum(self.total_counts.values())}"
+            f"Root model training complete: {len(self.root_counts)} time buckets, "
+            f"{sum(self.total_counts.values())} total root spans, "
+            f"{total_unique_features} total unique features"
         )
 
     def sample_root_features(self, count: int) -> list[tuple[int, NodeFeature]]:

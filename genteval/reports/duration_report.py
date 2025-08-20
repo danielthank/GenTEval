@@ -19,70 +19,24 @@ class DurationReport(BaseReport):
         """Initialize the duration report generator."""
         super().__init__(compressors, root_dir)
         self.plot = plot
-        # Create output directories for visualizations
-        self.viz_output_dir = root_dir / "visualizations" / "duration"
-        self.duration_all_dir = self.viz_output_dir / "duration_all_wasserstein_dist"
-        self.duration_pair_dir = (
-            self.viz_output_dir / "duration_pair_all_wasserstein_dist"
-        )
-        self.duration_depth_0_dir = (
-            self.viz_output_dir / "duration_depth_0_wasserstein_dist"
-        )
-        self.duration_depth_1_dir = (
-            self.viz_output_dir / "duration_depth_1_wasserstein_dist"
-        )
-        self.duration_depth_0_p50_dir = self.viz_output_dir / "duration_depth_0_p50"
-        self.duration_depth_0_p90_dir = self.viz_output_dir / "duration_depth_0_p90"
-        self.duration_depth_1_p50_dir = self.viz_output_dir / "duration_depth_1_p50"
-        self.duration_depth_1_p90_dir = self.viz_output_dir / "duration_depth_1_p90"
-        self.duration_depth_0_before_after_dir = (
-            self.viz_output_dir / "duration_depth_0_before_after_incident"
-        )
-        self.duration_depth_1_before_after_dir = (
-            self.viz_output_dir / "duration_depth_1_before_after_incident"
-        )
-        self.duration_depth_0_by_service_dir = (
-            self.viz_output_dir / "duration_depth_0_by_service_wasserstein_dist"
-        )
-        self.duration_depth_1_by_service_dir = (
-            self.viz_output_dir / "duration_depth_1_by_service_wasserstein_dist"
-        )
 
-        # Create all subdirectories only if plotting is enabled
-        if self.plot:
-            self.duration_all_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_pair_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_0_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_1_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_0_p50_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_0_p90_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_1_p50_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_1_p90_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_0_before_after_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_1_before_after_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_0_by_service_dir.mkdir(parents=True, exist_ok=True)
-            self.duration_depth_1_by_service_dir.mkdir(parents=True, exist_ok=True)
+        self.wasserstein_metric = WassersteinDistanceMetric()
+        self.depth_before_after_metric = DepthBeforeAfterMetric()
+        self.percentile_comparison_metric = PercentileComparisonMetric()
 
-        # Initialize metric classes
-        self.output_dirs = {
-            "viz_output_dir": self.viz_output_dir,
-            "duration_all_dir": self.duration_all_dir,
-            "duration_pair_dir": self.duration_pair_dir,
-            "duration_depth_0_dir": self.duration_depth_0_dir,
-            "duration_depth_1_dir": self.duration_depth_1_dir,
-            "duration_depth_0_p50_dir": self.duration_depth_0_p50_dir,
-            "duration_depth_0_p90_dir": self.duration_depth_0_p90_dir,
-            "duration_depth_1_p50_dir": self.duration_depth_1_p50_dir,
-            "duration_depth_1_p90_dir": self.duration_depth_1_p90_dir,
-            "duration_depth_0_before_after_dir": self.duration_depth_0_before_after_dir,
-            "duration_depth_1_before_after_dir": self.duration_depth_1_before_after_dir,
-            "duration_depth_0_by_service_dir": self.duration_depth_0_by_service_dir,
-            "duration_depth_1_by_service_dir": self.duration_depth_1_by_service_dir,
-        }
-
-        self.wasserstein_metric = WassersteinDistanceMetric(self.output_dirs)
-        self.depth_before_after_metric = DepthBeforeAfterMetric(self.output_dirs)
-        self.percentile_comparison_metric = PercentileComparisonMetric(self.output_dirs)
+    def _has_before_after_incident_data_for_depth(self, original, results, depth):
+        """Check if both datasets have before/after incident data for the given depth."""
+        depth_str = str(depth)
+        try:
+            # Try to access all required data paths
+            original["duration_before_incident_by_depth"][depth_str]["all"]
+            original["duration_after_incident_by_depth"][depth_str]["all"]
+            results["duration_before_incident_by_depth"][depth_str]["all"]
+            results["duration_after_incident_by_depth"][depth_str]["all"]
+        except KeyError:
+            return False
+        else:
+            return True
 
     def generate(self, run_dirs) -> dict[str, Any]:
         """Generate duration report with Wasserstein distance calculations and visualizations."""
@@ -135,15 +89,12 @@ class DurationReport(BaseReport):
                         results["duration"][group],
                         f"duration_{group}",
                         compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
+                        app_name=app_name,
+                        service=service,
+                        fault=fault,
+                        run=run,
                         plot=self.plot,
                     )
-                    """
-                    wdist = wasserstein_distance(
-                        original["duration"][group],
-                        results["duration"][group],
-                    )
-                    """
 
                     report_group = f"{app_name}_{compressor}"
                     self.report[report_group]["duration_wdist"].append(wdist)
@@ -159,7 +110,10 @@ class DurationReport(BaseReport):
                         results["duration_pair"][group],
                         f"duration_pair_{group}",
                         compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
+                        app_name=app_name,
+                        service=service,
+                        fault=fault,
+                        run=run,
                         plot=self.plot,
                     )
 
@@ -179,7 +133,10 @@ class DurationReport(BaseReport):
                                 results["duration_depth_0"][group],
                                 f"duration_depth_0_{group}",
                                 compressor,
-                                f"{app_name}_{service}_{fault}_{run}",
+                                app_name=app_name,
+                                service=service,
+                                fault=fault,
+                                run=run,
                                 plot=self.plot,
                             )
                         )
@@ -202,7 +159,10 @@ class DurationReport(BaseReport):
                                 results["duration_depth_1"][group],
                                 f"duration_depth_1_{group}",
                                 compressor,
-                                f"{app_name}_{service}_{fault}_{run}",
+                                app_name=app_name,
+                                service=service,
+                                fault=fault,
+                                run=run,
                                 plot=self.plot,
                             )
                         )
@@ -212,184 +172,33 @@ class DurationReport(BaseReport):
                             wdist
                         )
 
-                # Process duration_depth_0_by_service data
-                if (
-                    "duration_depth_0_by_service" in original
-                    and "duration_depth_0_by_service" in results
-                ):
-                    # Visualize and calculate weighted average Wasserstein distance
-                    weighted_wdist = (
-                        self.wasserstein_metric.visualize_wasserstein_by_service(
-                            original["duration_depth_0_by_service"],
-                            results["duration_depth_0_by_service"],
-                            "duration_depth_0_by_service",
-                            compressor,
-                            f"{app_name}_{service}_{fault}_{run}",
-                            plot=self.plot,
-                        )
-                    )
-
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group][
-                        "duration_depth_0_by_service_wdist"
-                    ].append(weighted_wdist)
-
-                # Process duration_depth_1_by_service data
-                if (
-                    "duration_depth_1_by_service" in original
-                    and "duration_depth_1_by_service" in results
-                ):
-                    # Visualize and calculate weighted average Wasserstein distance
-                    weighted_wdist = (
-                        self.wasserstein_metric.visualize_wasserstein_by_service(
-                            original["duration_depth_1_by_service"],
-                            results["duration_depth_1_by_service"],
-                            "duration_depth_1_by_service",
-                            compressor,
-                            f"{app_name}_{service}_{fault}_{run}",
-                            plot=self.plot,
-                        )
-                    )
-
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group][
-                        "duration_depth_1_by_service_wdist"
-                    ].append(weighted_wdist)
-
-                # Process duration_depth_0_p90_by_service data if available
-                if (
-                    "duration_depth_0_p90_by_service" in original
-                    and "duration_depth_0_p90_by_service" in results
-                ):
-                    # Generate p90 visualization immediately for this run
-                    mape_count_results = self.percentile_comparison_metric.visualize_duration_percentile_comparison(
-                        original["duration_depth_0_p90_by_service"],
-                        results["duration_depth_0_p90_by_service"],
-                        "P90",
-                        compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
-                        plot=self.plot,
-                    )
-
-                    # Store MAPE and count results in report
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_depth_0_p90_mape_runs"].append(
-                        mape_count_results["mape"]
-                    )
-                    self.report[report_group]["duration_depth_0_p90_count_runs"].append(
-                        mape_count_results["counts"]
-                    )
-                    self.report[report_group]["duration_depth_0_p90_cosine_sim"].append(
-                        mape_count_results["cosine_sim"]
-                    )
-
-                # Process duration_depth_0_p50_by_service data if available
-                if (
-                    "duration_depth_0_p50_by_service" in original
-                    and "duration_depth_0_p50_by_service" in results
-                ):
-                    # Generate p50 visualization immediately for this run
-                    mape_count_results = self.percentile_comparison_metric.visualize_duration_percentile_comparison(
-                        original["duration_depth_0_p50_by_service"],
-                        results["duration_depth_0_p50_by_service"],
-                        "P50",
-                        compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
-                        plot=self.plot,
-                    )
-
-                    # Store MAPE and count results in report
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_depth_0_p50_mape_runs"].append(
-                        mape_count_results["mape"]
-                    )
-                    self.report[report_group]["duration_depth_0_p50_count_runs"].append(
-                        mape_count_results["counts"]
-                    )
-                    self.report[report_group]["duration_depth_0_p50_cosine_sim"].append(
-                        mape_count_results["cosine_sim"]
-                    )
-
-                # Process duration_depth_1_p90_by_service data if available
-                if (
-                    "duration_depth_1_p90_by_service" in original
-                    and "duration_depth_1_p90_by_service" in results
-                ):
-                    # Generate p90 visualization immediately for this run
-                    mape_count_results = self.percentile_comparison_metric.visualize_duration_percentile_comparison(
-                        original["duration_depth_1_p90_by_service"],
-                        results["duration_depth_1_p90_by_service"],
-                        "P90",
-                        compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
-                        plot=self.plot,
-                        depth=1,
-                    )
-
-                    # Store MAPE and count results in report
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_depth_1_p90_mape_runs"].append(
-                        mape_count_results["mape"]
-                    )
-                    self.report[report_group]["duration_depth_1_p90_count_runs"].append(
-                        mape_count_results["counts"]
-                    )
-                    self.report[report_group]["duration_depth_1_p90_cosine_sim"].append(
-                        mape_count_results["cosine_sim"]
-                    )
-
-                # Process duration_depth_1_p50_by_service data if available
-                if (
-                    "duration_depth_1_p50_by_service" in original
-                    and "duration_depth_1_p50_by_service" in results
-                ):
-                    # Generate p50 visualization immediately for this run
-                    mape_count_results = self.percentile_comparison_metric.visualize_duration_percentile_comparison(
-                        original["duration_depth_1_p50_by_service"],
-                        results["duration_depth_1_p50_by_service"],
-                        "P50",
-                        compressor,
-                        f"{app_name}_{service}_{fault}_{run}",
-                        plot=self.plot,
-                        depth=1,
-                    )
-
-                    # Store MAPE and count results in report
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_depth_1_p50_mape_runs"].append(
-                        mape_count_results["mape"]
-                    )
-                    self.report[report_group]["duration_depth_1_p50_count_runs"].append(
-                        mape_count_results["counts"]
-                    )
-                    self.report[report_group]["duration_depth_1_p50_cosine_sim"].append(
-                        mape_count_results["cosine_sim"]
-                    )
-
-                # Process depth 0 duration before/after incident data
-                if (
-                    "duration_depth_0_before_incident" in original
-                    and "duration_depth_0_after_incident" in original
-                    and "duration_depth_0_before_incident" in results
-                    and "duration_depth_0_after_incident" in results
-                ):
-                    # Process "all" service data for before/after incident
-                    if (
-                        "all" in original["duration_depth_0_before_incident"]
-                        and "all" in original["duration_depth_0_after_incident"]
-                        and "all" in results["duration_depth_0_before_incident"]
-                        and "all" in results["duration_depth_0_after_incident"]
+                # Process duration before/after incident data for depths 0 and 1
+                for depth in [0, 1]:
+                    if self._has_before_after_incident_data_for_depth(
+                        original, results, depth
                     ):
-                        # Generate before/after incident visualization for depth 0
+                        depth_str = str(depth)
+                        # Generate before/after incident visualization
                         wdist_before, wdist_after = (
                             self.depth_before_after_metric.visualize_depth_before_after_incident(
-                                original["duration_depth_0_before_incident"]["all"],
-                                original["duration_depth_0_after_incident"]["all"],
-                                results["duration_depth_0_before_incident"]["all"],
-                                results["duration_depth_0_after_incident"]["all"],
+                                original["duration_before_incident_by_depth"][
+                                    depth_str
+                                ]["all"],
+                                original["duration_after_incident_by_depth"][depth_str][
+                                    "all"
+                                ],
+                                results["duration_before_incident_by_depth"][depth_str][
+                                    "all"
+                                ],
+                                results["duration_after_incident_by_depth"][depth_str][
+                                    "all"
+                                ],
                                 compressor,
-                                f"{app_name}_{service}_{fault}_{run}",
-                                depth=0,
+                                app_name=app_name,
+                                service=service,
+                                fault=fault,
+                                run=run,
+                                depth=depth,
                                 plot=self.plot,
                             )
                         )
@@ -400,53 +209,45 @@ class DurationReport(BaseReport):
                         # Only add finite distances to avoid inf values in averages
                         if wdist_before != float("inf"):
                             self.report[report_group][
-                                "duration_depth_0_before_wdist"
+                                f"duration_depth_{depth}_before_wdist"
                             ].append(wdist_before)
                         if wdist_after != float("inf"):
                             self.report[report_group][
-                                "duration_depth_0_after_wdist"
+                                f"duration_depth_{depth}_after_wdist"
                             ].append(wdist_after)
 
-                # Process depth 1 duration before/after incident data
+                # Process duration_by_depth_by_service data for all percentiles
                 if (
-                    "duration_depth_1_before_incident" in original
-                    and "duration_depth_1_after_incident" in original
-                    and "duration_depth_1_before_incident" in results
-                    and "duration_depth_1_after_incident" in results
+                    "duration_by_depth_by_service" in original
+                    and "duration_by_depth_by_service" in results
                 ):
-                    # Process "all" service data for before/after incident
-                    if (
-                        "all" in original["duration_depth_1_before_incident"]
-                        and "all" in original["duration_depth_1_after_incident"]
-                        and "all" in results["duration_depth_1_before_incident"]
-                        and "all" in results["duration_depth_1_after_incident"]
-                    ):
-                        # Generate before/after incident visualization for depth 1
-                        wdist_before, wdist_after = (
-                            self.depth_before_after_metric.visualize_depth_before_after_incident(
-                                original["duration_depth_1_before_incident"]["all"],
-                                original["duration_depth_1_after_incident"]["all"],
-                                results["duration_depth_1_before_incident"]["all"],
-                                results["duration_depth_1_after_incident"]["all"],
-                                compressor,
-                                f"{app_name}_{service}_{fault}_{run}",
-                                depth=1,
-                                plot=self.plot,
+                    mape_count_results = self.percentile_comparison_metric.process_duration_by_depth_by_service(
+                        original["duration_by_depth_by_service"],
+                        results["duration_by_depth_by_service"],
+                        compressor,
+                        app_name,
+                        service,
+                        fault,
+                        run,
+                        plot=self.plot,
+                    )
+
+                    # Store MAPE and count results in report
+                    report_group = f"{app_name}_{compressor}"
+                    for depth in mape_count_results:
+                        for percentile in mape_count_results[depth]:
+                            key_prefix = f"duration_depth_{depth}_{percentile}"
+                            self.report[report_group][f"{key_prefix}_mape_runs"].append(
+                                mape_count_results[depth][percentile]["mape"]
                             )
-                        )
-
-                        # Store Wasserstein distances in report
-                        report_group = f"{app_name}_{compressor}"
-
-                        # Only add finite distances to avoid inf values in averages
-                        if wdist_before != float("inf"):
                             self.report[report_group][
-                                "duration_depth_1_before_wdist"
-                            ].append(wdist_before)
-                        if wdist_after != float("inf"):
+                                f"{key_prefix}_count_runs"
+                            ].append(mape_count_results[depth][percentile]["counts"])
                             self.report[report_group][
-                                "duration_depth_1_after_wdist"
-                            ].append(wdist_after)
+                                f"{key_prefix}_cosine_sim"
+                            ].append(
+                                mape_count_results[depth][percentile]["cosine_sim"]
+                            )
 
         # Calculate averages and clean up
         for group in self.report:
@@ -474,134 +275,6 @@ class DurationReport(BaseReport):
                 ) / len(self.report[group]["duration_depth_1_wdist"])
                 del self.report[group]["duration_depth_1_wdist"]
 
-            if "duration_depth_0_by_service_wdist" in self.report[group]:
-                self.report[group]["duration_depth_0_by_service_wdist_avg"] = sum(
-                    self.report[group]["duration_depth_0_by_service_wdist"]
-                ) / len(self.report[group]["duration_depth_0_by_service_wdist"])
-                del self.report[group]["duration_depth_0_by_service_wdist"]
-
-            if "duration_depth_1_by_service_wdist" in self.report[group]:
-                self.report[group]["duration_depth_1_by_service_wdist_avg"] = sum(
-                    self.report[group]["duration_depth_1_by_service_wdist"]
-                ) / len(self.report[group]["duration_depth_1_by_service_wdist"])
-                del self.report[group]["duration_depth_1_by_service_wdist"]
-
-            if "duration_depth_0_p90_mape_runs" in self.report[group]:
-                # Calculate weighted average MAPE across all runs and all services
-                all_run_mapes = []
-                all_run_counts = []
-
-                for i, run_mape in enumerate(
-                    self.report[group]["duration_depth_0_p90_mape_runs"]
-                ):
-                    run_counts = self.report[group]["duration_depth_0_p90_count_runs"][
-                        i
-                    ]
-                    for service in run_mape:
-                        if service in run_counts:
-                            all_run_mapes.append(run_mape[service])
-                            all_run_counts.append(run_counts[service])
-
-                if all_run_mapes and sum(all_run_counts) > 0:
-                    # Calculate weighted average
-                    total_weighted_mape = sum(
-                        mape * count
-                        for mape, count in zip(
-                            all_run_mapes, all_run_counts, strict=False
-                        )
-                    )
-                    total_count = sum(all_run_counts)
-                    self.report[group]["duration_depth_0_p90_mape_avg"] = (
-                        total_weighted_mape / total_count
-                    )
-
-            if "duration_depth_0_p50_mape_runs" in self.report[group]:
-                # Calculate weighted average MAPE across all runs and all services
-                all_run_mapes = []
-                all_run_counts = []
-
-                for i, run_mape in enumerate(
-                    self.report[group]["duration_depth_0_p50_mape_runs"]
-                ):
-                    run_counts = self.report[group]["duration_depth_0_p50_count_runs"][
-                        i
-                    ]
-                    for service in run_mape:
-                        if service in run_counts:
-                            all_run_mapes.append(run_mape[service])
-                            all_run_counts.append(run_counts[service])
-
-                if all_run_mapes and sum(all_run_counts) > 0:
-                    # Calculate weighted average
-                    total_weighted_mape = sum(
-                        mape * count
-                        for mape, count in zip(
-                            all_run_mapes, all_run_counts, strict=False
-                        )
-                    )
-                    total_count = sum(all_run_counts)
-                    self.report[group]["duration_depth_0_p50_mape_avg"] = (
-                        total_weighted_mape / total_count
-                    )
-
-            if "duration_depth_1_p90_mape_runs" in self.report[group]:
-                # Calculate weighted average MAPE across all runs and all services
-                all_run_mapes = []
-                all_run_counts = []
-
-                for i, run_mape in enumerate(
-                    self.report[group]["duration_depth_1_p90_mape_runs"]
-                ):
-                    run_counts = self.report[group]["duration_depth_1_p90_count_runs"][
-                        i
-                    ]
-                    for service in run_mape:
-                        if service in run_counts:
-                            all_run_mapes.append(run_mape[service])
-                            all_run_counts.append(run_counts[service])
-
-                if all_run_mapes and sum(all_run_counts) > 0:
-                    # Calculate weighted average
-                    total_weighted_mape = sum(
-                        mape * count
-                        for mape, count in zip(
-                            all_run_mapes, all_run_counts, strict=False
-                        )
-                    )
-                    total_count = sum(all_run_counts)
-                    self.report[group]["duration_depth_1_p90_mape_avg"] = (
-                        total_weighted_mape / total_count
-                    )
-
-            if "duration_depth_1_p50_mape_runs" in self.report[group]:
-                # Calculate weighted average MAPE across all runs and all services
-                all_run_mapes = []
-                all_run_counts = []
-
-                for i, run_mape in enumerate(
-                    self.report[group]["duration_depth_1_p50_mape_runs"]
-                ):
-                    run_counts = self.report[group]["duration_depth_1_p50_count_runs"][
-                        i
-                    ]
-                    for service in run_mape:
-                        if service in run_counts:
-                            all_run_mapes.append(run_mape[service])
-                            all_run_counts.append(run_counts[service])
-
-                if all_run_mapes and sum(all_run_counts) > 0:
-                    # Calculate weighted average
-                    total_weighted_mape = sum(
-                        mape * count
-                        for mape, count in zip(
-                            all_run_mapes, all_run_counts, strict=False
-                        )
-                    )
-                    total_count = sum(all_run_counts)
-                    self.report[group]["duration_depth_1_p50_mape_avg"] = (
-                        total_weighted_mape / total_count
-                    )
-
             # Calculate averages for depth 0 before/after incident Wasserstein distances
             if "duration_depth_0_before_wdist" in self.report[group]:
                 if self.report[group]["duration_depth_0_before_wdist"]:
@@ -625,163 +298,6 @@ class DurationReport(BaseReport):
                     )
                 del self.report[group]["duration_depth_0_after_wdist"]
 
-            # Calculate averages for duration percentile cosine similarities
-            if "duration_depth_0_p90_cosine_sim" in self.report[group]:
-                if self.report[group]["duration_depth_0_p90_cosine_sim"]:
-                    # Calculate weighted average cosine similarity across all runs and all services
-                    all_cosine_sims = []
-                    all_cosine_counts = []
-
-                    for i, run_cosine_sim in enumerate(
-                        self.report[group]["duration_depth_0_p90_cosine_sim"]
-                    ):
-                        run_counts = self.report[group][
-                            "duration_depth_0_p90_count_runs"
-                        ][i]
-                        for service in run_cosine_sim:
-                            if service in run_counts:
-                                all_cosine_sims.append(run_cosine_sim[service])
-                                all_cosine_counts.append(run_counts[service])
-
-                    if all_cosine_sims and sum(all_cosine_counts) > 0:
-                        # Calculate weighted average
-                        total_weighted_cosine_sim = sum(
-                            cosine_sim * count
-                            for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts, strict=False
-                            )
-                        )
-                        total_count = sum(all_cosine_counts)
-                        self.report[group]["duration_depth_0_p90_cosine_sim_avg"] = (
-                            total_weighted_cosine_sim / total_count
-                        )
-                    else:
-                        self.report[group]["duration_depth_0_p90_cosine_sim_avg"] = (
-                            float("nan")
-                        )
-                else:
-                    self.report[group]["duration_depth_0_p90_cosine_sim_avg"] = float(
-                        "nan"
-                    )
-                del self.report[group]["duration_depth_0_p90_cosine_sim"]
-
-            if "duration_depth_0_p50_cosine_sim" in self.report[group]:
-                if self.report[group]["duration_depth_0_p50_cosine_sim"]:
-                    # Calculate weighted average cosine similarity across all runs and all services
-                    all_cosine_sims = []
-                    all_cosine_counts = []
-
-                    for i, run_cosine_sim in enumerate(
-                        self.report[group]["duration_depth_0_p50_cosine_sim"]
-                    ):
-                        run_counts = self.report[group][
-                            "duration_depth_0_p50_count_runs"
-                        ][i]
-                        for service in run_cosine_sim:
-                            if service in run_counts:
-                                all_cosine_sims.append(run_cosine_sim[service])
-                                all_cosine_counts.append(run_counts[service])
-
-                    if all_cosine_sims and sum(all_cosine_counts) > 0:
-                        # Calculate weighted average
-                        total_weighted_cosine_sim = sum(
-                            cosine_sim * count
-                            for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts, strict=False
-                            )
-                        )
-                        total_count = sum(all_cosine_counts)
-                        self.report[group]["duration_depth_0_p50_cosine_sim_avg"] = (
-                            total_weighted_cosine_sim / total_count
-                        )
-                    else:
-                        self.report[group]["duration_depth_0_p50_cosine_sim_avg"] = (
-                            float("nan")
-                        )
-                else:
-                    self.report[group]["duration_depth_0_p50_cosine_sim_avg"] = float(
-                        "nan"
-                    )
-                del self.report[group]["duration_depth_0_p50_cosine_sim"]
-
-            if "duration_depth_1_p90_cosine_sim" in self.report[group]:
-                if self.report[group]["duration_depth_1_p90_cosine_sim"]:
-                    # Calculate weighted average cosine similarity across all runs and all services
-                    all_cosine_sims = []
-                    all_cosine_counts = []
-
-                    for i, run_cosine_sim in enumerate(
-                        self.report[group]["duration_depth_1_p90_cosine_sim"]
-                    ):
-                        run_counts = self.report[group][
-                            "duration_depth_1_p90_count_runs"
-                        ][i]
-                        for service in run_cosine_sim:
-                            if service in run_counts:
-                                all_cosine_sims.append(run_cosine_sim[service])
-                                all_cosine_counts.append(run_counts[service])
-
-                    if all_cosine_sims and sum(all_cosine_counts) > 0:
-                        # Calculate weighted average
-                        total_weighted_cosine_sim = sum(
-                            cosine_sim * count
-                            for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts, strict=False
-                            )
-                        )
-                        total_count = sum(all_cosine_counts)
-                        self.report[group]["duration_depth_1_p90_cosine_sim_avg"] = (
-                            total_weighted_cosine_sim / total_count
-                        )
-                    else:
-                        self.report[group]["duration_depth_1_p90_cosine_sim_avg"] = (
-                            float("nan")
-                        )
-                else:
-                    self.report[group]["duration_depth_1_p90_cosine_sim_avg"] = float(
-                        "nan"
-                    )
-                del self.report[group]["duration_depth_1_p90_cosine_sim"]
-
-            if "duration_depth_1_p50_cosine_sim" in self.report[group]:
-                if self.report[group]["duration_depth_1_p50_cosine_sim"]:
-                    # Calculate weighted average cosine similarity across all runs and all services
-                    all_cosine_sims = []
-                    all_cosine_counts = []
-
-                    for i, run_cosine_sim in enumerate(
-                        self.report[group]["duration_depth_1_p50_cosine_sim"]
-                    ):
-                        run_counts = self.report[group][
-                            "duration_depth_1_p50_count_runs"
-                        ][i]
-                        for service in run_cosine_sim:
-                            if service in run_counts:
-                                all_cosine_sims.append(run_cosine_sim[service])
-                                all_cosine_counts.append(run_counts[service])
-
-                    if all_cosine_sims and sum(all_cosine_counts) > 0:
-                        # Calculate weighted average
-                        total_weighted_cosine_sim = sum(
-                            cosine_sim * count
-                            for cosine_sim, count in zip(
-                                all_cosine_sims, all_cosine_counts, strict=False
-                            )
-                        )
-                        total_count = sum(all_cosine_counts)
-                        self.report[group]["duration_depth_1_p50_cosine_sim_avg"] = (
-                            total_weighted_cosine_sim / total_count
-                        )
-                    else:
-                        self.report[group]["duration_depth_1_p50_cosine_sim_avg"] = (
-                            float("nan")
-                        )
-                else:
-                    self.report[group]["duration_depth_1_p50_cosine_sim_avg"] = float(
-                        "nan"
-                    )
-                del self.report[group]["duration_depth_1_p50_cosine_sim"]
-
             # Calculate averages for depth 1 before/after incident Wasserstein distances
             if "duration_depth_1_before_wdist" in self.report[group]:
                 if self.report[group]["duration_depth_1_before_wdist"]:
@@ -804,5 +320,92 @@ class DurationReport(BaseReport):
                         "inf"
                     )
                 del self.report[group]["duration_depth_1_after_wdist"]
+
+            # Calculate averages for all percentile metrics (depth 0-4, p0-p100)
+            percentiles = [
+                "p0",
+                "p10",
+                "p20",
+                "p30",
+                "p40",
+                "p50",
+                "p60",
+                "p70",
+                "p80",
+                "p90",
+                "p100",
+            ]
+            for depth in range(5):  # 0, 1, 2, 3, 4
+                for percentile in percentiles:
+                    key_prefix = f"duration_depth_{depth}_{percentile}"
+
+                    # Calculate MAPE averages
+                    mape_key = f"{key_prefix}_mape_runs"
+                    if mape_key in self.report[group]:
+                        all_run_mapes = []
+                        all_run_counts = []
+
+                        for i, run_mape in enumerate(self.report[group][mape_key]):
+                            run_counts = self.report[group][f"{key_prefix}_count_runs"][
+                                i
+                            ]
+                            for service in run_mape:
+                                if service in run_counts:
+                                    all_run_mapes.append(run_mape[service])
+                                    all_run_counts.append(run_counts[service])
+
+                        if all_run_mapes and sum(all_run_counts) > 0:
+                            # Calculate weighted average
+                            total_weighted_mape = sum(
+                                mape * count
+                                for mape, count in zip(
+                                    all_run_mapes, all_run_counts, strict=False
+                                )
+                            )
+                            total_count = sum(all_run_counts)
+                            self.report[group][f"{key_prefix}_mape_avg"] = (
+                                total_weighted_mape / total_count
+                            )
+
+                    # Calculate cosine similarity averages
+                    cosine_key = f"{key_prefix}_cosine_sim"
+                    if cosine_key in self.report[group]:
+                        if self.report[group][cosine_key]:
+                            # Calculate weighted average cosine similarity across all runs and all services
+                            all_cosine_sims = []
+                            all_cosine_counts = []
+
+                            for i, run_cosine_sim in enumerate(
+                                self.report[group][cosine_key]
+                            ):
+                                run_counts = self.report[group][
+                                    f"{key_prefix}_count_runs"
+                                ][i]
+                                for service in run_cosine_sim:
+                                    if service in run_counts:
+                                        all_cosine_sims.append(run_cosine_sim[service])
+                                        all_cosine_counts.append(run_counts[service])
+
+                            if all_cosine_sims and sum(all_cosine_counts) > 0:
+                                # Calculate weighted average
+                                total_weighted_cosine_sim = sum(
+                                    cosine_sim * count
+                                    for cosine_sim, count in zip(
+                                        all_cosine_sims, all_cosine_counts, strict=False
+                                    )
+                                )
+                                total_count = sum(all_cosine_counts)
+                                self.report[group][f"{key_prefix}_cosine_sim_avg"] = (
+                                    total_weighted_cosine_sim / total_count
+                                )
+                            else:
+                                self.report[group][f"{key_prefix}_cosine_sim_avg"] = (
+                                    float("nan")
+                                )
+                        else:
+                            self.report[group][f"{key_prefix}_cosine_sim_avg"] = float(
+                                "nan"
+                            )
+                        del self.report[group][cosine_key]
 
         return dict(self.report)

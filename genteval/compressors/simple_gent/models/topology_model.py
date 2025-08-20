@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 
 import networkx as nx
 import numpy as np
+from tqdm import tqdm
 
 from genteval.utils.data_structures import count_spans_per_tree
 
@@ -61,9 +62,10 @@ class TopologyModel:
         """Calculate the maximum number of nodes per time bucket."""
         from collections import defaultdict
 
+        self.logger.info("Calculating maximum nodes per time bucket")
         max_nodes_per_bucket = defaultdict(int)
 
-        for trace in traces:
+        for trace in tqdm(traces, desc="Calculating max nodes per bucket"):
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
 
@@ -75,11 +77,14 @@ class TopologyModel:
                     max_nodes_per_bucket[time_bucket], max_tree_size
                 )
 
+        self.logger.info(
+            f"Found {len(max_nodes_per_bucket)} time buckets with max nodes"
+        )
         return dict(max_nodes_per_bucket)
 
     def fit(self, traces):
         """Learn topology potentials from traces."""
-        self.logger.info("Training topology model")
+        self.logger.info(f"Training topology model on {len(traces)} traces")
 
         # Calculate max_nodes_count per time bucket
         self.max_nodes_per_bucket = self._calculate_max_nodes_per_bucket(traces)
@@ -91,7 +96,11 @@ class TopologyModel:
             lambda: defaultdict(Counter)
         )  # {time_bucket: {depth: Counter}}
 
-        for trace in traces:
+        self.logger.info("Extracting topology features from traces")
+        total_root_spans = 0
+        total_edges_extracted = 0
+
+        for trace in tqdm(traces, desc="Processing traces"):
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
 
@@ -108,17 +117,34 @@ class TopologyModel:
                     if parent_id in trace.spans:
                         graph.add_edge(parent_id, span_id)
 
+            total_root_spans += len(root_spans)
+
             # Extract features from each tree
             for root in root_spans:
+                edges_before = sum(len(bucket) for bucket in edge_counts.values())
                 self._extract_tree_features(
                     graph, root, time_bucket, edge_counts, node_counts
                 )
+                edges_after = sum(len(bucket) for bucket in edge_counts.values())
+                total_edges_extracted += edges_after - edges_before
+
+        self.logger.info(
+            f"Extracted features from {total_root_spans} trees, {total_edges_extracted} edges total"
+        )
 
         # Convert counts to potentials using log-likelihood
-        for time_bucket, bucket_edges in edge_counts.items():
+        self.logger.info("Converting edge counts to potentials")
+        total_processed_buckets = 0
+        total_processed_edges = 0
+
+        for time_bucket, bucket_edges in tqdm(
+            edge_counts.items(), desc="Processing time buckets"
+        ):
             total_edges = sum(bucket_edges.values())
             if total_edges == 0:
                 continue
+
+            total_processed_buckets += 1
 
             for (parent_feature, child_feature), count in bucket_edges.items():
                 # Use log potential with smoothing
@@ -128,16 +154,25 @@ class TopologyModel:
                 self.edge_potentials[time_bucket][(parent_feature, child_feature)] = (
                     potential
                 )
+                total_processed_edges += 1
+
+        self.logger.info(
+            f"Processed {total_processed_buckets} time buckets with {total_processed_edges} edge potentials"
+        )
 
         # Store node name frequencies for fallback
         self.node_name_idxs = node_counts
+        self.logger.info(
+            f"Stored node frequency data for {len(node_counts)} time buckets"
+        )
 
         # Build child candidates cache
+        self.logger.info("Building child candidates cache")
         self._build_child_candidates_cache()
 
         self.logger.info(
-            f"Learned topology model for {len(self.edge_potentials)} time buckets, "
-            f"total edges: {sum(len(bucket) for bucket in self.edge_potentials.values())}"
+            f"Topology model training complete: {len(self.edge_potentials)} time buckets, "
+            f"{sum(len(bucket) for bucket in self.edge_potentials.values())} total edges"
         )
 
     def _extract_tree_features(
@@ -187,7 +222,11 @@ class TopologyModel:
 
     def _build_child_candidates_cache(self):
         """Build cache of possible children for each parent feature."""
-        for time_bucket, bucket_edges in self.edge_potentials.items():
+        total_parent_features = 0
+
+        for time_bucket, bucket_edges in tqdm(
+            self.edge_potentials.items(), desc="Building cache"
+        ):
             parent_children = defaultdict(list)
 
             # Group by parent feature
@@ -212,6 +251,11 @@ class TopologyModel:
                 self.child_candidates_cache[time_bucket][parent_feature] = (
                     children_with_probs
                 )
+                total_parent_features += 1
+
+        self.logger.info(
+            f"Built child candidates cache for {total_parent_features} unique parent features"
+        )
 
     def generate_tree_structure(
         self, root_feature: NodeFeature, time_bucket: int

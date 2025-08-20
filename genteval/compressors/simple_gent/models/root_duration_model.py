@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import numpy as np
 from sklearn.mixture import GaussianMixture
+from tqdm import tqdm
 
 from genteval.compressors.simple_gent.proto import simple_gent_pb2
 
@@ -33,14 +34,19 @@ class RootDurationModel:
 
     def fit(self, traces):
         """Learn GMM models for root durations from traces."""
-        self.logger.info("Training root duration model")
+        self.logger.info(f"Training root duration model on {len(traces)} traces")
 
         # First pass: collect duration samples
-        for trace in traces:
+        self.logger.info("Collecting root span duration samples")
+        total_root_spans = 0
+        total_duration_samples = 0
+
+        for trace in tqdm(traces, desc="Collecting duration samples"):
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
 
             # Find root spans
+            trace_root_count = 0
             for span_id, span_data in trace.spans.items():
                 if span_data.get("parentSpanId") is None:
                     # Count children
@@ -63,38 +69,84 @@ class RootDurationModel:
                         duration
                     )
 
+                    trace_root_count += 1
+                    total_duration_samples += 1
+
+            total_root_spans += trace_root_count
+
+        self.logger.info(
+            f"Collected {total_duration_samples} duration samples from {total_root_spans} root spans"
+        )
+        self.logger.info(
+            f"Found duration data for {len(self._temp_durations)} time buckets"
+        )
+
         # Second pass: fit GMM for each (time_bucket, feature) combination
-        for time_bucket, bucket_features in self._temp_durations.items():
-            for feature, log_durations in bucket_features.items():
-                original_durations = self._temp_original_durations[time_bucket][feature]
+        self.logger.info("Fitting Gaussian Mixture Models for each feature")
 
-                min_duration = min(original_durations)
-                max_duration = max(original_durations)
+        # Calculate total work for progress bar
+        total_feature_combinations = sum(
+            len(bucket_features) for bucket_features in self._temp_durations.values()
+        )
+        self.logger.info(
+            f"Fitting GMMs for {total_feature_combinations} unique (time_bucket, feature) combinations"
+        )
 
-                if len(log_durations) >= self.config.min_samples_for_gmm:
-                    samples_array = np.array(log_durations).reshape(-1, 1)
+        successful_fits = 0
+        fallback_fits = 0
+        single_sample_fits = 0
+        skipped_fits = 0
 
-                    # Choose number of components
-                    n_components = min(
-                        self.config.max_gmm_components, max(1, len(log_durations) // 10)
-                    )
+        # Create progress bar for all feature combinations
+        with tqdm(total=total_feature_combinations, desc="Fitting GMM models") as pbar:
+            for time_bucket, bucket_features in self._temp_durations.items():
+                for feature, log_durations in bucket_features.items():
+                    original_durations = self._temp_original_durations[time_bucket][
+                        feature
+                    ]
 
-                    try:
-                        gmm = GaussianMixture(
-                            n_components=n_components,
-                            covariance_type="full",
+                    min_duration = min(original_durations)
+                    max_duration = max(original_durations)
+
+                    if len(log_durations) >= self.config.min_samples_for_gmm:
+                        samples_array = np.array(log_durations).reshape(-1, 1)
+
+                        # Choose number of components
+                        n_components = min(
+                            self.config.max_gmm_components,
+                            max(1, len(log_durations) // 10),
                         )
-                        gmm.fit(samples_array)
-                        self.duration_models[time_bucket][feature] = (
-                            gmm,
-                            min_duration,
-                            max_duration,
-                        )
-                    except Exception as e:
-                        # Fallback to single component
-                        self.logger.warning(
-                            f"GMM fitting failed for {time_bucket}/{feature}: {e}. Using single component."
-                        )
+
+                        try:
+                            gmm = GaussianMixture(
+                                n_components=n_components,
+                                covariance_type="full",
+                            )
+                            gmm.fit(samples_array)
+                            self.duration_models[time_bucket][feature] = (
+                                gmm,
+                                min_duration,
+                                max_duration,
+                            )
+                            successful_fits += 1
+                        except Exception as e:
+                            # Fallback to single component
+                            self.logger.warning(
+                                f"GMM fitting failed for {time_bucket}/{feature}: {e}. Using single component."
+                            )
+                            gmm = GaussianMixture(n_components=1)
+                            gmm.fit(samples_array)
+                            self.duration_models[time_bucket][feature] = (
+                                gmm,
+                                min_duration,
+                                max_duration,
+                            )
+                            fallback_fits += 1
+
+                    elif len(log_durations) == 1:
+                        # Single sample: create simple GMM
+                        value = log_durations[0]
+                        samples_array = np.array([value, value + 1e-6]).reshape(-1, 1)
                         gmm = GaussianMixture(n_components=1)
                         gmm.fit(samples_array)
                         self.duration_models[time_bucket][feature] = (
@@ -102,18 +154,15 @@ class RootDurationModel:
                             min_duration,
                             max_duration,
                         )
+                        single_sample_fits += 1
+                    else:
+                        # Not enough samples, skip
+                        skipped_fits += 1
+                        self.logger.debug(
+                            f"Skipping GMM for {time_bucket}/{feature}: only {len(log_durations)} samples"
+                        )
 
-                elif len(log_durations) == 1:
-                    # Single sample: create simple GMM
-                    value = log_durations[0]
-                    samples_array = np.array([value, value + 1e-6]).reshape(-1, 1)
-                    gmm = GaussianMixture(n_components=1)
-                    gmm.fit(samples_array)
-                    self.duration_models[time_bucket][feature] = (
-                        gmm,
-                        min_duration,
-                        max_duration,
-                    )
+                    pbar.update(1)
 
         # Clear temporary storage
         self._temp_durations.clear()
@@ -121,7 +170,11 @@ class RootDurationModel:
 
         total_models = sum(len(bucket) for bucket in self.duration_models.values())
         self.logger.info(
-            f"Built {total_models} GMM models across {len(self.duration_models)} time buckets"
+            f"GMM fitting complete: {total_models} models across {len(self.duration_models)} time buckets"
+        )
+        self.logger.info(
+            f"Fit results: {successful_fits} successful, {fallback_fits} fallback, "
+            f"{single_sample_fits} single-sample, {skipped_fits} skipped"
         )
 
     def _get_gmm_model(

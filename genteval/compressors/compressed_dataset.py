@@ -348,6 +348,7 @@ class CompressedDataset:
                     compressed = f.read()
 
                 decompressed = dataset._decompress(compressed)
+                print(f"Decompressed {filename} of size {len(decompressed)} bytes")
                 format_to_use = dataset.formats[filename]
                 proto_spec = dataset.proto_specs.get(filename)
                 value = dataset._deserialize(decompressed, format_to_use, proto_spec)

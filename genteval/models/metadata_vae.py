@@ -63,6 +63,10 @@ class MetadataVAE(nn.Module):
         self.decoder = nn.Sequential(
             nn.Linear(decoder_input_dim, hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
             nn.Linear(hidden_dim, beta_output_dim),
         )
 

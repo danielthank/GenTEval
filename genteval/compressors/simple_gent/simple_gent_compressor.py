@@ -8,6 +8,7 @@ from genteval.compressors import CompressedDataset, Compressor, SerializationFor
 from genteval.compressors.simple_gent.proto import simple_gent_pb2
 from genteval.compressors.trace import Trace
 from genteval.dataset import Dataset
+from genteval.utils.data_structures import count_spans_per_tree
 
 from .config import SimpleGenTConfig
 from .models import (
@@ -52,37 +53,68 @@ class SimpleGenTCompressor(Compressor):
         np.random.seed(self.config.random_seed)
 
     def _transform_dataset(self, traces):
+        """Transform node names to indices in all traces"""
+        self.logger.info(
+            f"Transforming {len(traces)} traces: converting node names to indices"
+        )
+
         all_node_names = []
         trace_span_positions = []  # [(trace_idx, span_id, position_in_batch)]
 
-        for trace_id, trace_data in traces.items():
+        # Collect all node names from all traces
+        for trace_id, trace_data in tqdm(traces.items(), desc="Collecting node names"):
             for span_id, span_data in trace_data.items():
                 node_name = span_data["nodeName"]
                 position_in_batch = len(all_node_names)
                 all_node_names.append(node_name)
                 trace_span_positions.append((trace_id, span_id, position_in_batch))
 
-        all_node_indices = self.node_encoder.transform(all_node_names)
+        self.logger.info(f"Collected {len(all_node_names)} node names from spans")
 
-        for trace_id, span_id, batch_pos in trace_span_positions:
+        # Transform all node names to indices in batch
+        all_node_indices = self.node_encoder.transform(all_node_names)
+        self.logger.info("Batch transformed all node names to indices")
+
+        # Apply transformed indices back to traces
+        for trace_id, span_id, batch_pos in tqdm(
+            trace_span_positions, desc="Applying indices"
+        ):
             traces[trace_id][span_id]["nodeIdx"] = all_node_indices[batch_pos]
             del traces[trace_id][span_id]["nodeName"]
 
+        self.logger.info("Successfully transformed all node names to indices")
+
     def _inverse_transform_dataset(self, traces):
+        """Transform node indices back to names in all traces"""
+        self.logger.info(
+            f"Inverse transforming {len(traces)} traces: converting node indices to names"
+        )
+
         all_node_idx = []
         trace_span_positions = []  # [(trace_idx, span_id, position_in_batch)]
 
-        for trace_id, trace_data in traces.items():
+        # Collect all node indices from all traces
+        for trace_id, trace_data in tqdm(
+            traces.items(), desc="Collecting node indices"
+        ):
             for span_id, span_data in trace_data.items():
                 all_node_idx.append(span_data["nodeIdx"])
                 trace_span_positions.append((trace_id, span_id, len(all_node_idx) - 1))
 
-        # Inverse transform all node indices at once
-        all_node_names = self.node_encoder.inverse_transform(all_node_idx)
+        self.logger.info(f"Collected {len(all_node_idx)} node indices from spans")
 
-        for trace_id, span_id, batch_pos in trace_span_positions:
+        # Inverse transform all node indices to names in batch
+        all_node_names = self.node_encoder.inverse_transform(all_node_idx)
+        self.logger.info("Batch inverse transformed all node indices to names")
+
+        # Apply transformed names back to traces
+        for trace_id, span_id, batch_pos in tqdm(
+            trace_span_positions, desc="Applying names"
+        ):
             traces[trace_id][span_id]["nodeName"] = all_node_names[batch_pos]
             del traces[trace_id][span_id]["nodeIdx"]
+
+        self.logger.info("Successfully inverse transformed all node indices to names")
 
     def _preprocess_traces_with_indices(self, traces):
         preprocessed_traces = []
@@ -112,6 +144,18 @@ class SimpleGenTCompressor(Compressor):
         self._transform_dataset(dataset.traces)
         preprocessed_traces = self._preprocess_traces_with_indices(dataset.traces)
         self.logger.info("Preprocessed traces with node indices")
+
+        # Calculate total number of trees (root nodes) and spans across all traces
+        total_trees = 0
+        total_spans = 0
+        for trace in preprocessed_traces:
+            tree_sizes = count_spans_per_tree(trace.spans)
+            total_trees += len(tree_sizes)
+            total_spans += len(trace.spans)
+
+        # Output totals
+        self.logger.info(f"Total number of trees: {total_trees}")
+        self.logger.info(f"Total number of spans: {total_spans}")
 
         # Step 3: Initialize models with vocab_size and train on preprocessed traces
         vocab_size = self.node_encoder.get_vocab_size()
@@ -150,10 +194,8 @@ class SimpleGenTCompressor(Compressor):
             simple_gent_pb2.SimpleGenTModels,
         )
 
-        # Save original number of traces for reconstruction
-        compressed_data.add(
-            "num_original_traces", len(dataset.traces), SerializationFormat.MSGPACK
-        )
+        # Save number of trees (root nodes) for reconstruction
+        compressed_data.add("num_traces", total_trees, SerializationFormat.MSGPACK)
 
         self.logger.info("Simple GenT compression completed")
         return compressed_data
@@ -170,7 +212,7 @@ class SimpleGenTCompressor(Compressor):
         self._load_models(compressed_dataset)
 
         # Generate traces
-        num_traces = compressed_dataset["num_original_traces"]
+        num_traces = compressed_dataset["num_traces"]
         self.logger.info(f"Generating {num_traces} traces")
 
         generated_dataset = self._generate_traces(num_traces)

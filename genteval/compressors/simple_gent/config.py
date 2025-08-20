@@ -43,14 +43,14 @@ class SimpleGenTConfig:
 
     # MetadataVAE parameters
     metadata_hidden_dim: int = 16
-    metadata_latent_dim: int = 4
-    use_flow_prior: bool = True
-    prior_flow_layers: int = 4
+    metadata_latent_dim: int = 8
+    use_flow_prior: bool = False
+    prior_flow_layers: int = 1
     prior_flow_hidden_dim: int = 16
     num_beta_components: int = 5
     learning_rate: float = 1e-3
     metadata_epochs: int = 500
-    batch_size: int = 256
+    batch_size: int = 512
     beta: float = 10.0  # KL divergence weight
     early_stopping_patience: int = 10
     sequential_training_lr_factor: float = 0.5  # LR reduction for sequential training

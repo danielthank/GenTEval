@@ -7,8 +7,11 @@ This ensures that parent spans properly encompass all child span execution times
 """
 
 import argparse
+import logging
 import sys
+import time
 
+from genteval.bin.logger import setup_logging
 from genteval.data_collection.utils.duration_adjuster import DurationAdjuster
 
 
@@ -33,28 +36,55 @@ def main():
 
     args = parser.parse_args()
 
+    # Setup logging using the colored logger
+    setup_logging(
+        log_level=logging.INFO,
+        simplified=True,
+    )
+
+    logger = logging.getLogger(__name__)
+
+    logger.info("Starting duration adjustment process")
+    logger.info(f"Input file: {args.input_file}")
+    logger.info(f"Output file: {args.output}")
+    start_time = time.time()
+
     try:
         # Initialize the adjuster
+        logger.info("Initializing DurationAdjuster")
         adjuster = DurationAdjuster(verbose=True)  # Always verbose for CLI usage
 
         # Load and process the data
+        logger.info("Loading CSV data...")
         adjuster.load_csv(args.input_file)
+
+        logger.info("Building parent-child relationships...")
         adjuster.build_relationships()
+
+        logger.info("Adjusting span durations...")
         adjusted_count = adjuster.adjust_durations()
 
         # Save results
+        logger.info("Writing adjusted data to output file...")
         adjuster.write_csv(args.output)
 
         # Show summary
         if args.verbose:
             adjuster.print_adjustment_summary()
 
+        elapsed_time = time.time() - start_time
+        logger.info(f"Duration adjustment completed in {elapsed_time:.2f} seconds")
+
         if adjusted_count > 0:
             print(f"\nSuccessfully adjusted {adjusted_count} spans.")
+            logger.info(
+                f"Adjusted {adjusted_count} spans out of {len(adjuster.spans)} total spans"
+            )
         else:
             print(
                 "\nNo adjustments were needed - all spans already properly encompass their children."
             )
+            logger.info("No adjustments were needed")
 
     except FileNotFoundError as e:
         print(f"Error: Input file not found: {e}", file=sys.stderr)

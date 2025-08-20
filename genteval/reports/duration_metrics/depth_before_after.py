@@ -1,5 +1,7 @@
 """Depth before/after incident metric for duration analysis."""
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import wasserstein_distance
@@ -8,15 +10,8 @@ from scipy.stats import wasserstein_distance
 class DepthBeforeAfterMetric:
     """Handles before/after incident analysis for depth-specific spans."""
 
-    def __init__(self, output_dirs):
-        """Initialize with output directories."""
-        self.duration_depth_0_before_after_dir = output_dirs[
-            "duration_depth_0_before_after_dir"
-        ]
-        self.duration_depth_1_before_after_dir = output_dirs[
-            "duration_depth_1_before_after_dir"
-        ]
-        self.viz_output_dir = output_dirs["viz_output_dir"]
+    def __init__(self):
+        pass
 
     def visualize_depth_before_after_incident(
         self,
@@ -26,6 +21,9 @@ class DepthBeforeAfterMetric:
         compressed_after_data,
         compressor,
         app_name,
+        service,
+        fault,
+        run,
         depth,
         plot=True,
     ):
@@ -150,18 +148,23 @@ class DepthBeforeAfterMetric:
 
         plt.tight_layout()
 
-        # Save the plot in appropriate subdirectory based on depth
-        filename = (
-            f"{app_name}_{compressor}_depth_{depth}_duration_before_after_incident.png"
+        plot_dir = (
+            Path("output")
+            / app_name
+            / f"{service}_{fault}"
+            / f"{run}"
+            / "visualization"
+            / "duration"
+            / f"depth_{depth}"
+            / "before_after"
         )
-        if depth == 0:
-            filepath = self.duration_depth_0_before_after_dir / filename
-        elif depth == 1:
-            filepath = self.duration_depth_1_before_after_dir / filename
-        else:
-            # Fallback for other depths
-            filepath = self.viz_output_dir / filename
-        plt.savefig(filepath, dpi=300, bbox_inches="tight")
+        plot_dir.mkdir(parents=True, exist_ok=True)
+
+        plot_path = plot_dir / f"{compressor}.png"
+
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         plt.close()
+
+        print(f"Created before/after incident visualization: {plot_path}")
 
         return wdist_before, wdist_after

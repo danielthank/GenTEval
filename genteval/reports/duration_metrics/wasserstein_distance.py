@@ -1,5 +1,7 @@
 """Wasserstein distance metric for duration analysis."""
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import wasserstein_distance
@@ -8,18 +10,8 @@ from scipy.stats import wasserstein_distance
 class WassersteinDistanceMetric:
     """Handles Wasserstein distance calculations and visualizations for duration data."""
 
-    def __init__(self, output_dirs):
-        """Initialize with output directories."""
-        self.duration_all_dir = output_dirs["duration_all_dir"]
-        self.duration_pair_dir = output_dirs["duration_pair_dir"]
-        self.duration_depth_0_dir = output_dirs["duration_depth_0_dir"]
-        self.duration_depth_1_dir = output_dirs["duration_depth_1_dir"]
-        self.duration_depth_0_by_service_dir = output_dirs[
-            "duration_depth_0_by_service_dir"
-        ]
-        self.duration_depth_1_by_service_dir = output_dirs[
-            "duration_depth_1_by_service_dir"
-        ]
+    def __init__(self):
+        pass
 
     def visualize_wasserstein_distributions(
         self,
@@ -28,6 +20,9 @@ class WassersteinDistanceMetric:
         group_name,
         compressor,
         app_name,
+        service=None,
+        fault=None,
+        run=None,
         plot=True,
     ):
         """Visualize the distributions used in Wasserstein distance calculation."""
@@ -112,28 +107,65 @@ class WassersteinDistanceMetric:
 
         plt.tight_layout()
 
-        # Save the plot in appropriate subdirectory
-        safe_group_name = group_name.replace("/", "_").replace(" ", "_")
-        filename = f"{app_name}_{compressor}_{safe_group_name}_wasserstein_dist.png"
+        # Save the plot using new directory structure
+        from pathlib import Path
 
-        # Choose the correct subdirectory based on the group type
+        filename = f"{compressor}.png"
+
+        # Determine subdirectory based on group type
         if "duration_pair" in group_name:
-            filepath = self.duration_pair_dir / filename
-        elif "duration_depth_0_by_service" in group_name:
-            filepath = self.duration_depth_0_by_service_dir / filename
-        elif "duration_depth_1_by_service" in group_name:
-            filepath = self.duration_depth_1_by_service_dir / filename
-        elif "duration_depth_0" in group_name:
-            filepath = self.duration_depth_0_dir / filename
-        elif "duration_depth_1" in group_name:
-            filepath = self.duration_depth_1_dir / filename
+            plot_dir = (
+                Path("output")
+                / app_name
+                / f"{service}_{fault}"
+                / f"{run}"
+                / "visualization"
+                / "duration"
+                / "pair"
+            )
+        elif "by_service" in group_name:
+            # Extract depth from group name (e.g., "duration_depth_2_by_service")
+            depth = self._extract_depth_from_group_name(group_name)
+            plot_dir = (
+                Path("output")
+                / app_name
+                / f"{service}_{fault}"
+                / f"{run}"
+                / "visualization"
+                / "duration"
+                / f"depth_{depth}"
+                / "by_service"
+            )
         else:
-            filepath = self.duration_all_dir / filename
+            # Extract depth from group name (e.g., "duration_depth_2")
+            depth = self._extract_depth_from_group_name(group_name)
+            plot_dir = (
+                Path("output")
+                / app_name
+                / f"{service}_{fault}"
+                / f"{run}"
+                / "visualization"
+                / "duration"
+                / f"depth_{depth}"
+                / "all"
+            )
+
+        plot_dir.mkdir(parents=True, exist_ok=True)
+        filepath = plot_dir / filename
 
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
         plt.close()
 
+        print(f"Created Wasserstein plot: {filepath}")
+
         return wdist
+
+    def _extract_depth_from_group_name(self, group_name):
+        """Extract depth number from group name like 'duration_depth_2' or 'duration_depth_3_by_service'."""
+        import re
+
+        match = re.search(r"duration_depth_(\d+)", group_name)
+        return match.group(1) if match else "0"
 
     def visualize_wasserstein_by_service(
         self,
@@ -142,6 +174,9 @@ class WassersteinDistanceMetric:
         group_name,
         compressor,
         app_name,
+        service=None,
+        fault=None,
+        run=None,
         plot=True,
     ):
         """Visualize service-wise distributions and calculate weighted average Wasserstein distance."""
@@ -277,20 +312,43 @@ class WassersteinDistanceMetric:
 
         plt.tight_layout()
 
-        # Save the plot
-        safe_group_name = group_name.replace("/", "_").replace(" ", "_")
-        filename = (
-            f"{app_name}_{compressor}_{safe_group_name}_by_service_wasserstein_dist.png"
-        )
+        # Save the plot using new directory structure
+        filename = f"{compressor}.png"
 
-        if "duration_depth_0_by_service" in group_name:
-            filepath = self.duration_depth_0_by_service_dir / filename
-        elif "duration_depth_1_by_service" in group_name:
-            filepath = self.duration_depth_1_by_service_dir / filename
+        # Determine subdirectory based on group type
+        if "by_service" in group_name:
+            # Extract depth from group name (e.g., "duration_depth_2_by_service")
+            depth = self._extract_depth_from_group_name(group_name)
+            plot_dir = (
+                Path("output")
+                / app_name
+                / f"{service}_{fault}"
+                / f"{run}"
+                / "visualization"
+                / "duration"
+                / f"depth_{depth}"
+                / "by_service"
+            )
         else:
-            filepath = self.duration_all_dir / filename
+            # Extract depth from group name (e.g., "duration_depth_2")
+            depth = self._extract_depth_from_group_name(group_name)
+            plot_dir = (
+                Path("output")
+                / app_name
+                / f"{service}_{fault}"
+                / f"{run}"
+                / "visualization"
+                / "duration"
+                / f"depth_{depth}"
+                / "all"
+            )
+
+        plot_dir.mkdir(parents=True, exist_ok=True)
+        filepath = plot_dir / filename
 
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
         plt.close()
+
+        print(f"Created Wasserstein by service plot: {filepath}")
 
         return weighted_avg_wdist
