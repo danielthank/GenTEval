@@ -20,7 +20,8 @@ class BaseReport(ABC):
         """
         self.compressors = compressors
         self.root_dir = root_dir
-        self.report = defaultdict(lambda: defaultdict(list))
+        # [report_group][group] = defaultdict(list)
+        self.report = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
     @abstractmethod
     def generate(self, run_dirs) -> dict[str, Any]:

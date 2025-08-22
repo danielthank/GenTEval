@@ -8,24 +8,14 @@ from genteval.evaluators.evaluator import Evaluator
 
 class DurationEvaluator(Evaluator):
     def evaluate(self, dataset: Dataset, labels):
-        # duration distribution by service
-        duration_distribution = defaultdict(list)
-        duration_pair_distribution = defaultdict(list)
-        # duration distribution at specific depths (0-4)
-        duration_by_depth = {}
-        duration_by_depth_by_service = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(list))
-        )
+        # [group] = [..durations]
+        duration = defaultdict(list)
 
-        # span durations before and after incident injection by depth (0-4)
-        duration_before_incident_by_depth = {}
-        duration_after_incident_by_depth = {}
+        # [group][time_buckett] = [..durations]
+        duration_by_time = defaultdict(lambda: defaultdict(list))
 
-        # Initialize for depths 0-4
-        for depth in range(5):  # 0, 1, 2, 3, 4
-            duration_by_depth[depth] = defaultdict(list)
-            duration_before_incident_by_depth[depth] = defaultdict(list)
-            duration_after_incident_by_depth[depth] = defaultdict(list)
+        # [group][time_bucket][percentile] = value
+        duration_by_time_percentiles = defaultdict(lambda: defaultdict(dict))
 
         # Get inject_time from labels (convert from seconds to microseconds)
         inject_time_us = int(labels.get("inject_time", 0)) * 1000000
@@ -47,9 +37,9 @@ class DurationEvaluator(Evaluator):
 
         for trace in dataset.traces.values():
             for span_id, span in trace.items():
-                duration = span["duration"]
+                span_duration = span["duration"]
 
-                duration_distribution["all"].append(duration)
+                duration["all"].append(span_duration)
 
                 if span["parentSpanId"] is not None:
                     parent_span = trace.get(span["parentSpanId"])
@@ -57,78 +47,47 @@ class DurationEvaluator(Evaluator):
                         parent_duration = parent_span["duration"]
                         if parent_duration > 0:
                             # TODO: consider not cliping the duration
-                            duration_pair_distribution["all"].append(
-                                duration / parent_duration
-                                if duration <= parent_duration
+                            duration["pair_all"].append(
+                                span_duration / parent_duration
+                                if span_duration <= parent_duration
                                 else 1
                             )
 
-            # Process spans at all depths (0-4) for time buckets and before/after incident analysis
-            for span_id, span in trace.items():
                 span_depth = get_span_depth(span_id, trace)
 
-                # Only process depths 0-4
                 if 0 <= span_depth <= 4:
                     service = span["nodeName"].split("!@#")[0]
                     span_start_time = span["startTime"]
                     span_duration = span["duration"]
                     start_time = span_start_time // (60 * 1000000)  # minute bucket
 
-                    # collect duration distribution for this depth
-                    duration_by_depth[span_depth]["all"].append(span_duration)
+                    duration[f"depth_{span_depth}"].append(span_duration)
 
-                    # collect span duration by service and time bucket
-                    duration_by_depth_by_service[span_depth][service][
+                    if (
+                        span_start_time + span_duration < inject_time_us
+                        or span_start_time >= inject_time_us
+                    ):
+                        duration[f"depth_{span_depth}_service_{service}"].append(
+                            span_duration
+                        )
+
+                    duration_by_time[f"depth_{span_depth}_service_{service}"][
                         start_time
                     ].append(span_duration)
+                    duration_by_time[f"depth_{span_depth}"][start_time].append(
+                        span_duration
+                    )
 
-                    # Determine if this span is before or after incident injection
-                    if span_start_time + span_duration < inject_time_us:
-                        # Span ended before incident injection
-                        duration_before_incident_by_depth[span_depth]["all"].append(
-                            span_duration
-                        )
-                    elif span_start_time >= inject_time_us:
-                        # Span started after incident injection
-                        duration_after_incident_by_depth[span_depth]["all"].append(
-                            span_duration
-                        )
-
-        # calculate percentiles (p0, p10, p20, ..., p90, p100) for each depth, service and time bucket
-        duration_by_depth_by_service_percentiles = {}
         percentiles = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
-        for depth, services in duration_by_depth_by_service.items():
-            duration_by_depth_by_service_percentiles[depth] = {}
-            for service, time_buckets in services.items():
-                duration_by_depth_by_service_percentiles[depth][service] = []
-                for timebucket, durations in time_buckets.items():
-                    if durations:  # only calculate if there are durations
-                        percentile_values = {}
-                        for p in percentiles:
-                            percentile_values[f"p{p}"] = np.percentile(durations, p)
+        for group, time_buckets in duration_by_time.items():
+            for time_bucket, distribution in time_buckets.items():
+                for p in percentiles:
+                    duration_by_time_percentiles[group][time_bucket][f"p{p}"] = (
+                        np.percentile(distribution, p)
+                    )
 
-                        bucket_data = {"timebucket": timebucket, **percentile_values}
-                        duration_by_depth_by_service_percentiles[depth][service].append(
-                            bucket_data
-                        )
-
-                # sort by timebucket for consistent ordering
-                duration_by_depth_by_service_percentiles[depth][service].sort(
-                    key=lambda x: x["timebucket"]
-                )
-
-        # Build return dictionary with all depth data
-        result = {
-            "duration": duration_distribution,
-            "duration_pair": duration_pair_distribution,
-            "duration_by_depth_by_service": duration_by_depth_by_service_percentiles,
-            "duration_before_incident_by_depth": duration_before_incident_by_depth,
-            "duration_after_incident_by_depth": duration_after_incident_by_depth,
+        return {
+            "duration": duration,
+            "duration_by_time_percentiles": duration_by_time_percentiles,
         }
-
-        # Add individual depth data for specific depth analysis
-        for depth in range(5):  # 0, 1, 2, 3, 4
-            result[f"duration_depth_{depth}"] = duration_by_depth[depth]
-
-        return result

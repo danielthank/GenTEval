@@ -17,7 +17,7 @@ class WassersteinDistanceMetric:
         self,
         original_data,
         compressed_data,
-        group_name,
+        group_key,
         compressor,
         app_name,
         service=None,
@@ -27,36 +27,21 @@ class WassersteinDistanceMetric:
     ):
         """Visualize the distributions used in Wasserstein distance calculation."""
         # Convert duration data to milliseconds for consistency (duration_pair data is not converted)
-        is_duration_pair = "duration_pair" in group_name
-        if is_duration_pair:
-            # Duration pair ratios - no conversion needed
-            original_for_wdist = original_data
-            compressed_for_wdist = compressed_data
-        else:
-            # Duration data - convert from μs to ms
-            original_for_wdist = np.array(original_data) / 1000
-            compressed_for_wdist = np.array(compressed_data) / 1000
+        is_duration_pair = "pair" in group_key
+        if not is_duration_pair:
+            original_data = np.array(original_data) / 1000
+            compressed_data = np.array(compressed_data) / 1000
 
         # Calculate and return Wasserstein distance
-        wdist = wasserstein_distance(original_for_wdist, compressed_for_wdist)
+        wdist = wasserstein_distance(original_data, compressed_data)
 
         if not plot:
             return wdist
 
         fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
-        # Check if this is duration_pair data to apply bounds
-        is_duration_pair = "duration_pair" in group_name
-
-        # Plot CDFs for better visualization of Wasserstein distance
-        if is_duration_pair:
-            # Duration pair ratios - no conversion needed
-            original_sorted = np.sort(original_data)
-            compressed_sorted = np.sort(compressed_data)
-        else:
-            # Duration data - convert from μs to ms
-            original_sorted = np.sort(np.array(original_data) / 1000)
-            compressed_sorted = np.sort(np.array(compressed_data) / 1000)
+        original_sorted = np.sort(original_data)
+        compressed_sorted = np.sort(compressed_data)
 
         original_cdf = np.arange(1, len(original_sorted) + 1) / len(original_sorted)
         compressed_cdf = np.arange(1, len(compressed_sorted) + 1) / len(
@@ -87,7 +72,7 @@ class WassersteinDistanceMetric:
             "Duration (ms)" if not is_duration_pair else "Duration Pair Ratio"
         )
         ax.set_ylabel("Cumulative Probability")
-        ax.set_title(f"Cumulative Distribution Functions - {group_name}")
+        ax.set_title(f"Cumulative Distribution Functions - {group_key}")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -101,7 +86,7 @@ class WassersteinDistanceMetric:
 
         # Set title with Wasserstein distance
         fig.suptitle(
-            f"{app_name} - {compressor} - {group_name}\nWasserstein Distance: {wdist:.4f}",
+            f"{app_name} - {compressor} - {group_key}\nWasserstein Distance: {wdist:.4f}",
             fontsize=14,
         )
 
@@ -113,42 +98,15 @@ class WassersteinDistanceMetric:
         filename = f"{compressor}.png"
 
         # Determine subdirectory based on group type
-        if "duration_pair" in group_name:
-            plot_dir = (
-                Path("output")
-                / app_name
-                / f"{service}_{fault}"
-                / f"{run}"
-                / "visualization"
-                / "duration"
-                / "pair"
-            )
-        elif "by_service" in group_name:
-            # Extract depth from group name (e.g., "duration_depth_2_by_service")
-            depth = self._extract_depth_from_group_name(group_name)
-            plot_dir = (
-                Path("output")
-                / app_name
-                / f"{service}_{fault}"
-                / f"{run}"
-                / "visualization"
-                / "duration"
-                / f"depth_{depth}"
-                / "by_service"
-            )
-        else:
-            # Extract depth from group name (e.g., "duration_depth_2")
-            depth = self._extract_depth_from_group_name(group_name)
-            plot_dir = (
-                Path("output")
-                / app_name
-                / f"{service}_{fault}"
-                / f"{run}"
-                / "visualization"
-                / "duration"
-                / f"depth_{depth}"
-                / "all"
-            )
+        plot_dir = (
+            Path("output")
+            / app_name
+            / f"{service}_{fault}"
+            / f"{run}"
+            / "visualization"
+            / "wdist"
+            / f"{group_key}"
+        )
 
         plot_dir.mkdir(parents=True, exist_ok=True)
         filepath = plot_dir / filename

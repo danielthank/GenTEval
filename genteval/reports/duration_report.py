@@ -79,15 +79,15 @@ class DurationReport(BaseReport):
                 results = self.load_json_file(results_path)
 
                 # Process duration data
-                for group in original["duration"]:
-                    if group not in results["duration"]:
+                for group_key in original["duration"]:
+                    if group_key not in results["duration"]:
                         continue
 
                     # Visualize and calculate Wasserstein distance
                     wdist = self.wasserstein_metric.visualize_wasserstein_distributions(
-                        original["duration"][group],
-                        results["duration"][group],
-                        f"duration_{group}",
+                        original["duration"][group_key],
+                        results["duration"][group_key],
+                        group_key,
                         compressor,
                         app_name=app_name,
                         service=service,
@@ -96,83 +96,11 @@ class DurationReport(BaseReport):
                         plot=self.plot,
                     )
 
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_wdist"].append(wdist)
-
-                # Process duration_pair data
-                for group in original["duration_pair"]:
-                    if group not in results["duration_pair"]:
-                        continue
-
-                    # Visualize and calculate Wasserstein distance
-                    wdist = self.wasserstein_metric.visualize_wasserstein_distributions(
-                        original["duration_pair"][group],
-                        results["duration_pair"][group],
-                        f"duration_pair_{group}",
-                        compressor,
-                        app_name=app_name,
-                        service=service,
-                        fault=fault,
-                        run=run,
-                        plot=self.plot,
-                    )
-
-                    report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["duration_pair_wdist"].append(wdist)
-
-                # Process duration_depth_0 data
-                if "duration_depth_0" in original and "duration_depth_0" in results:
-                    for group in original["duration_depth_0"]:
-                        if group not in results["duration_depth_0"]:
-                            continue
-
-                        # Visualize and calculate Wasserstein distance
-                        wdist = (
-                            self.wasserstein_metric.visualize_wasserstein_distributions(
-                                original["duration_depth_0"][group],
-                                results["duration_depth_0"][group],
-                                f"duration_depth_0_{group}",
-                                compressor,
-                                app_name=app_name,
-                                service=service,
-                                fault=fault,
-                                run=run,
-                                plot=self.plot,
-                            )
-                        )
-
-                        report_group = f"{app_name}_{compressor}"
-                        self.report[report_group]["duration_depth_0_wdist"].append(
-                            wdist
-                        )
-
-                # Process duration_depth_1 data
-                if "duration_depth_1" in original and "duration_depth_1" in results:
-                    for group in original["duration_depth_1"]:
-                        if group not in results["duration_depth_1"]:
-                            continue
-
-                        # Visualize and calculate Wasserstein distance
-                        wdist = (
-                            self.wasserstein_metric.visualize_wasserstein_distributions(
-                                original["duration_depth_1"][group],
-                                results["duration_depth_1"][group],
-                                f"duration_depth_1_{group}",
-                                compressor,
-                                app_name=app_name,
-                                service=service,
-                                fault=fault,
-                                run=run,
-                                plot=self.plot,
-                            )
-                        )
-
-                        report_group = f"{app_name}_{compressor}"
-                        self.report[report_group]["duration_depth_1_wdist"].append(
-                            wdist
-                        )
+                    report_group_key = f"{app_name}_{compressor}_{group_key}_wdist"
+                    self.report[report_group_key][group_key]["values"].append(wdist)
 
                 # Process duration before/after incident data for depths 0 and 1
+                """
                 for depth in [0, 1]:
                     if self._has_before_after_incident_data_for_depth(
                         original, results, depth
@@ -248,78 +176,66 @@ class DurationReport(BaseReport):
                             ].append(
                                 mape_count_results[depth][percentile]["cosine_sim"]
                             )
+                """
 
         # Calculate averages and clean up
-        for group in self.report:
-            if "duration_wdist" in self.report[group]:
-                self.report[group]["duration_wdist_avg"] = sum(
-                    self.report[group]["duration_wdist"]
-                ) / len(self.report[group]["duration_wdist"])
-                del self.report[group]["duration_wdist"]
-
-            if "duration_pair_wdist" in self.report[group]:
-                self.report[group]["duration_pair_wdist_avg"] = sum(
-                    self.report[group]["duration_pair_wdist"]
-                ) / len(self.report[group]["duration_pair_wdist"])
-                del self.report[group]["duration_pair_wdist"]
-
-            if "duration_depth_0_wdist" in self.report[group]:
-                self.report[group]["duration_depth_0_wdist_avg"] = sum(
-                    self.report[group]["duration_depth_0_wdist"]
-                ) / len(self.report[group]["duration_depth_0_wdist"])
-                del self.report[group]["duration_depth_0_wdist"]
-
-            if "duration_depth_1_wdist" in self.report[group]:
-                self.report[group]["duration_depth_1_wdist_avg"] = sum(
-                    self.report[group]["duration_depth_1_wdist"]
-                ) / len(self.report[group]["duration_depth_1_wdist"])
-                del self.report[group]["duration_depth_1_wdist"]
+        for report_group_key, report_group in self.report.items():
+            if report_group_key.endswith("_wdist"):
+                # Calculate average Wasserstein distance for each report group
+                for group in report_group.values():
+                    group["avg"] = (
+                        sum(group["values"]) / len(group["values"])
+                        if group["values"]
+                        else float("nan")
+                    )
+                    del group["values"]
 
             # Calculate averages for depth 0 before/after incident Wasserstein distances
-            if "duration_depth_0_before_wdist" in self.report[group]:
-                if self.report[group]["duration_depth_0_before_wdist"]:
-                    self.report[group]["duration_depth_0_before_wdist_avg"] = sum(
-                        self.report[group]["duration_depth_0_before_wdist"]
-                    ) / len(self.report[group]["duration_depth_0_before_wdist"])
+            """
+            if "duration_depth_0_before_wdist" in self.report[report_group]:
+                if self.report[report_group]["duration_depth_0_before_wdist"]:
+                    self.report[report_group]["duration_depth_0_before_wdist_avg"] = sum(
+                        self.report[report_group]["duration_depth_0_before_wdist"]
+                    ) / len(self.report[report_group]["duration_depth_0_before_wdist"])
                 else:
-                    self.report[group]["duration_depth_0_before_wdist_avg"] = float(
+                    self.report[report_group]["duration_depth_0_before_wdist_avg"] = float(
                         "inf"
                     )
-                del self.report[group]["duration_depth_0_before_wdist"]
+                del self.report[report_group]["duration_depth_0_before_wdist"]
 
-            if "duration_depth_0_after_wdist" in self.report[group]:
-                if self.report[group]["duration_depth_0_after_wdist"]:
-                    self.report[group]["duration_depth_0_after_wdist_avg"] = sum(
-                        self.report[group]["duration_depth_0_after_wdist"]
-                    ) / len(self.report[group]["duration_depth_0_after_wdist"])
+            if "duration_depth_0_after_wdist" in self.report[report_group]:
+                if self.report[report_group]["duration_depth_0_after_wdist"]:
+                    self.report[report_group]["duration_depth_0_after_wdist_avg"] = sum(
+                        self.report[report_group]["duration_depth_0_after_wdist"]
+                    ) / len(self.report[report_group]["duration_depth_0_after_wdist"])
                 else:
-                    self.report[group]["duration_depth_0_after_wdist_avg"] = float(
+                    self.report[report_group]["duration_depth_0_after_wdist_avg"] = float(
                         "inf"
                     )
-                del self.report[group]["duration_depth_0_after_wdist"]
+                del self.report[report_group]["duration_depth_0_after_wdist"]
 
             # Calculate averages for depth 1 before/after incident Wasserstein distances
-            if "duration_depth_1_before_wdist" in self.report[group]:
-                if self.report[group]["duration_depth_1_before_wdist"]:
-                    self.report[group]["duration_depth_1_before_wdist_avg"] = sum(
-                        self.report[group]["duration_depth_1_before_wdist"]
-                    ) / len(self.report[group]["duration_depth_1_before_wdist"])
+            if "duration_depth_1_before_wdist" in self.report[report_group]:
+                if self.report[report_group]["duration_depth_1_before_wdist"]:
+                    self.report[report_group]["duration_depth_1_before_wdist_avg"] = sum(
+                        self.report[report_group]["duration_depth_1_before_wdist"]
+                    ) / len(self.report[report_group]["duration_depth_1_before_wdist"])
                 else:
-                    self.report[group]["duration_depth_1_before_wdist_avg"] = float(
+                    self.report[report_group]["duration_depth_1_before_wdist_avg"] = float(
                         "inf"
                     )
-                del self.report[group]["duration_depth_1_before_wdist"]
+                del self.report[report_group]["duration_depth_1_before_wdist"]
 
-            if "duration_depth_1_after_wdist" in self.report[group]:
-                if self.report[group]["duration_depth_1_after_wdist"]:
-                    self.report[group]["duration_depth_1_after_wdist_avg"] = sum(
-                        self.report[group]["duration_depth_1_after_wdist"]
-                    ) / len(self.report[group]["duration_depth_1_after_wdist"])
+            if "duration_depth_1_after_wdist" in self.report[report_group]:
+                if self.report[report_group]["duration_depth_1_after_wdist"]:
+                    self.report[report_group]["duration_depth_1_after_wdist_avg"] = sum(
+                        self.report[report_group]["duration_depth_1_after_wdist"]
+                    ) / len(self.report[report_group]["duration_depth_1_after_wdist"])
                 else:
-                    self.report[group]["duration_depth_1_after_wdist_avg"] = float(
+                    self.report[report_group]["duration_depth_1_after_wdist_avg"] = float(
                         "inf"
                     )
-                del self.report[group]["duration_depth_1_after_wdist"]
+                del self.report[report_group]["duration_depth_1_after_wdist"]
 
             # Calculate averages for all percentile metrics (depth 0-4, p0-p100)
             percentiles = [
@@ -341,12 +257,12 @@ class DurationReport(BaseReport):
 
                     # Calculate MAPE averages
                     mape_key = f"{key_prefix}_mape_runs"
-                    if mape_key in self.report[group]:
+                    if mape_key in self.report[report_group]:
                         all_run_mapes = []
                         all_run_counts = []
 
-                        for i, run_mape in enumerate(self.report[group][mape_key]):
-                            run_counts = self.report[group][f"{key_prefix}_count_runs"][
+                        for i, run_mape in enumerate(self.report[report_group][mape_key]):
+                            run_counts = self.report[report_group][f"{key_prefix}_count_runs"][
                                 i
                             ]
                             for service in run_mape:
@@ -363,22 +279,22 @@ class DurationReport(BaseReport):
                                 )
                             )
                             total_count = sum(all_run_counts)
-                            self.report[group][f"{key_prefix}_mape_avg"] = (
+                            self.report[report_group][f"{key_prefix}_mape_avg"] = (
                                 total_weighted_mape / total_count
                             )
 
                     # Calculate cosine similarity averages
                     cosine_key = f"{key_prefix}_cosine_sim"
-                    if cosine_key in self.report[group]:
-                        if self.report[group][cosine_key]:
+                    if cosine_key in self.report[report_group]:
+                        if self.report[report_group][cosine_key]:
                             # Calculate weighted average cosine similarity across all runs and all services
                             all_cosine_sims = []
                             all_cosine_counts = []
 
                             for i, run_cosine_sim in enumerate(
-                                self.report[group][cosine_key]
+                                self.report[report_group][cosine_key]
                             ):
-                                run_counts = self.report[group][
+                                run_counts = self.report[report_group][
                                     f"{key_prefix}_count_runs"
                                 ][i]
                                 for service in run_cosine_sim:
@@ -395,17 +311,18 @@ class DurationReport(BaseReport):
                                     )
                                 )
                                 total_count = sum(all_cosine_counts)
-                                self.report[group][f"{key_prefix}_cosine_sim_avg"] = (
+                                self.report[report_group][f"{key_prefix}_cosine_sim_avg"] = (
                                     total_weighted_cosine_sim / total_count
                                 )
                             else:
-                                self.report[group][f"{key_prefix}_cosine_sim_avg"] = (
+                                self.report[report_group][f"{key_prefix}_cosine_sim_avg"] = (
                                     float("nan")
                                 )
                         else:
-                            self.report[group][f"{key_prefix}_cosine_sim_avg"] = float(
+                            self.report[report_group][f"{key_prefix}_cosine_sim_avg"] = float(
                                 "nan"
                             )
-                        del self.report[group][cosine_key]
+                        del self.report[report_group][cosine_key]
+            """
 
         return dict(self.report)
