@@ -36,13 +36,17 @@ class SizeReport(BaseReport):
                     if file.is_file():
                         total_size += file.stat().st_size
 
-                self.report[report_group]["size"].append(total_size)
+                self.report[report_group]["size"]["values"].append(total_size)
 
-        # Calculate averages
-        for group in self.report:
-            if "size" in self.report[group] and self.report[group]["size"]:
-                self.report[group]["size"] = sum(self.report[group]["size"]) / len(
-                    self.report[group]["size"]
-                )
+        # Calculate averages and clean up
+        for group in self.report.values():
+            for metric_group in group.values():
+                if isinstance(metric_group, dict) and "values" in metric_group:
+                    metric_group["avg"] = (
+                        sum(metric_group["values"]) / len(metric_group["values"])
+                        if metric_group["values"]
+                        else float("nan")
+                    )
+                    del metric_group["values"]
 
         return dict(self.report)

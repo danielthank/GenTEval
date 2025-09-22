@@ -46,6 +46,7 @@ batch_convert_trajectory = "genteval.data_collection.ai_agent.batch_convert_cli:
 
 # Development tools
 generate-proto = "genteval.bin.generate_proto:main"
+draw = "genteval.bin.draw:main"
 
 [build-system]
 requires = ["hatchling"]

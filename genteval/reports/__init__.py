@@ -7,6 +7,7 @@ from .operation_report import OperationReport
 from .rca_report import RCAReport
 from .size_report import SizeReport
 from .span_count_report import SpanCountReport
+from .time_report import TimeReport
 
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "RCAReport",
     "SizeReport",
     "SpanCountReport",
+    "TimeReport",
 ]

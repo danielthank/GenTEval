@@ -124,7 +124,7 @@ class SimpleGenTCompressor(Compressor):
 
         return preprocessed_traces
 
-    def compress(self, dataset: Dataset) -> CompressedDataset:
+    def _compress_impl(self, dataset: Dataset) -> CompressedDataset:
         """Learn models from the dataset (training phase)."""
         self.logger.info("Starting Simple GenT compression")
 
@@ -200,7 +200,7 @@ class SimpleGenTCompressor(Compressor):
         self.logger.info("Simple GenT compression completed")
         return compressed_data
 
-    def decompress(self, compressed_dataset: CompressedDataset) -> Dataset:
+    def _decompress_impl(self, compressed_dataset: CompressedDataset) -> Dataset:
         """Generate new dataset using trained models (sampling phase)."""
         self.logger.info("Starting Simple GenT decompression")
 

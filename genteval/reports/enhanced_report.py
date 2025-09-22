@@ -87,13 +87,24 @@ class EnhancedReportGenerator:
             return Text(f"{value:.2f}%", style="red")
         if metric_type == "size":
             # Format file sizes nicely
-            if value >= 1024 * 1024 * 1024:  # GB
-                return Text(f"{value / (1024**3):.2f} GB", style="cyan")
-            if value >= 1024 * 1024:  # MB
-                return Text(f"{value / (1024**2):.2f} MB", style="cyan")
             if value >= 1024:  # KB
                 return Text(f"{value / 1024:.2f} KB", style="cyan")
             return Text(f"{value} B", style="cyan")
+        if metric_type == "time":
+            # Format time nicely (seconds)
+            if value >= 3600:  # Hours
+                hours = int(value // 3600)
+                minutes = int((value % 3600) // 60)
+                seconds = value % 60
+                return Text(f"{hours}h {minutes}m {seconds:.2f}s", style="magenta")
+            if value >= 60:  # Minutes
+                minutes = int(value // 60)
+                seconds = value % 60
+                return Text(f"{minutes}m {seconds:.2f}s", style="magenta")
+            if value >= 1:  # Seconds
+                return Text(f"{value:.2f}s", style="magenta")
+            # Milliseconds
+            return Text(f"{value * 1000:.2f}ms", style="magenta")
         return Text(f"{value:.4f}", style="white")
 
     def create_summary_table(self, report_data: dict[str, Any], title: str) -> "Table":
@@ -112,27 +123,19 @@ class EnhancedReportGenerator:
 
         # Define the desired order for operation metrics
         operation_metric_order = [
-            "operation_precision_avg",
-            "operation_recall_avg",
-            "operation_f1_avg",
-            "operation_pair_precision_avg",
-            "operation_pair_recall_avg",
-            "operation_pair_f1_avg",
+            "operation_precision",
+            "operation_recall",
+            "operation_f1",
+            "operation_pair_precision",
+            "operation_pair_recall",
+            "operation_pair_f1",
         ]
 
-        # Filter and order metrics
+        # Filter metrics - all metrics now have nested "avg" key
         available_metrics = []
-        for metric in sample_data.keys():
-            if (
-                metric.endswith("_f1_avg")
-                or metric.endswith("_precision_avg")
-                or metric.endswith("_recall_avg")
-                or metric.endswith("_wdist_avg")
-                or metric.endswith("_mape_avg")
-                or metric.endswith("_cosine_sim_avg")
-                or metric == "size"
-            ):
-                available_metrics.append(metric)
+        for metric_key, metric_data in sample_data.items():
+            if isinstance(metric_data, dict) and "avg" in metric_data:
+                available_metrics.append(metric_key)
 
         # Sort metrics with custom order for operation metrics
         def metric_sort_key(metric):
@@ -158,7 +161,11 @@ class EnhancedReportGenerator:
         for compressor_group, metrics in sorted(report_data.items()):
             row = [compressor_group]
             for metric in ordered_metrics:
-                value = metrics[metric]
+                # Extract the avg value from the nested structure
+                metric_data = metrics[metric]
+
+                value = metric_data["avg"]
+
                 if "f1" in metric or "precision" in metric or "recall" in metric:
                     formatted_value = self.format_metric_value(value, "accuracy")
                 elif "wdist" in metric:
@@ -169,6 +176,8 @@ class EnhancedReportGenerator:
                     formatted_value = self.format_metric_value(value, "accuracy")
                 elif "size" in metric:
                     formatted_value = self.format_metric_value(value, "size")
+                elif "compression_time_seconds" in metric or "time" in metric:
+                    formatted_value = self.format_metric_value(value, "time")
                 else:
                     formatted_value = self.format_metric_value(value)
 
@@ -194,15 +203,113 @@ class EnhancedReportGenerator:
         for compressor_group, metrics in sorted(report_data.items()):
             row = [compressor_group]
             for k in range(1, 6):
-                value = metrics.get(f"ac{k}", 0)
+                metric_data = metrics[f"ac{k}"]
+                if "values" in metric_data and "avg" not in metric_data:
+                    values = metric_data["values"]
+                    value = sum(values) / len(values) if values else float("nan")
+                else:
+                    value = metric_data["avg"]
                 formatted_value = self.format_metric_value(value, "accuracy")
                 row.append(formatted_value)
 
-            avg5 = metrics.get("avg5", 0)
+            avg5_data = metrics["avg5"]
+            if "values" in avg5_data and "avg" not in avg5_data:
+                values = avg5_data["values"]
+                avg5 = sum(values) / len(values) if values else float("nan")
+            else:
+                avg5 = avg5_data["avg"]
             row.append(self.format_metric_value(avg5, "accuracy"))
             table.add_row(*row)
 
         return table
+
+    def _print_duration_sections(self, report_data: dict[str, Any]):
+        """Print duration metrics organized by sections."""
+        # Calculate and display both fidelity scores first
+        mape_fidelity_scores = self.calculate_mape_fidelity_score(report_data)
+        cos_fidelity_scores = self.calculate_cos_fidelity_score(report_data)
+
+        if mape_fidelity_scores or cos_fidelity_scores:
+            fidelity_table = Table(
+                title="Duration Fidelity Scores",
+                box=box.ROUNDED,
+                title_style="bold magenta",
+            )
+            fidelity_table.add_column("Compressor", style="cyan", no_wrap=True)
+            fidelity_table.add_column("MAPE Fidelity", justify="right")
+            fidelity_table.add_column("Cos Fidelity", justify="right")
+
+            # Get all compressors from both scores
+            all_compressors = set(mape_fidelity_scores.keys()) | set(
+                cos_fidelity_scores.keys()
+            )
+
+            for compressor in sorted(all_compressors):
+                mape_score = mape_fidelity_scores.get(compressor, 0.0)
+                cos_score = cos_fidelity_scores.get(compressor, 0.0)
+
+                formatted_mape = self.format_metric_value(mape_score, "accuracy")
+                formatted_cos = self.format_metric_value(cos_score, "accuracy")
+
+                fidelity_table.add_row(compressor, formatted_mape, formatted_cos)
+
+            self.console.print(fidelity_table)
+            self.console.print()
+
+        # Create separate data structures for each section
+        wdist_data = {}
+        depth0_data = {}
+        depth1_data = {}
+
+        for compressor, metrics in report_data.items():
+            wdist_metrics = {}
+            depth0_metrics = {}
+            depth1_metrics = {}
+
+            for metric_name, metric_data in metrics.items():
+                if "_wdist" in metric_name:
+                    wdist_metrics[metric_name] = metric_data
+                elif "depth_0" in metric_name and (
+                    "_mape" in metric_name or "_cosine_sim" in metric_name
+                ):
+                    # Only include p50 and p90 for cleaner display
+                    if "_p50_" in metric_name or "_p90_" in metric_name:
+                        depth0_metrics[metric_name] = metric_data
+                elif "depth_1" in metric_name and (
+                    "_mape" in metric_name or "_cosine_sim" in metric_name
+                ):
+                    # Only include p50 and p90 for cleaner display
+                    if "_p50_" in metric_name or "_p90_" in metric_name:
+                        depth1_metrics[metric_name] = metric_data
+
+            if wdist_metrics:
+                wdist_data[compressor] = wdist_metrics
+            if depth0_metrics:
+                depth0_data[compressor] = depth0_metrics
+            if depth1_metrics:
+                depth1_data[compressor] = depth1_metrics
+
+        # Print each section
+        if wdist_data:
+            wdist_table = self.create_summary_table(
+                wdist_data, "Duration Wasserstein Distance Metrics"
+            )
+            self.console.print(wdist_table)
+            self.console.print()
+
+        if depth0_data:
+            depth0_table = self.create_summary_table(
+                depth0_data, "Duration Depth 0 Metrics (P50 & P90)"
+            )
+            self.console.print(depth0_table)
+            self.console.print()
+
+        if depth1_data:
+            depth1_table = self.create_summary_table(
+                depth1_data, "Duration Depth 1 Metrics (P50 & P90)"
+            )
+            self.console.print(depth1_table)
+            self.console.print()
 
     def create_performance_overview(
         self, all_reports: dict[str, dict[str, Any]]
@@ -231,24 +338,56 @@ class EnhancedReportGenerator:
 
             if report_type in ["trace_rca", "micro_rank"]:
                 # For RCA, higher avg5 is better
-                best_compressor = max(
-                    report_data.items(), key=lambda x: x[1].get("avg5", 0)
-                )
+                def get_avg5_value(x):
+                    avg5_data = x[1]["avg5"]
+                    if "values" in avg5_data and "avg" not in avg5_data:
+                        values = avg5_data["values"]
+                        return sum(values) / len(values) if values else float("nan")
+                    return avg5_data["avg"]
+
+                best_compressor = max(report_data.items(), key=get_avg5_value)
                 overview_text.append(
                     f"🏆 Best {report_type.replace('_', ' ').title()}: "
-                    f"{best_compressor[0]} ({best_compressor[1].get('avg5', 0):.4f})"
+                    f"{best_compressor[0]} ({get_avg5_value(best_compressor):.4f})"
                 )
+            elif report_type == "time":
+                # For compression time, lower is better
+                def get_time_value(x):
+                    metric = x[1].get("compression_time_seconds")
+                    if not metric:
+                        return float("inf")
+                    if "values" in metric and "avg" not in metric:
+                        values = metric["values"]
+                        return sum(values) / len(values) if values else float("inf")
+                    return metric.get("avg", float("inf"))
+
+                try:
+                    fastest = min(report_data.items(), key=get_time_value)
+                    fastest_time = get_time_value(fastest)
+                    formatted_time = str(self.format_metric_value(fastest_time, "time"))
+                    overview_text.append(
+                        f"⏱️ Fastest Compression: {fastest[0]} ({formatted_time})"
+                    )
+                except ValueError:
+                    # No valid items
+                    pass
             elif "f1" in str(report_data):
                 # For F1 scores, higher is better
                 sample_metrics = next(iter(report_data.values()))
-                f1_metrics = [k for k in sample_metrics.keys() if k.endswith("_f1_avg")]
+                f1_metrics = [k for k in sample_metrics if "f1" in k]
                 if f1_metrics:
-                    best_compressor = max(
-                        report_data.items(), key=lambda x: x[1].get(f1_metrics[0], 0)
-                    )
+
+                    def get_f1_value(x):
+                        f1_data = x[1][f1_metrics[0]]
+                        if "values" in f1_data and "avg" not in f1_data:
+                            values = f1_data["values"]
+                            return sum(values) / len(values) if values else float("nan")
+                        return f1_data["avg"]
+
+                    best_compressor = max(report_data.items(), key=get_f1_value)
                     overview_text.append(
                         f"🏆 Best {report_type.title()}: "
-                        f"{best_compressor[0]} ({best_compressor[1].get(f1_metrics[0], 0):.4f})"
+                        f"{best_compressor[0]} ({get_f1_value(best_compressor):.4f})"
                     )
 
         overview_panel = Panel(
@@ -259,6 +398,85 @@ class EnhancedReportGenerator:
         )
 
         return overview_panel
+
+    def calculate_mape_fidelity_score(
+        self, duration_data: dict[str, Any]
+    ) -> dict[str, float]:
+        """Calculate MAPE fidelity score by averaging MAPE across depths 0-4 and all percentiles."""
+        mape_fidelity_scores = {}
+
+        for compressor, metrics in duration_data.items():
+            mape_values = []
+
+            # Collect MAPE values for depth 0-4 and all percentiles (p0-p100)
+            for metric_name, metric_data in metrics.items():
+                if "_mape" in metric_name:
+                    # Check if it's a depth metric (depth_0, depth_1, depth_2, depth_3, depth_4)
+                    for depth in range(5):  # 0-4
+                        if f"depth_{depth}_" in metric_name:
+                            # Extract MAPE value
+                            if isinstance(metric_data, dict) and "avg" in metric_data:
+                                mape_val = metric_data["avg"]
+                                # Only include finite values
+                                if not (
+                                    isinstance(mape_val, float)
+                                    and (
+                                        mape_val == float("inf") or mape_val != mape_val
+                                    )
+                                ):
+                                    mape_values.append(mape_val)
+                            break
+
+            # Calculate average MAPE (lower is better, so fidelity = 100 - avg_mape)
+            if mape_values:
+                avg_mape = sum(mape_values) / len(mape_values)
+                # Convert MAPE to fidelity score (100% - MAPE%, clamped to 0-100)
+                mape_fidelity_score = max(0, min(100, 100 - avg_mape))
+                mape_fidelity_scores[compressor] = mape_fidelity_score
+            else:
+                mape_fidelity_scores[compressor] = 0.0
+
+        return mape_fidelity_scores
+
+    def calculate_cos_fidelity_score(
+        self, duration_data: dict[str, Any]
+    ) -> dict[str, float]:
+        """Calculate Cos fidelity score by averaging cosine similarity across depths 0-4 and all percentiles."""
+        cos_fidelity_scores = {}
+
+        for compressor, metrics in duration_data.items():
+            cos_sim_values = []
+
+            # Collect cosine similarity values for depth 0-4 and all percentiles (p0-p100)
+            for metric_name, metric_data in metrics.items():
+                if "_cosine_sim" in metric_name:
+                    # Check if it's a depth metric (depth_0, depth_1, depth_2, depth_3, depth_4)
+                    for depth in range(5):  # 0-4
+                        if f"depth_{depth}_" in metric_name:
+                            # Extract cosine similarity value
+                            if isinstance(metric_data, dict) and "avg" in metric_data:
+                                cos_sim_val = metric_data["avg"]
+                                # Only include finite values
+                                if not (
+                                    isinstance(cos_sim_val, float)
+                                    and (
+                                        cos_sim_val == float("inf")
+                                        or cos_sim_val != cos_sim_val
+                                    )
+                                ):
+                                    cos_sim_values.append(cos_sim_val)
+                            break
+
+            # Calculate average cosine similarity and scale to 0-100
+            if cos_sim_values:
+                avg_cos_sim = sum(cos_sim_values) / len(cos_sim_values)
+                # Scale cosine similarity (0-1) to fidelity score (0-100)
+                cos_fidelity_score = avg_cos_sim * 100
+                cos_fidelity_scores[compressor] = cos_fidelity_score
+            else:
+                cos_fidelity_scores[compressor] = 0.0
+
+        return cos_fidelity_scores
 
     def print_enhanced_report(self, all_reports: dict[str, dict[str, Any]]):
         """Print enhanced, beautifully formatted reports."""
@@ -298,13 +516,17 @@ class EnhancedReportGenerator:
 
             if report_type in ["trace_rca", "micro_rank"]:
                 table = self.create_rca_table(report_data)
+                self.console.print(table)
+                self.console.print()
+            elif report_type == "duration":
+                # Create separate sections for duration metrics
+                self._print_duration_sections(report_data)
             else:
                 table = self.create_summary_table(
                     report_data, f"{report_type.replace('_', ' ').title()} Metrics"
                 )
-
-            self.console.print(table)
-            self.console.print()
+                self.console.print(table)
+                self.console.print()
 
         # Print footer
         self.console.print("✨ Report generation complete!", style="bold green")
@@ -336,30 +558,136 @@ class EnhancedReportGenerator:
             print(f"{report_type.replace('_', ' ').title()} Results")
             print("-" * 50)
 
-            for compressor_group, metrics in sorted(report_data.items()):
-                print(f"\n{compressor_group}:")
-                for metric, value in sorted(metrics.items()):
-                    # Create more readable metric names
-                    display_name = metric.replace("_", " ").title()
-                    if "Duration Depth" in display_name:
-                        display_name = display_name.replace(
-                            "Duration Depth 0", "Depth 0"
-                        )
-                        display_name = display_name.replace(
-                            "Duration Depth 1", "Depth 1"
-                        )
+            if report_type == "duration":
+                self._print_duration_sections_fallback(report_data)
+            else:
+                for compressor_group, metrics in sorted(report_data.items()):
+                    print(f"\n{compressor_group}:")
+                    for metric, metric_data in sorted(metrics.items()):
+                        # Extract the avg value from the nested structure
+                        value = metric_data["avg"]
+
+                        # Create more readable metric names
+                        display_name = metric.replace("_", " ").title()
+                        if "Duration Depth" in display_name:
+                            display_name = display_name.replace(
+                                "Duration Depth 0", "Depth 0"
+                            )
+                            display_name = display_name.replace(
+                                "Duration Depth 1", "Depth 1"
+                            )
+                            display_name = display_name.replace("Wdist", "W-Dist")
+                            display_name = display_name.replace("Mape", "MAPE")
+                            display_name = display_name.replace("Cosine Sim", "Cos-Sim")
+
+                        # Specialized pretty formatting for known types
+                        if isinstance(value, (int, float)):
+                            lower_metric = metric.lower()
+                            if (
+                                "compression_time_seconds" in lower_metric
+                                or "time" in lower_metric
+                            ):
+                                # Human-friendly time formatting
+                                seconds = float(value)
+                                if seconds >= 3600:
+                                    hours = int(seconds // 3600)
+                                    minutes = int((seconds % 3600) // 60)
+                                    sec = seconds % 60
+                                    pretty = f"{hours}h {minutes}m {sec:.2f}s"
+                                elif seconds >= 60:
+                                    minutes = int(seconds // 60)
+                                    sec = seconds % 60
+                                    pretty = f"{minutes}m {sec:.2f}s"
+                                elif seconds >= 1:
+                                    pretty = f"{seconds:.2f}s"
+                                else:
+                                    pretty = f"{seconds * 1000:.2f}ms"
+                                print(f"  {display_name}: {pretty}")
+                            else:
+                                print(f"  {display_name}: {value:.4f}")
+                        else:
+                            print(f"  {display_name}: {value}")
+                print()
+
+        print("Report generation complete!")
+        print()
+
+    def _print_duration_sections_fallback(self, report_data: dict[str, Any]):
+        """Print duration sections for fallback mode."""
+        # Calculate and display both fidelity scores first
+        mape_fidelity_scores = self.calculate_mape_fidelity_score(report_data)
+        cos_fidelity_scores = self.calculate_cos_fidelity_score(report_data)
+
+        if mape_fidelity_scores or cos_fidelity_scores:
+            print("\nDuration Fidelity Scores")
+            print("-" * 50)
+            print(f"{'Compressor':<20} {'MAPE Fidelity':<15} {'Cos Fidelity':<15}")
+            print("-" * 50)
+
+            all_compressors = set(mape_fidelity_scores.keys()) | set(
+                cos_fidelity_scores.keys()
+            )
+            for compressor in sorted(all_compressors):
+                mape_score = mape_fidelity_scores.get(compressor, 0.0)
+                cos_score = cos_fidelity_scores.get(compressor, 0.0)
+                print(f"{compressor:<20} {mape_score:>13.2f}% {cos_score:>13.2f}%")
+            print()
+
+        # Create separate data structures for each section
+        wdist_data = {}
+        depth0_data = {}
+        depth1_data = {}
+
+        for compressor, metrics in report_data.items():
+            wdist_metrics = {}
+            depth0_metrics = {}
+            depth1_metrics = {}
+
+            for metric_name, metric_data in metrics.items():
+                if "_wdist" in metric_name:
+                    wdist_metrics[metric_name] = metric_data
+                elif "depth_0" in metric_name and (
+                    "_mape" in metric_name or "_cosine_sim" in metric_name
+                ):
+                    if "_p50_" in metric_name or "_p90_" in metric_name:
+                        depth0_metrics[metric_name] = metric_data
+                elif "depth_1" in metric_name and (
+                    "_mape" in metric_name or "_cosine_sim" in metric_name
+                ):
+                    if "_p50_" in metric_name or "_p90_" in metric_name:
+                        depth1_metrics[metric_name] = metric_data
+
+            if wdist_metrics:
+                wdist_data[compressor] = wdist_metrics
+            if depth0_metrics:
+                depth0_data[compressor] = depth0_metrics
+            if depth1_metrics:
+                depth1_data[compressor] = depth1_metrics
+
+        # Print sections
+        sections = [
+            ("Wasserstein Distance Metrics", wdist_data),
+            ("Depth 0 Metrics (P50 & P90)", depth0_data),
+            ("Depth 1 Metrics (P50 & P90)", depth1_data),
+        ]
+
+        for section_title, section_data in sections:
+            if section_data:
+                print(f"\n{section_title}")
+                print("-" * 30)
+                for compressor, metrics in sorted(section_data.items()):
+                    print(f"\n  {compressor}:")
+                    for metric, metric_data in sorted(metrics.items()):
+                        value = metric_data["avg"]
+                        display_name = metric.replace("_", " ").title()
                         display_name = display_name.replace("Wdist", "W-Dist")
                         display_name = display_name.replace("Mape", "MAPE")
                         display_name = display_name.replace("Cosine Sim", "Cos-Sim")
 
-                    if isinstance(value, float):
-                        print(f"  {display_name}: {value:.4f}")
-                    else:
-                        print(f"  {display_name}: {value}")
-            print()
-
-        print("Report generation complete!")
-        print()
+                        if isinstance(value, float):
+                            print(f"    {display_name}: {value:.4f}")
+                        else:
+                            print(f"    {display_name}: {value}")
 
     def save_enhanced_json_report(
         self, all_reports: dict[str, dict[str, Any]], output_path: pathlib.Path
@@ -388,9 +716,48 @@ class EnhancedReportGenerator:
                 # Calculate average accuracy across all compressors
                 avg_accuracies = []
                 for compressor_data in report_data.values():
-                    avg_accuracies.append(compressor_data.get("avg5", 0))
+                    avg5_data = compressor_data["avg5"]
+                    if "values" in avg5_data and "avg" not in avg5_data:
+                        values = avg5_data["values"]
+                        avg_accuracies.append(
+                            sum(values) / len(values) if values else float("nan")
+                        )
+                    else:
+                        avg_accuracies.append(avg5_data["avg"])
                 summary["overall_avg_accuracy"] = (
                     sum(avg_accuracies) / len(avg_accuracies) if avg_accuracies else 0
+                )
+            elif report_type == "duration":
+                # Calculate both fidelity scores for duration metrics
+                mape_fidelity_scores = self.calculate_mape_fidelity_score(report_data)
+                cos_fidelity_scores = self.calculate_cos_fidelity_score(report_data)
+
+                summary["mape_fidelity_scores"] = mape_fidelity_scores
+                summary["cos_fidelity_scores"] = cos_fidelity_scores
+
+                if mape_fidelity_scores:
+                    summary["overall_mape_fidelity"] = sum(
+                        mape_fidelity_scores.values()
+                    ) / len(mape_fidelity_scores)
+                if cos_fidelity_scores:
+                    summary["overall_cos_fidelity"] = sum(
+                        cos_fidelity_scores.values()
+                    ) / len(cos_fidelity_scores)
+            elif report_type == "time":
+                # Calculate overall average compression time across compressors
+                times = []
+                for compressor_data in report_data.values():
+                    metric = compressor_data.get("compression_time_seconds")
+                    if not metric:
+                        continue
+                    if "values" in metric and "avg" not in metric:
+                        values = metric["values"]
+                        if values:
+                            times.append(sum(values) / len(values))
+                    elif "avg" in metric:
+                        times.append(metric["avg"])
+                summary["overall_avg_compression_time_seconds"] = (
+                    sum(times) / len(times) if times else 0
                 )
 
             enhanced_report["summary"][report_type] = summary

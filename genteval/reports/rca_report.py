@@ -66,18 +66,25 @@ class RCAReport(BaseReport):
                     services.add(rank)
 
                 for k in range(1, 6):
-                    self.report[report_group][f"ac{k}"].append(
+                    self.report[report_group][f"ac{k}"]["values"].append(
                         self.ac_at_k(service, ranks, k)
                     )
 
-        # Calculate averages
-        for fault in self.report:
-            for k in range(1, 6):
-                self.report[fault][f"ac{k}"] = sum(self.report[fault][f"ac{k}"]) / len(
-                    self.report[fault][f"ac{k}"]
-                )
-            self.report[fault]["avg5"] = (
-                sum(self.report[fault][f"ac{k}"] for k in range(1, 6)) / 5
-            )
+        # Calculate averages and clean up
+        for group in self.report.values():
+            ac_avgs = []
+            for metric_group in group.values():
+                if isinstance(metric_group, dict) and "values" in metric_group:
+                    metric_group["avg"] = (
+                        sum(metric_group["values"]) / len(metric_group["values"])
+                        if metric_group["values"]
+                        else float("nan")
+                    )
+                    ac_avgs.append(metric_group["avg"])
+                    del metric_group["values"]
+
+            # Calculate avg5 from the individual ac averages
+            if ac_avgs:
+                group["avg5"] = {"avg": sum(ac_avgs) / len(ac_avgs)}
 
         return dict(self.report)

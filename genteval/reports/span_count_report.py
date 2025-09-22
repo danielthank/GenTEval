@@ -132,14 +132,19 @@ class SpanCountReport(BaseReport):
                     )
 
                     report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["span_count_wdist"].append(wdist)
+                    self.report[report_group]["span_count_wdist"]["values"].append(
+                        wdist
+                    )
 
         # Calculate averages and clean up
-        for group in self.report:
-            if "span_count_wdist" in self.report[group]:
-                self.report[group]["span_count_wdist_avg"] = sum(
-                    self.report[group]["span_count_wdist"]
-                ) / len(self.report[group]["span_count_wdist"])
-                del self.report[group]["span_count_wdist"]
+        for group in self.report.values():
+            for metric_group in group.values():
+                if isinstance(metric_group, dict) and "values" in metric_group:
+                    metric_group["avg"] = (
+                        sum(metric_group["values"]) / len(metric_group["values"])
+                        if metric_group["values"]
+                        else float("nan")
+                    )
+                    del metric_group["values"]
 
         return dict(self.report)

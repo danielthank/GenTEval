@@ -63,6 +63,7 @@ class DurationEvaluator(Evaluator):
 
                     duration[f"depth_{span_depth}"].append(span_duration)
 
+                    """
                     if (
                         span_start_time + span_duration < inject_time_us
                         or span_start_time >= inject_time_us
@@ -70,10 +71,13 @@ class DurationEvaluator(Evaluator):
                         duration[f"depth_{span_depth}_service_{service}"].append(
                             span_duration
                         )
+                    """
 
+                    """
                     duration_by_time[f"depth_{span_depth}_service_{service}"][
                         start_time
                     ].append(span_duration)
+                    """
                     duration_by_time[f"depth_{span_depth}"][start_time].append(
                         span_duration
                     )

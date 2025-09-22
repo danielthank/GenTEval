@@ -92,9 +92,13 @@ class OperationReport(BaseReport):
                         set(results["operation"][group]),
                     )
                     report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["operation_precision"].append(precision)
-                    self.report[report_group]["operation_recall"].append(recall)
-                    self.report[report_group]["operation_f1"].append(f1)
+                    self.report[report_group]["operation_precision"]["values"].append(
+                        precision
+                    )
+                    self.report[report_group]["operation_recall"]["values"].append(
+                        recall
+                    )
+                    self.report[report_group]["operation_f1"]["values"].append(f1)
 
                 # Process operation_pair data
                 for group in original["operation_pair"]:
@@ -106,48 +110,23 @@ class OperationReport(BaseReport):
                         set(results["operation_pair"][group]),
                     )
                     report_group = f"{app_name}_{compressor}"
-                    self.report[report_group]["operation_pair_precision"].append(
-                        precision
+                    self.report[report_group]["operation_pair_precision"][
+                        "values"
+                    ].append(precision)
+                    self.report[report_group]["operation_pair_recall"]["values"].append(
+                        recall
                     )
-                    self.report[report_group]["operation_pair_recall"].append(recall)
-                    self.report[report_group]["operation_pair_f1"].append(f1)
+                    self.report[report_group]["operation_pair_f1"]["values"].append(f1)
 
         # Calculate averages and clean up
-        for group in self.report:
-            if "operation_precision" in self.report[group]:
-                self.report[group]["operation_precision_avg"] = sum(
-                    self.report[group]["operation_precision"]
-                ) / len(self.report[group]["operation_precision"])
-                del self.report[group]["operation_precision"]
-
-            if "operation_recall" in self.report[group]:
-                self.report[group]["operation_recall_avg"] = sum(
-                    self.report[group]["operation_recall"]
-                ) / len(self.report[group]["operation_recall"])
-                del self.report[group]["operation_recall"]
-
-            if "operation_f1" in self.report[group]:
-                self.report[group]["operation_f1_avg"] = sum(
-                    self.report[group]["operation_f1"]
-                ) / len(self.report[group]["operation_f1"])
-                del self.report[group]["operation_f1"]
-
-            if "operation_pair_precision" in self.report[group]:
-                self.report[group]["operation_pair_precision_avg"] = sum(
-                    self.report[group]["operation_pair_precision"]
-                ) / len(self.report[group]["operation_pair_precision"])
-                del self.report[group]["operation_pair_precision"]
-
-            if "operation_pair_recall" in self.report[group]:
-                self.report[group]["operation_pair_recall_avg"] = sum(
-                    self.report[group]["operation_pair_recall"]
-                ) / len(self.report[group]["operation_pair_recall"])
-                del self.report[group]["operation_pair_recall"]
-
-            if "operation_pair_f1" in self.report[group]:
-                self.report[group]["operation_pair_f1_avg"] = sum(
-                    self.report[group]["operation_pair_f1"]
-                ) / len(self.report[group]["operation_pair_f1"])
-                del self.report[group]["operation_pair_f1"]
+        for group in self.report.values():
+            for metric_group in group.values():
+                if isinstance(metric_group, dict) and "values" in metric_group:
+                    metric_group["avg"] = (
+                        sum(metric_group["values"]) / len(metric_group["values"])
+                        if metric_group["values"]
+                        else float("nan")
+                    )
+                    del metric_group["values"]
 
         return dict(self.report)

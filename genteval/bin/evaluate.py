@@ -9,6 +9,7 @@ from genteval.evaluators import (
     MicroRankEvaluator,
     OperationEvaluator,
     SpanCountEvaluator,
+    TimeEvaluator,
     TraceRCAEvaluator,
 )
 
@@ -82,6 +83,12 @@ def main():
         json.dump(
             results,
             open(evaluated_dir / "span_count_results.json", "w"),
+        )
+    elif args.evaluator == "time":
+        results = TimeEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "time_results.json", "w"),
         )
     elif args.evaluator == "size":
         # Size does not require a specific evaluator. It just needs reporting.

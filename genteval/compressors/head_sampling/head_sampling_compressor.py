@@ -11,7 +11,7 @@ class HeadSamplingCompressor(Compressor):
         super().__init__()
         self.sampling_rate = sampling_rate
 
-    def compress(self, dataset: Dataset) -> CompressedDataset:
+    def _compress_impl(self, dataset: Dataset) -> CompressedDataset:
         trace_len = len(dataset.traces)
         if trace_len < self.sampling_rate:
             raise ValueError(
@@ -34,7 +34,7 @@ class HeadSamplingCompressor(Compressor):
 
         return compressed_dataset
 
-    def decompress(self, compressed_dataset: CompressedDataset) -> Dataset:
+    def _decompress_impl(self, compressed_dataset: CompressedDataset) -> Dataset:
         dataset = Dataset()
         # Extract traces from OpenTelemetry format
         traces_data = compressed_dataset["sampled_traces"]

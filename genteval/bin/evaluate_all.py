@@ -110,6 +110,7 @@ async def evaluate_all():
             "micro_rank",
             "size",
             "span_count",
+            "time",
         ],
         help="Evaluators to run (default: all evaluators)",
     )

@@ -89,15 +89,50 @@ class DurationReport(BaseReport):
                         results["duration"][group_key],
                         group_key,
                         compressor,
-                        app_name=app_name,
-                        service=service,
-                        fault=fault,
-                        run=run,
-                        plot=self.plot,
+                        app_name,
+                        service,
+                        fault,
+                        run,
+                        self.plot,
                     )
 
-                    report_group_key = f"{app_name}_{compressor}_{group_key}_wdist"
-                    self.report[report_group_key][group_key]["values"].append(wdist)
+                    report_group = f"{app_name}_{compressor}"
+                    self.report[report_group][f"{group_key}_wdist"]["values"].append(
+                        wdist
+                    )
+
+                for group_key in original["duration_by_time_percentiles"]:
+                    if group_key not in results["duration_by_time_percentiles"]:
+                        continue
+
+                    mape_count_results = self.percentile_comparison_metric.process_duration_by_time_percentile(
+                        original["duration_by_time_percentiles"][group_key],
+                        results["duration_by_time_percentiles"][group_key],
+                        group_key,
+                        compressor,
+                        app_name,
+                        service,
+                        fault,
+                        run,
+                        self.plot,
+                    )
+
+                    # Store MAPE and cosine sim results in report
+                    report_group = f"{app_name}_{compressor}"
+
+                    # Store results for each percentile (structure is now {percentile: {mape, cosine_sim}})
+                    for percentile in mape_count_results:
+                        key_prefix = f"{group_key}_{percentile}"
+                        self.report[report_group][f"{key_prefix}_mape"][
+                            "values"
+                        ].append(
+                            mape_count_results[percentile]["mape"]
+                        )
+                        self.report[report_group][f"{key_prefix}_cosine_sim"][
+                            "values"
+                        ].append(
+                            mape_count_results[percentile]["cosine_sim"]
+                        )
 
                 # Process duration before/after incident data for depths 0 and 1
                 """
@@ -144,185 +179,17 @@ class DurationReport(BaseReport):
                                 f"duration_depth_{depth}_after_wdist"
                             ].append(wdist_after)
 
-                # Process duration_by_depth_by_service data for all percentiles
-                if (
-                    "duration_by_depth_by_service" in original
-                    and "duration_by_depth_by_service" in results
-                ):
-                    mape_count_results = self.percentile_comparison_metric.process_duration_by_depth_by_service(
-                        original["duration_by_depth_by_service"],
-                        results["duration_by_depth_by_service"],
-                        compressor,
-                        app_name,
-                        service,
-                        fault,
-                        run,
-                        plot=self.plot,
-                    )
-
-                    # Store MAPE and count results in report
-                    report_group = f"{app_name}_{compressor}"
-                    for depth in mape_count_results:
-                        for percentile in mape_count_results[depth]:
-                            key_prefix = f"duration_depth_{depth}_{percentile}"
-                            self.report[report_group][f"{key_prefix}_mape_runs"].append(
-                                mape_count_results[depth][percentile]["mape"]
-                            )
-                            self.report[report_group][
-                                f"{key_prefix}_count_runs"
-                            ].append(mape_count_results[depth][percentile]["counts"])
-                            self.report[report_group][
-                                f"{key_prefix}_cosine_sim"
-                            ].append(
-                                mape_count_results[depth][percentile]["cosine_sim"]
-                            )
                 """
 
         # Calculate averages and clean up
-        for report_group_key, report_group in self.report.items():
-            if report_group_key.endswith("_wdist"):
-                # Calculate average Wasserstein distance for each report group
-                for group in report_group.values():
-                    group["avg"] = (
-                        sum(group["values"]) / len(group["values"])
-                        if group["values"]
+        for report_group in self.report.values():
+            for metric_group in report_group.values():
+                if isinstance(metric_group, dict) and "values" in metric_group:
+                    metric_group["avg"] = (
+                        sum(metric_group["values"]) / len(metric_group["values"])
+                        if metric_group["values"]
                         else float("nan")
                     )
-                    del group["values"]
-
-            # Calculate averages for depth 0 before/after incident Wasserstein distances
-            """
-            if "duration_depth_0_before_wdist" in self.report[report_group]:
-                if self.report[report_group]["duration_depth_0_before_wdist"]:
-                    self.report[report_group]["duration_depth_0_before_wdist_avg"] = sum(
-                        self.report[report_group]["duration_depth_0_before_wdist"]
-                    ) / len(self.report[report_group]["duration_depth_0_before_wdist"])
-                else:
-                    self.report[report_group]["duration_depth_0_before_wdist_avg"] = float(
-                        "inf"
-                    )
-                del self.report[report_group]["duration_depth_0_before_wdist"]
-
-            if "duration_depth_0_after_wdist" in self.report[report_group]:
-                if self.report[report_group]["duration_depth_0_after_wdist"]:
-                    self.report[report_group]["duration_depth_0_after_wdist_avg"] = sum(
-                        self.report[report_group]["duration_depth_0_after_wdist"]
-                    ) / len(self.report[report_group]["duration_depth_0_after_wdist"])
-                else:
-                    self.report[report_group]["duration_depth_0_after_wdist_avg"] = float(
-                        "inf"
-                    )
-                del self.report[report_group]["duration_depth_0_after_wdist"]
-
-            # Calculate averages for depth 1 before/after incident Wasserstein distances
-            if "duration_depth_1_before_wdist" in self.report[report_group]:
-                if self.report[report_group]["duration_depth_1_before_wdist"]:
-                    self.report[report_group]["duration_depth_1_before_wdist_avg"] = sum(
-                        self.report[report_group]["duration_depth_1_before_wdist"]
-                    ) / len(self.report[report_group]["duration_depth_1_before_wdist"])
-                else:
-                    self.report[report_group]["duration_depth_1_before_wdist_avg"] = float(
-                        "inf"
-                    )
-                del self.report[report_group]["duration_depth_1_before_wdist"]
-
-            if "duration_depth_1_after_wdist" in self.report[report_group]:
-                if self.report[report_group]["duration_depth_1_after_wdist"]:
-                    self.report[report_group]["duration_depth_1_after_wdist_avg"] = sum(
-                        self.report[report_group]["duration_depth_1_after_wdist"]
-                    ) / len(self.report[report_group]["duration_depth_1_after_wdist"])
-                else:
-                    self.report[report_group]["duration_depth_1_after_wdist_avg"] = float(
-                        "inf"
-                    )
-                del self.report[report_group]["duration_depth_1_after_wdist"]
-
-            # Calculate averages for all percentile metrics (depth 0-4, p0-p100)
-            percentiles = [
-                "p0",
-                "p10",
-                "p20",
-                "p30",
-                "p40",
-                "p50",
-                "p60",
-                "p70",
-                "p80",
-                "p90",
-                "p100",
-            ]
-            for depth in range(5):  # 0, 1, 2, 3, 4
-                for percentile in percentiles:
-                    key_prefix = f"duration_depth_{depth}_{percentile}"
-
-                    # Calculate MAPE averages
-                    mape_key = f"{key_prefix}_mape_runs"
-                    if mape_key in self.report[report_group]:
-                        all_run_mapes = []
-                        all_run_counts = []
-
-                        for i, run_mape in enumerate(self.report[report_group][mape_key]):
-                            run_counts = self.report[report_group][f"{key_prefix}_count_runs"][
-                                i
-                            ]
-                            for service in run_mape:
-                                if service in run_counts:
-                                    all_run_mapes.append(run_mape[service])
-                                    all_run_counts.append(run_counts[service])
-
-                        if all_run_mapes and sum(all_run_counts) > 0:
-                            # Calculate weighted average
-                            total_weighted_mape = sum(
-                                mape * count
-                                for mape, count in zip(
-                                    all_run_mapes, all_run_counts, strict=False
-                                )
-                            )
-                            total_count = sum(all_run_counts)
-                            self.report[report_group][f"{key_prefix}_mape_avg"] = (
-                                total_weighted_mape / total_count
-                            )
-
-                    # Calculate cosine similarity averages
-                    cosine_key = f"{key_prefix}_cosine_sim"
-                    if cosine_key in self.report[report_group]:
-                        if self.report[report_group][cosine_key]:
-                            # Calculate weighted average cosine similarity across all runs and all services
-                            all_cosine_sims = []
-                            all_cosine_counts = []
-
-                            for i, run_cosine_sim in enumerate(
-                                self.report[report_group][cosine_key]
-                            ):
-                                run_counts = self.report[report_group][
-                                    f"{key_prefix}_count_runs"
-                                ][i]
-                                for service in run_cosine_sim:
-                                    if service in run_counts:
-                                        all_cosine_sims.append(run_cosine_sim[service])
-                                        all_cosine_counts.append(run_counts[service])
-
-                            if all_cosine_sims and sum(all_cosine_counts) > 0:
-                                # Calculate weighted average
-                                total_weighted_cosine_sim = sum(
-                                    cosine_sim * count
-                                    for cosine_sim, count in zip(
-                                        all_cosine_sims, all_cosine_counts, strict=False
-                                    )
-                                )
-                                total_count = sum(all_cosine_counts)
-                                self.report[report_group][f"{key_prefix}_cosine_sim_avg"] = (
-                                    total_weighted_cosine_sim / total_count
-                                )
-                            else:
-                                self.report[report_group][f"{key_prefix}_cosine_sim_avg"] = (
-                                    float("nan")
-                                )
-                        else:
-                            self.report[report_group][f"{key_prefix}_cosine_sim_avg"] = float(
-                                "nan"
-                            )
-                        del self.report[report_group][cosine_key]
-            """
+                    del metric_group["values"]
 
         return dict(self.report)

@@ -38,6 +38,7 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
         ),
         "the-agent-company-transformed": (
             [
+                "all",
                 "20241217_OpenHands-0.14.2-gemini-1.5-pro",
                 "20241217_OpenHands-0.14.2-gemini-2.0-flash",
                 "20241217_OpenHands-0.14.2-gpt-4o-2024-08-06",
@@ -56,6 +57,12 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
             [None],
             [1],
         ),
+        "request-tree": (
+            ["20250728_100"],
+            [None],
+            [2],
+        ),
+        "uber-trace1-transformed": (["202502"], [None], [1]),
     }
 
     # Convert single values to lists

@@ -8,6 +8,7 @@ from genteval.reports import (
     RCAReport,
     SizeReport,
     SpanCountReport,
+    TimeReport,
 )
 
 from .utils import run_dirs
@@ -64,6 +65,7 @@ def main():
             "micro_rank",
             "size",
             "span_count",
+            "time",
         ],
         help="Evaluators to run (default: all evaluators)",
     )
@@ -132,6 +134,11 @@ def main():
         report_generator = SpanCountReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["span_count"] = report
+
+    if "time" in args.evaluators:
+        report_generator = TimeReport(args.compressors, root_dir)
+        report = report_generator.generate(run_dirs_func)
+        all_reports["time"] = report
 
     # Always use enhanced formatting
     if all_reports:
