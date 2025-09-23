@@ -18,6 +18,14 @@ class ExperimentData:
     duration: str
     mape_fidelity: float
     cos_fidelity: float
+    operation_f1_fidelity: float
+    operation_pair_f1_fidelity: float
+    child_parent_ratio_fidelity: float
+    child_parent_overall_fidelity: float
+    child_parent_depth1_fidelity: float
+    child_parent_depth2_fidelity: float
+    child_parent_depth3_fidelity: float
+    child_parent_depth4_fidelity: float
     size_kb: float
     cpu_time_seconds: float
     gpu_time_seconds: float
@@ -90,10 +98,29 @@ class ReportParser:
         size_data = self._extract_size_data(report_data, compressor_name)
         time_data = self._extract_time_data(report_data, compressor_name)
         fidelity_data = self._extract_fidelity_data(report_data, compressor_name)
+        operation_data = self._extract_operation_data(report_data, compressor_name)
+        child_parent_ratio_data = self._extract_child_parent_ratio_data(
+            report_data, compressor_name
+        )
 
         if not all([size_data, time_data, fidelity_data]):
             print(f"Warning: Missing data for {compressor_name}")
             return None
+
+        # Operation data is optional for backward compatibility
+        if not operation_data:
+            operation_data = {"operation_f1": 0.0, "operation_pair_f1": 0.0}
+
+        # Child/parent ratio data is optional for backward compatibility
+        if not child_parent_ratio_data:
+            child_parent_ratio_data = {
+                "child_parent_ratio_wdist": 0.0,
+                "child_parent_overall_wdist": 0.0,
+                "child_parent_depth1_wdist": 0.0,
+                "child_parent_depth2_wdist": 0.0,
+                "child_parent_depth3_wdist": 0.0,
+                "child_parent_depth4_wdist": 0.0,
+            }
 
         # Calculate costs
         cost_data = self._calculate_costs(
@@ -106,6 +133,26 @@ class ReportParser:
             duration=name_parts["duration"],
             mape_fidelity=fidelity_data["mape"],
             cos_fidelity=fidelity_data["cosine"],
+            operation_f1_fidelity=operation_data["operation_f1"] * 100,
+            operation_pair_f1_fidelity=operation_data["operation_pair_f1"] * 100,
+            child_parent_ratio_fidelity=max(
+                0, 100 - child_parent_ratio_data["child_parent_ratio_wdist"] * 1000
+            ),
+            child_parent_overall_fidelity=max(
+                0, 100 - child_parent_ratio_data["child_parent_overall_wdist"] * 1000
+            ),
+            child_parent_depth1_fidelity=max(
+                0, 100 - child_parent_ratio_data["child_parent_depth1_wdist"] * 1000
+            ),
+            child_parent_depth2_fidelity=max(
+                0, 100 - child_parent_ratio_data["child_parent_depth2_wdist"] * 1000
+            ),
+            child_parent_depth3_fidelity=max(
+                0, 100 - child_parent_ratio_data["child_parent_depth3_wdist"] * 1000
+            ),
+            child_parent_depth4_fidelity=max(
+                0, 100 - child_parent_ratio_data["child_parent_depth4_wdist"] * 1000
+            ),
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
             gpu_time_seconds=time_data["gpu_seconds"],
@@ -236,6 +283,89 @@ class ReportParser:
 
         except KeyError:
             return None
+
+    def _extract_operation_data(
+        self, report_data: dict, compressor_name: str
+    ) -> dict | None:
+        try:
+            operation_report = report_data["reports"]["operation"]
+            if compressor_name in operation_report:
+                operation_f1 = (
+                    operation_report[compressor_name]
+                    .get("operation_f1", {})
+                    .get("avg", 0.0)
+                )
+                operation_pair_f1 = (
+                    operation_report[compressor_name]
+                    .get("operation_pair_f1", {})
+                    .get("avg", 0.0)
+                )
+                return {
+                    "operation_f1": operation_f1,
+                    "operation_pair_f1": operation_pair_f1,
+                }
+        except KeyError:
+            pass
+
+        return None
+
+    def _extract_child_parent_ratio_data(
+        self, report_data: dict, compressor_name: str
+    ) -> dict | None:
+        try:
+            duration_report = report_data["reports"]["duration"]
+            if compressor_name in duration_report:
+                result = {}
+
+                # Calculate average child/parent ratio W-dist across all depths
+                wdist_values = []
+                for depth in range(5):  # depths 0-4
+                    key = f"pair_depth_{depth}_wdist"
+                    if key in duration_report[compressor_name]:
+                        wdist_values.append(
+                            duration_report[compressor_name][key]["avg"]
+                        )
+
+                if wdist_values:
+                    avg_wdist = sum(wdist_values) / len(wdist_values)
+                    result["child_parent_ratio_wdist"] = avg_wdist
+
+                # Get individual depth W-dist values
+                for depth in range(1, 5):  # depths 1-4
+                    key = f"pair_depth_{depth}_wdist"
+                    if key in duration_report[compressor_name]:
+                        result[f"child_parent_depth{depth}_wdist"] = duration_report[
+                            compressor_name
+                        ][key]["avg"]
+
+                # Get overall child/parent ratio W-dist from pair_all_wdist
+                if "pair_all_wdist" in duration_report[compressor_name]:
+                    result["child_parent_overall_wdist"] = duration_report[
+                        compressor_name
+                    ]["pair_all_wdist"]["avg"]
+
+                # Return result if we have either averaged or overall data
+                if result:
+                    return result
+
+                # Fallback: use pair_all_wdist for all if depth-specific data not available
+                if "pair_all_wdist" in duration_report[compressor_name]:
+                    pair_all_wdist = duration_report[compressor_name]["pair_all_wdist"][
+                        "avg"
+                    ]
+                    return {
+                        "child_parent_ratio_wdist": pair_all_wdist,
+                        "child_parent_overall_wdist": pair_all_wdist,
+                        "child_parent_depth1_wdist": pair_all_wdist,
+                        "child_parent_depth2_wdist": pair_all_wdist,
+                        "child_parent_depth3_wdist": pair_all_wdist,
+                        "child_parent_depth4_wdist": pair_all_wdist,
+                    }
+
+        except KeyError:
+            pass
+
+        return None
 
     def _calculate_costs(
         self, size_bytes: float, cpu_seconds: float, gpu_seconds: float

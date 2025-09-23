@@ -55,6 +55,10 @@ class SimpleGenTConfig:
     early_stopping_patience: int = 10
     sequential_training_lr_factor: float = 0.5  # LR reduction for sequential training
 
+    # Reject sampling parameters
+    reject_sampling_max_attempts: int = 10
+    reject_sampling_enabled: bool = True
+
     # General parameters
     random_seed: int = 42
 

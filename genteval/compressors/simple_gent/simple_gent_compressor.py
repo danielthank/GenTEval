@@ -16,6 +16,7 @@ from .models import (
     NodeEncoder,
     RootDurationModel,
     RootModel,
+    SpanDurationBoundsModel,
     TopologyModel,
 )
 from .timing_utils import SplitTimer
@@ -48,6 +49,7 @@ class SimpleGenTCompressor(Compressor):
         self.root_model = RootModel(self.config)
         self.topology_model = TopologyModel(self.config)
         self.root_duration_model = RootDurationModel(self.config)
+        self.span_duration_bounds_model = SpanDurationBoundsModel(self.config)
         self.metadata_vae_model = None  # Will be created with vocab_size during fitting
 
         # Set random seed for reproducibility
@@ -171,6 +173,7 @@ class SimpleGenTCompressor(Compressor):
             self.root_model.fit(preprocessed_traces)
             self.topology_model.fit(preprocessed_traces)
             self.root_duration_model.fit(preprocessed_traces)
+            self.span_duration_bounds_model.fit(preprocessed_traces)
 
         # Train GPU-based model (MetadataVAE)
         self.metadata_vae_model = MetadataVAEModel(self.config, vocab_size)
@@ -196,6 +199,7 @@ class SimpleGenTCompressor(Compressor):
             self.root_model.save_state_dict(proto_models)
             self.topology_model.save_state_dict(proto_models)
             self.root_duration_model.save_state_dict(proto_models)
+            self.span_duration_bounds_model.save_state_dict(proto_models)
             self.metadata_vae_model.save_state_dict(proto_models)
 
             # Serialize protobuf message
@@ -265,6 +269,9 @@ class SimpleGenTCompressor(Compressor):
 
         self.root_duration_model = RootDurationModel(self.config)
         self.root_duration_model.load_state_dict(proto_models)
+
+        self.span_duration_bounds_model = SpanDurationBoundsModel(self.config)
+        self.span_duration_bounds_model.load_state_dict(proto_models)
 
         self.metadata_vae_model = MetadataVAEModel(self.config, vocab_size)
         self.metadata_vae_model.load_state_dict(proto_models)
@@ -386,8 +393,16 @@ class SimpleGenTCompressor(Compressor):
 
             # Phase 2: Batch sample all children at this depth level
             if batch_requests:
+                # Get duration bounds for each child request
+                duration_bounds = []
+                for time_bucket, _, child_feature, _, _ in batch_requests:
+                    bounds = self.span_duration_bounds_model.get_duration_bounds(
+                        time_bucket, child_feature
+                    )
+                    duration_bounds.append(bounds)
+
                 batch_results = self.metadata_vae_model.sample_ratios_batch(
-                    batch_requests
+                    batch_requests, duration_bounds
                 )
 
                 # Phase 3: Create child spans and prepare next level
@@ -537,13 +552,21 @@ class SimpleGenTCompressor(Compressor):
 
             # Phase 2: Single massive batch call across ALL traces at this depth!
             if mega_batch_requests:
+                # Get duration bounds for each child request
+                mega_duration_bounds = []
+                for time_bucket, _, child_feature, _, _ in mega_batch_requests:
+                    bounds = self.span_duration_bounds_model.get_duration_bounds(
+                        time_bucket, child_feature
+                    )
+                    mega_duration_bounds.append(bounds)
+
                 mega_batch_results = self.metadata_vae_model.sample_ratios_batch(
-                    mega_batch_requests
+                    mega_batch_requests, mega_duration_bounds
                 )
 
                 # Phase 3: Apply batch results back to respective traces
-                for i, ((gap_ratio, duration_ratio), trace_info) in enumerate(
-                    zip(mega_batch_results, request_to_trace_info, strict=False)
+                for (gap_ratio, duration_ratio), trace_info in zip(
+                    mega_batch_results, request_to_trace_info, strict=False
                 ):
                     (
                         trace_id,

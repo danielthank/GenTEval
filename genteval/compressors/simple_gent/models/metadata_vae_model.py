@@ -418,7 +418,9 @@ class MetadataVAEModel:
         raise ValueError("No models available for inference")
 
     def sample_ratios_batch(
-        self, requests: list[tuple[int, NodeFeature, NodeFeature, float, float]]
+        self,
+        requests: list[tuple[int, NodeFeature, NodeFeature, float, float]],
+        duration_bounds: list[tuple[float, float]] = None,
     ) -> list[tuple[float, float]]:
         """
         Batch sample gap and duration ratios for multiple requests.
@@ -428,6 +430,8 @@ class MetadataVAEModel:
             requests: List of (time_bucket, parent_feature, child_feature,
                              parent_duration, normalized_child_idx) tuples
                      where normalized_child_idx = child_idx / child_count
+            duration_bounds: Optional list of (min_duration, max_duration) tuples
+                           for reject sampling. If provided, must match requests length.
 
         Returns:
             List of (gap_ratio, duration_ratio) tuples in same order as requests
@@ -437,6 +441,10 @@ class MetadataVAEModel:
 
         if not requests:
             return []
+
+        # Validate duration_bounds if provided
+        if duration_bounds is not None and len(duration_bounds) != len(requests):
+            raise ValueError("duration_bounds must have same length as requests")
 
         # Group requests by time bucket
         requests_by_bucket = {}
@@ -508,6 +516,146 @@ class MetadataVAEModel:
                     )
 
                     results[original_idx] = (gap_ratio, duration_ratio)
+
+        # Apply reject sampling if duration bounds are provided
+        if duration_bounds is not None:
+            results = self._apply_reject_sampling(requests, results, duration_bounds)
+
+        return results
+
+    def _apply_reject_sampling(
+        self,
+        requests: list[tuple[int, NodeFeature, NodeFeature, float, float]],
+        initial_results: list[tuple[float, float]],
+        duration_bounds: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Apply reject sampling to ensure generated durations fall within bounds."""
+
+        # Import config parameters for reject sampling
+        max_attempts = getattr(self.config, "reject_sampling_max_attempts", 10)
+        reject_sampling_enabled = getattr(self.config, "reject_sampling_enabled", True)
+
+        if not reject_sampling_enabled:
+            return initial_results
+
+        results = list(initial_results)
+
+        # Find indices that need resampling
+        indices_to_resample = []
+        for i, ((_, duration_ratio), (min_dur, max_dur)) in enumerate(
+            zip(results, duration_bounds, strict=False)
+        ):
+            if duration_bounds[i] is None:
+                continue
+
+            # Calculate actual child duration
+            parent_duration = requests[i][3]  # parent_duration is 4th element
+            child_duration = duration_ratio * parent_duration
+
+            # Check if within bounds
+            if not (min_dur <= child_duration <= max_dur):
+                indices_to_resample.append(i)
+
+        # Perform reject sampling for out-of-bounds samples
+        for _ in range(max_attempts):
+            if not indices_to_resample:
+                break
+
+            # Create requests for resampling
+            resample_requests = [requests[i] for i in indices_to_resample]
+
+            # Group by time bucket for efficient batch processing
+            resample_by_bucket = {}
+            index_mapping = {}  # maps bucket position to original index
+
+            for pos, orig_idx in enumerate(indices_to_resample):
+                time_bucket = resample_requests[pos][0]
+                if time_bucket not in resample_by_bucket:
+                    resample_by_bucket[time_bucket] = []
+                    index_mapping[time_bucket] = []
+
+                resample_by_bucket[time_bucket].append(resample_requests[pos])
+                index_mapping[time_bucket].append(orig_idx)
+
+            # Resample each bucket
+            for time_bucket, bucket_requests in resample_by_bucket.items():
+                model = self._get_model_for_time_bucket(time_bucket)
+                model.eval()
+
+                with torch.no_grad():
+                    # Extract features for resampling
+                    parent_features = [req[1] for req in bucket_requests]
+                    child_features = [req[2] for req in bucket_requests]
+                    parent_durations = [req[3] for req in bucket_requests]
+                    normalized_child_indices = [req[4] for req in bucket_requests]
+
+                    # Extract node indices
+                    parent_node_indices = np.array(
+                        [pf.node_idx for pf in parent_features]
+                    )
+                    child_node_indices = np.array(
+                        [cf.node_idx for cf in child_features]
+                    )
+
+                    # Create tensors
+                    parent_duration_tensor = torch.FloatTensor(parent_durations).to(
+                        self.device
+                    )
+                    child_idx_tensor = torch.FloatTensor(normalized_child_indices).to(
+                        self.device
+                    )
+                    parent_node_tensor = torch.LongTensor(parent_node_indices).to(
+                        self.device
+                    )
+                    child_node_tensor = torch.LongTensor(child_node_indices).to(
+                        self.device
+                    )
+
+                    # Batch resample
+                    batch_samples = model.sample(
+                        parent_duration_tensor,
+                        child_idx_tensor,
+                        parent_node_tensor,
+                        child_node_tensor,
+                    )
+
+                    # Update results for this bucket
+                    for j, orig_idx in enumerate(index_mapping[time_bucket]):
+                        gap_ratio = float(np.clip(batch_samples[j, 0].item(), 0.0, 1.0))
+                        duration_ratio = float(
+                            np.clip(batch_samples[j, 1].item(), 0.0, 1.0)
+                        )
+                        results[orig_idx] = (gap_ratio, duration_ratio)
+
+            # Check which indices still need resampling
+            new_indices_to_resample = []
+            for i in indices_to_resample:
+                gap_ratio, duration_ratio = results[i]
+                min_dur, max_dur = duration_bounds[i]
+                parent_duration = requests[i][3]
+                child_duration = duration_ratio * parent_duration
+
+                if not (min_dur <= child_duration <= max_dur):
+                    new_indices_to_resample.append(i)
+
+            indices_to_resample = new_indices_to_resample
+
+        # Apply fallback clamping for any remaining out-of-bounds samples
+        for i in indices_to_resample:
+            gap_ratio, duration_ratio = results[i]
+            min_dur, max_dur = duration_bounds[i]
+            parent_duration = requests[i][3]
+
+            # Clamp duration ratio to respect bounds
+            min_ratio = min_dur / parent_duration if parent_duration > 0 else 0.0
+            max_ratio = max_dur / parent_duration if parent_duration > 0 else 1.0
+
+            # Ensure ratios are within [0, 1] and respect bounds
+            clamped_duration_ratio = np.clip(
+                duration_ratio, max(0.0, min_ratio), min(1.0, max_ratio)
+            )
+
+            results[i] = (gap_ratio, float(clamped_duration_ratio))
 
         return results
 

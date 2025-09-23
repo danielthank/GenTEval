@@ -75,7 +75,9 @@ def create_mape_heatmap(mape_data, compressor_name, output_dir):
         if depth in mape_data:
             for perc_idx, percentile in enumerate(percentiles):
                 if percentile in mape_data[depth]:
-                    heatmap_data[depth_idx, perc_idx] = mape_data[depth][percentile]
+                    heatmap_data[depth_idx, perc_idx] = (
+                        100 - mape_data[depth][percentile]
+                    )
 
     # Create the heatmap
     plt.figure(figsize=(12, 8))
@@ -87,16 +89,18 @@ def create_mape_heatmap(mape_data, compressor_name, output_dir):
         heatmap_data,
         annot=True,
         fmt=".1f",
-        cmap="RdYlGn_r",  # Red-Yellow-Green reversed (lower is better)
+        cmap="RdYlGn",  # Red-Yellow-Green reversed (lower is better)
         mask=mask,
         xticklabels=[f"p{p}" for p in percentiles],
         yticklabels=[f"Depth {d}" for d in depths],
         square=True,
         cbar=False,
+        vmin=0,
+        vmax=100,
     )
 
     plt.title(
-        f"MAPE Heatmap: {compressor_name}\n(Lower values = Better fidelity)",
+        f"MAPE Heatmap: {compressor_name}\n(Higher values = Better fidelity)",
         fontsize=16,
         fontweight="bold",
         pad=20,
@@ -219,6 +223,28 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
         names = [exp.name for exp in all_experiments]
         mape_fidelity = [exp.mape_fidelity for exp in all_experiments]
         cos_fidelity = [exp.cos_fidelity for exp in all_experiments]
+        operation_f1_fidelity = [exp.operation_f1_fidelity for exp in all_experiments]
+        operation_pair_f1_fidelity = [
+            exp.operation_pair_f1_fidelity for exp in all_experiments
+        ]
+        child_parent_ratio_fidelity = [
+            exp.child_parent_ratio_fidelity for exp in all_experiments
+        ]
+        child_parent_overall_fidelity = [
+            exp.child_parent_overall_fidelity for exp in all_experiments
+        ]
+        child_parent_depth1_fidelity = [
+            exp.child_parent_depth1_fidelity for exp in all_experiments
+        ]
+        child_parent_depth2_fidelity = [
+            exp.child_parent_depth2_fidelity for exp in all_experiments
+        ]
+        child_parent_depth3_fidelity = [
+            exp.child_parent_depth3_fidelity for exp in all_experiments
+        ]
+        child_parent_depth4_fidelity = [
+            exp.child_parent_depth4_fidelity for exp in all_experiments
+        ]
         cost_per_million_spans = [
             exp.total_cost_per_million_spans for exp in all_experiments
         ]
@@ -401,6 +427,78 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             y_title="Cosine Similarity Fidelity (%)",
             plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Cosine Similarity",
             out_fname="gent_vs_head_sampling_cosine.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=operation_f1_fidelity,
+            y_title="Operation F1 Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Operation F1 Fidelity",
+            out_fname="gent_vs_head_sampling_operation_f1.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=operation_pair_f1_fidelity,
+            y_title="Operation Pair F1 Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Operation Pair F1 Fidelity",
+            out_fname="gent_vs_head_sampling_operation_pair_f1.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=child_parent_ratio_fidelity,
+            y_title="Child/Parent Duration Ratio Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Child/Parent Duration Ratio Fidelity",
+            out_fname="gent_vs_head_sampling_child_parent_ratio.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=child_parent_overall_fidelity,
+            y_title="Overall Child/Parent Duration Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Overall Child/Parent Duration Fidelity",
+            out_fname="gent_vs_head_sampling_child_parent_overall.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=child_parent_depth1_fidelity,
+            y_title="Depth 1 Child/Parent Duration Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Depth 1 Child/Parent Duration Fidelity",
+            out_fname="gent_vs_head_sampling_child_parent_depth1.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=child_parent_depth2_fidelity,
+            y_title="Depth 2 Child/Parent Duration Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Depth 2 Child/Parent Duration Fidelity",
+            out_fname="gent_vs_head_sampling_child_parent_depth2.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=child_parent_depth3_fidelity,
+            y_title="Depth 3 Child/Parent Duration Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Depth 3 Child/Parent Duration Fidelity",
+            out_fname="gent_vs_head_sampling_child_parent_depth3.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=child_parent_depth4_fidelity,
+            y_title="Depth 4 Child/Parent Duration Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Depth 4 Child/Parent Duration Fidelity",
+            out_fname="gent_vs_head_sampling_child_parent_depth4.png",
         )
 
         return 0

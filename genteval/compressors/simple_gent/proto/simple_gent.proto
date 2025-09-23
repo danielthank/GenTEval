@@ -29,6 +29,9 @@ message TimeBucketModels {
   
   // MetadataVAE models: neural networks for joint gap and duration ratio modeling
   repeated MetadataVAEModel metadata_vae_models = 6;
+
+  // Span duration bounds: min/max duration bounds for all spans
+  repeated SpanDurationBounds span_duration_bounds = 7;
 }
 
 // Node feature representation
@@ -56,6 +59,13 @@ message RootDurationModel {
   GaussianMixtureParams distribution = 2;
   double min_duration = 3;  // Original minimum duration for bounds checking
   double max_duration = 4;  // Original maximum duration for bounds checking
+}
+
+// Span duration bounds: maps node feature to min/max duration bounds
+message SpanDurationBounds {
+  NodeFeature feature = 1;
+  double min_duration = 2;  // Minimum duration observed for this feature
+  double max_duration = 3;  // Maximum duration observed for this feature
 }
 
 // MetadataVAE model: neural network that jointly models gap and duration ratios

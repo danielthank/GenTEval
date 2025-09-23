@@ -46,12 +46,20 @@ class DurationEvaluator(Evaluator):
                     if parent_span:
                         parent_duration = parent_span["duration"]
                         if parent_duration > 0:
-                            # TODO: consider not cliping the duration
-                            duration["pair_all"].append(
+                            child_parent_ratio = (
                                 span_duration / parent_duration
                                 if span_duration <= parent_duration
                                 else 1
                             )
+                            # TODO: consider not cliping the duration
+                            duration["pair_all"].append(child_parent_ratio)
+
+                            # Add depth-based child/parent ratio collection
+                            child_depth = get_span_depth(span_id, trace)
+                            if 0 <= child_depth <= 4:
+                                duration[f"pair_depth_{child_depth}"].append(
+                                    child_parent_ratio
+                                )
 
                 span_depth = get_span_depth(span_id, trace)
 
