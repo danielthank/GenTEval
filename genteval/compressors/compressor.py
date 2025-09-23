@@ -1,9 +1,8 @@
-import time
 from abc import ABC, abstractmethod
 
 from genteval.dataset import Dataset
 
-from .compressed_dataset import CompressedDataset, SerializationFormat
+from .compressed_dataset import CompressedDataset
 
 
 class Compressor(ABC):
@@ -18,13 +17,7 @@ class Compressor(ABC):
         Returns:
             CompressedDataset containing compressed representation with timing info
         """
-        start_time = time.time()
         result = self._compress_impl(dataset)
-        compression_time = time.time() - start_time
-
-        result.add(
-            "compression_time_seconds", compression_time, SerializationFormat.MSGPACK
-        )
         return result
 
     @abstractmethod
@@ -50,13 +43,20 @@ class Compressor(ABC):
         """
         result = self._decompress_impl(compressed_dataset)
 
-        # Recover compression time if available
-        if "compression_time_seconds" in compressed_dataset:
-            result.compression_time_seconds = compressed_dataset[
-                "compression_time_seconds"
+        # Recover compression times if available
+        if "compression_time_cpu_seconds" in compressed_dataset:
+            result.compression_time_cpu_seconds = compressed_dataset[
+                "compression_time_cpu_seconds"
             ]
         else:
-            result.compression_time_seconds = None
+            result.compression_time_cpu_seconds = None
+
+        if "compression_time_gpu_seconds" in compressed_dataset:
+            result.compression_time_gpu_seconds = compressed_dataset[
+                "compression_time_gpu_seconds"
+            ]
+        else:
+            result.compression_time_gpu_seconds = None
 
         return result
 

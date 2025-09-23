@@ -1,7 +1,8 @@
 class Dataset:
     def __init__(self):
         self.traces = None
-        self.compression_time_seconds = None
+        self.compression_time_cpu_seconds = None
+        self.compression_time_gpu_seconds = None
 
     def extend(self, other) -> "Dataset":
         if not isinstance(other, Dataset):

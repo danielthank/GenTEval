@@ -18,6 +18,7 @@ from .models import (
     RootModel,
     TopologyModel,
 )
+from .timing_utils import SplitTimer
 
 
 def _get_random_trace_id():
@@ -128,76 +129,98 @@ class SimpleGenTCompressor(Compressor):
         """Learn models from the dataset (training phase)."""
         self.logger.info("Starting Simple GenT compression")
 
-        # Step 1: Fit shared node encoder first
-        self.logger.info("Fitting shared node encoder")
-        all_node_names = set()
-        for trace_data in dataset.traces.values():
-            for span_data in trace_data.values():
-                all_node_names.add(span_data["nodeName"])
+        # Initialize timing
+        timer = SplitTimer()
 
-        self.node_encoder.fit(list(all_node_names))
-        self.logger.info(
-            f"Node encoder fitted with {self.node_encoder.get_vocab_size()} unique node names"
-        )
+        # Step 1: Fit shared node encoder first (CPU operation)
+        with timer.cpu_context():
+            self.logger.info("Fitting shared node encoder")
+            all_node_names = set()
+            for trace_data in dataset.traces.values():
+                for span_data in trace_data.values():
+                    all_node_names.add(span_data["nodeName"])
 
-        # Step 2: Preprocess traces - replace nodeNames with indices
-        self._transform_dataset(dataset.traces)
-        preprocessed_traces = self._preprocess_traces_with_indices(dataset.traces)
-        self.logger.info("Preprocessed traces with node indices")
+            self.node_encoder.fit(list(all_node_names))
+            self.logger.info(
+                f"Node encoder fitted with {self.node_encoder.get_vocab_size()} unique node names"
+            )
 
-        # Calculate total number of trees (root nodes) and spans across all traces
-        total_trees = 0
-        total_spans = 0
-        for trace in preprocessed_traces:
-            tree_sizes = count_spans_per_tree(trace.spans)
-            total_trees += len(tree_sizes)
-            total_spans += len(trace.spans)
+        # Step 2: Preprocess traces - replace nodeNames with indices (CPU operation)
+        with timer.cpu_context():
+            self._transform_dataset(dataset.traces)
+            preprocessed_traces = self._preprocess_traces_with_indices(dataset.traces)
+            self.logger.info("Preprocessed traces with node indices")
 
-        # Output totals
-        self.logger.info(f"Total number of trees: {total_trees}")
-        self.logger.info(f"Total number of spans: {total_spans}")
+            # Calculate total number of trees (root nodes) and spans across all traces
+            total_trees = 0
+            total_spans = 0
+            for trace in preprocessed_traces:
+                tree_sizes = count_spans_per_tree(trace.spans)
+                total_trees += len(tree_sizes)
+                total_spans += len(trace.spans)
+
+            # Output totals
+            self.logger.info(f"Total number of trees: {total_trees}")
+            self.logger.info(f"Total number of spans: {total_spans}")
 
         # Step 3: Initialize models with vocab_size and train on preprocessed traces
         vocab_size = self.node_encoder.get_vocab_size()
+
+        # Train CPU-based models
+        with timer.cpu_context():
+            self.root_model.fit(preprocessed_traces)
+            self.topology_model.fit(preprocessed_traces)
+            self.root_duration_model.fit(preprocessed_traces)
+
+        # Train GPU-based model (MetadataVAE)
         self.metadata_vae_model = MetadataVAEModel(self.config, vocab_size)
+        with timer.gpu_context(device=str(self.metadata_vae_model.device)):
+            self.metadata_vae_model.fit(preprocessed_traces)
 
-        self.root_model.fit(preprocessed_traces)
-        self.topology_model.fit(preprocessed_traces)
-        self.root_duration_model.fit(preprocessed_traces)
-        self.metadata_vae_model.fit(preprocessed_traces)
+        # Create compressed dataset and save (CPU operation)
+        with timer.cpu_context():
+            compressed_data = CompressedDataset()
 
-        # Create compressed dataset
-        compressed_data = CompressedDataset()
+            # Save configuration
+            compressed_data.add(
+                "simple_gent_config", self.config.to_dict(), SerializationFormat.MSGPACK
+            )
 
-        # Save configuration
+            # Create protobuf message and save model states
+            proto_models = simple_gent_pb2.SimpleGenTModels()
+            proto_models.time_bucket_duration = self.config.time_bucket_duration_us
+
+            # Save all models using consistent interface
+            self.node_encoder.save_state_dict(proto_models)
+
+            self.root_model.save_state_dict(proto_models)
+            self.topology_model.save_state_dict(proto_models)
+            self.root_duration_model.save_state_dict(proto_models)
+            self.metadata_vae_model.save_state_dict(proto_models)
+
+            # Serialize protobuf message
+            compressed_data.add(
+                "simple_gent_models_proto",
+                proto_models,
+                SerializationFormat.GRPC,
+                simple_gent_pb2.SimpleGenTModels,
+            )
+
+            # Save number of trees (root nodes) for reconstruction
+            compressed_data.add("num_traces", total_trees, SerializationFormat.MSGPACK)
+
+        # Save timing information
+        cpu_time, gpu_time = timer.get_times()
         compressed_data.add(
-            "simple_gent_config", self.config.to_dict(), SerializationFormat.MSGPACK
+            "compression_time_cpu_seconds", cpu_time, SerializationFormat.MSGPACK
+        )
+        compressed_data.add(
+            "compression_time_gpu_seconds", gpu_time, SerializationFormat.MSGPACK
         )
 
-        # Create protobuf message and save model states
-        proto_models = simple_gent_pb2.SimpleGenTModels()
-        proto_models.time_bucket_duration = self.config.time_bucket_duration_us
-
-        # Save all models using consistent interface
-        self.node_encoder.save_state_dict(proto_models)
-
-        self.root_model.save_state_dict(proto_models)
-        self.topology_model.save_state_dict(proto_models)
-        self.root_duration_model.save_state_dict(proto_models)
-        self.metadata_vae_model.save_state_dict(proto_models)
-
-        # Serialize protobuf message
-        compressed_data.add(
-            "simple_gent_models_proto",
-            proto_models,
-            SerializationFormat.GRPC,
-            simple_gent_pb2.SimpleGenTModels,
+        self.logger.info(
+            f"Simple GenT compression completed - CPU: {cpu_time:.3f}s, GPU: {gpu_time:.3f}s"
         )
-
-        # Save number of trees (root nodes) for reconstruction
-        compressed_data.add("num_traces", total_trees, SerializationFormat.MSGPACK)
-
-        self.logger.info("Simple GenT compression completed")
         return compressed_data
 
     def _decompress_impl(self, compressed_dataset: CompressedDataset) -> Dataset:

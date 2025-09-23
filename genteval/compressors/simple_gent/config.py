@@ -25,7 +25,7 @@ class SimpleGenTConfig:
     """Configuration for Simple GenT algorithm."""
 
     # Time bucketing configuration
-    time_bucket_duration_us: int = 10 * 60 * 1000000  # 1 minute in microseconds
+    time_bucket_duration_us: int = 1 * 60 * 1000000  # 1 minute in microseconds
 
     # Model selection
     topology_model: TopologyModelType = TopologyModelType.MRF

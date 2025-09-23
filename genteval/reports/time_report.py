@@ -38,12 +38,40 @@ class TimeReport(BaseReport):
                 results = self.load_json_file(results_path)
                 report_group = f"{app_name}_{compressor}"
 
-                # Extract compression time
-                compression_time = results.get("compression_time_seconds")
-                if compression_time is not None:
-                    self.report[report_group]["compression_time_seconds"][
+                # Extract compression times
+                compression_time_cpu = results.get("compression_time_cpu_seconds")
+                compression_time_gpu = results.get("compression_time_gpu_seconds")
+                compression_time_total = results.get("compression_time_total_seconds")
+
+                if compression_time_cpu is not None:
+                    if "compression_time_cpu_seconds" not in self.report[report_group]:
+                        self.report[report_group]["compression_time_cpu_seconds"] = {
+                            "values": []
+                        }
+                    self.report[report_group]["compression_time_cpu_seconds"][
                         "values"
-                    ].append(compression_time)
+                    ].append(compression_time_cpu)
+
+                if compression_time_gpu is not None:
+                    if "compression_time_gpu_seconds" not in self.report[report_group]:
+                        self.report[report_group]["compression_time_gpu_seconds"] = {
+                            "values": []
+                        }
+                    self.report[report_group]["compression_time_gpu_seconds"][
+                        "values"
+                    ].append(compression_time_gpu)
+
+                if compression_time_total is not None:
+                    if (
+                        "compression_time_total_seconds"
+                        not in self.report[report_group]
+                    ):
+                        self.report[report_group]["compression_time_total_seconds"] = {
+                            "values": []
+                        }
+                    self.report[report_group]["compression_time_total_seconds"][
+                        "values"
+                    ].append(compression_time_total)
 
         # Calculate averages and clean up
         for group in self.report.values():

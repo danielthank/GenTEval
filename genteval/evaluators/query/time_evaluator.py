@@ -13,7 +13,21 @@ class TimeEvaluator(Evaluator):
         Returns:
             Dictionary containing compression time metrics
         """
-        # Extract compression time if available
-        compression_time = getattr(dataset, "compression_time_seconds", None)
+        # Extract compression times if available
+        compression_time_cpu = getattr(dataset, "compression_time_cpu_seconds", None)
+        compression_time_gpu = getattr(dataset, "compression_time_gpu_seconds", None)
 
-        return {"compression_time_seconds": compression_time}
+        # Calculate total compression time
+        total_compression_time = None
+        if compression_time_cpu is not None and compression_time_gpu is not None:
+            total_compression_time = compression_time_cpu + compression_time_gpu
+        elif compression_time_cpu is not None:
+            total_compression_time = compression_time_cpu
+        elif compression_time_gpu is not None:
+            total_compression_time = compression_time_gpu
+
+        return {
+            "compression_time_cpu_seconds": compression_time_cpu,
+            "compression_time_gpu_seconds": compression_time_gpu,
+            "compression_time_total_seconds": total_compression_time,
+        }

@@ -1,3 +1,4 @@
+import copy
 import logging
 import pickle
 
@@ -25,11 +26,12 @@ class MetadataVAEModel:
 
         # Dictionary to store models per time bucket: {time_bucket: model}
         self.models = {}
-        self.optimizers = {}
+        self.optimizer = None
 
         self.is_fitted = False
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
         self.logger.info(f"Using device: {self.device}")
 
     def fit(self, traces):
@@ -48,13 +50,27 @@ class MetadataVAEModel:
             f"Training models sequentially for time buckets: {sorted_time_buckets}"
         )
 
-        previous_model = None
+        self.shared_model = MetadataVAE(
+            vocab_size,
+            self.config.metadata_hidden_dim,
+            self.config.metadata_latent_dim,
+            self.config.use_flow_prior,
+            self.config.prior_flow_layers,
+            self.config.prior_flow_hidden_dim,
+            self.config.num_beta_components,
+        )
+        self.shared_model.to(self.device)
+
+        learning_rate = self.config.learning_rate
+        self.optimizer = torch.optim.AdamW(
+            self.shared_model.parameters(), lr=learning_rate, fused=True
+        )
 
         # Train models sequentially in time order
         for time_bucket in sorted_time_buckets:
             inputs, targets = training_data_by_bucket[time_bucket]
             self.logger.info(
-                f"Training model for time bucket {time_bucket} with {len(inputs)} examples"
+                f"Training shared model on time bucket {time_bucket} with {len(inputs)} examples"
             )
 
             # Skip time buckets with too few samples
@@ -73,41 +89,20 @@ class MetadataVAEModel:
                 f"Time bucket {time_bucket}: Training with {len(train_inputs)} examples, validating with {len(val_inputs)} examples"
             )
 
-            # Initialize model for this time bucket
-            model = MetadataVAE(
-                vocab_size,
-                self.config.metadata_hidden_dim,
-                self.config.metadata_latent_dim,
-                self.config.use_flow_prior,
-                self.config.prior_flow_layers,
-                self.config.prior_flow_hidden_dim,
-                self.config.num_beta_components,
-            )
+            model = self.shared_model
 
-            # If we have a previous model, initialize from its state
-            if previous_model is not None:
-                self.logger.info(
-                    f"Initializing time bucket {time_bucket} model from previous time bucket model"
-                )
-                model.load_state_dict(previous_model.state_dict())
-                # Use a lower learning rate for fine-tuning
+            if time_bucket != sorted_time_buckets[0]:
                 fine_tune_lr_factor = self.config.sequential_training_lr_factor
-                learning_rate = self.config.learning_rate * fine_tune_lr_factor
+                new_learning_rate = self.config.learning_rate * fine_tune_lr_factor
+                for param_group in self.optimizer.param_groups:
+                    param_group["lr"] = new_learning_rate
                 self.logger.info(
-                    f"Using reduced learning rate {learning_rate} (factor: {fine_tune_lr_factor}) for fine-tuning"
+                    f"Using reduced learning rate {new_learning_rate} (factor: {fine_tune_lr_factor}) for fine-tuning"
                 )
             else:
-                learning_rate = self.config.learning_rate
                 self.logger.info(
-                    f"Training first model from scratch with learning rate {learning_rate}"
+                    f"Training first time bucket from scratch with learning rate {learning_rate}"
                 )
-
-            model.to(self.device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-            # Store model and optimizer
-            self.models[time_bucket] = model
-            self.optimizers[time_bucket] = optimizer
 
             # Create DataLoaders
             train_dataset = TensorDataset(
@@ -117,6 +112,7 @@ class MetadataVAEModel:
                 train_dataset,
                 batch_size=self.config.batch_size,
                 shuffle=True,
+                pin_memory=True,
             )
 
             val_dataset = TensorDataset(
@@ -126,6 +122,7 @@ class MetadataVAEModel:
                 val_dataset,
                 batch_size=self.config.batch_size,
                 shuffle=False,
+                pin_memory=True,
             )
 
             # Early stopping parameters
@@ -146,15 +143,15 @@ class MetadataVAEModel:
                 current_beta = self.config.beta
 
                 model.train()
-                epoch_total_loss = 0
-                epoch_recon_loss = 0
-                epoch_kl_loss = 0
+                epoch_total_loss = 0.0
+                epoch_recon_loss = 0.0
+                epoch_kl_loss = 0.0
                 num_batches = 0
 
                 for batch_inputs, batch_targets in train_loader:
                     # Move to device
-                    inputs_device = batch_inputs.to(self.device)
-                    targets_device = batch_targets.to(self.device)
+                    inputs_device = batch_inputs.to(self.device, non_blocking=True)
+                    targets_device = batch_targets.to(self.device, non_blocking=True)
 
                     # Extract features (removed parent_start_time)
                     parent_duration = inputs_device[:, 0]
@@ -162,7 +159,7 @@ class MetadataVAEModel:
                     parent_node_idx = inputs_device[:, 2].long()
                     child_node_idx = inputs_device[:, 3].long()
 
-                    optimizer.zero_grad()
+                    self.optimizer.zero_grad()
                     model_output = model(
                         parent_duration,
                         normalized_child_idx,
@@ -187,14 +184,13 @@ class MetadataVAEModel:
                         current_beta,
                     )
                     total_loss.backward()
-                    optimizer.step()
+                    self.optimizer.step()
 
                     epoch_total_loss += total_loss.item()
                     epoch_recon_loss += recon_loss.item()
                     epoch_kl_loss += kl_loss.item()
                     num_batches += 1
 
-                # Calculate training losses
                 avg_total_loss = epoch_total_loss / max(num_batches, 1)
                 avg_recon_loss = epoch_recon_loss / max(num_batches, 1)
                 avg_kl_loss = epoch_kl_loss / max(num_batches, 1)
@@ -236,12 +232,9 @@ class MetadataVAEModel:
                     f"Time bucket {time_bucket}: Restored best model with validation loss: {best_val_loss:.4f}"
                 )
 
-            # Set this model as the previous model for the next time bucket
-            previous_model = model
+            self.models[time_bucket] = copy.deepcopy(model)
 
-        self.logger.info(
-            f"Trained {len(self.models)} models for {len(self.models)} time buckets"
-        )
+        self.logger.info(f"Trained shared model across {len(self.models)} time buckets")
         self.is_fitted = True
 
     def _prepare_training_data(self, traces) -> dict:
@@ -365,14 +358,14 @@ class MetadataVAEModel:
     def _evaluate_model(self, model, val_loader, beta=1.0):
         """Evaluate a specific model on validation set and return average loss."""
         model.eval()
-        total_val_loss = 0
+        total_val_loss = 0.0
         num_val_batches = 0
 
         with torch.no_grad():
             for batch_inputs, batch_targets in val_loader:
                 # Move to device
-                inputs_device = batch_inputs.to(self.device)
-                targets_device = batch_targets.to(self.device)
+                inputs_device = batch_inputs.to(self.device, non_blocking=True)
+                targets_device = batch_targets.to(self.device, non_blocking=True)
 
                 # Extract features (removed parent_start_time)
                 parent_duration = inputs_device[:, 0]
@@ -571,7 +564,7 @@ class MetadataVAEModel:
     def load_state_dict(self, proto_models):
         """Load model state from protobuf message."""
         self.models = {}
-        self.optimizers = {}
+        self.optimizer = None
 
         # Load from protobuf message
         for time_bucket_models in proto_models.time_buckets:
@@ -598,11 +591,7 @@ class MetadataVAEModel:
                     model_state_dict, strict=False
                 )  # strict=False for partial loading
 
-                # Store model and optimizer
                 self.models[time_bucket] = model
-                self.optimizers[time_bucket] = torch.optim.Adam(
-                    model.parameters(), lr=self.config.learning_rate
-                )
 
         self.is_fitted = True
         total_models = len(self.models)

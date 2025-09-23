@@ -91,20 +91,8 @@ class EnhancedReportGenerator:
                 return Text(f"{value / 1024:.2f} KB", style="cyan")
             return Text(f"{value} B", style="cyan")
         if metric_type == "time":
-            # Format time nicely (seconds)
-            if value >= 3600:  # Hours
-                hours = int(value // 3600)
-                minutes = int((value % 3600) // 60)
-                seconds = value % 60
-                return Text(f"{hours}h {minutes}m {seconds:.2f}s", style="magenta")
-            if value >= 60:  # Minutes
-                minutes = int(value // 60)
-                seconds = value % 60
-                return Text(f"{minutes}m {seconds:.2f}s", style="magenta")
-            if value >= 1:  # Seconds
-                return Text(f"{value:.2f}s", style="magenta")
-            # Milliseconds
-            return Text(f"{value * 1000:.2f}ms", style="magenta")
+            # Always format time in seconds
+            return Text(f"{value:.4f}", style="magenta")
         return Text(f"{value:.4f}", style="white")
 
     def create_summary_table(self, report_data: dict[str, Any], title: str) -> "Table":
@@ -176,7 +164,15 @@ class EnhancedReportGenerator:
                     formatted_value = self.format_metric_value(value, "accuracy")
                 elif "size" in metric:
                     formatted_value = self.format_metric_value(value, "size")
-                elif "compression_time_seconds" in metric or "time" in metric:
+                elif any(
+                    x in metric
+                    for x in [
+                        "compression_time_cpu_seconds",
+                        "compression_time_gpu_seconds",
+                        "compression_time_total_seconds",
+                        "time",
+                    ]
+                ):
                     formatted_value = self.format_metric_value(value, "time")
                 else:
                     formatted_value = self.format_metric_value(value)
@@ -353,7 +349,12 @@ class EnhancedReportGenerator:
             elif report_type == "time":
                 # For compression time, lower is better
                 def get_time_value(x):
-                    metric = x[1].get("compression_time_seconds")
+                    # Try total time first, then fall back to individual CPU/GPU times
+                    metric = x[1].get("compression_time_total_seconds")
+                    if not metric:
+                        metric = x[1].get("compression_time_cpu_seconds")
+                    if not metric:
+                        metric = x[1].get("compression_time_gpu_seconds")
                     if not metric:
                         return float("inf")
                     if "values" in metric and "avg" not in metric:
@@ -583,25 +584,18 @@ class EnhancedReportGenerator:
                         # Specialized pretty formatting for known types
                         if isinstance(value, (int, float)):
                             lower_metric = metric.lower()
-                            if (
-                                "compression_time_seconds" in lower_metric
-                                or "time" in lower_metric
+                            if any(
+                                x in lower_metric
+                                for x in [
+                                    "compression_time_cpu_seconds",
+                                    "compression_time_gpu_seconds",
+                                    "compression_time_total_seconds",
+                                    "time",
+                                ]
                             ):
-                                # Human-friendly time formatting
+                                # Always format time in seconds
                                 seconds = float(value)
-                                if seconds >= 3600:
-                                    hours = int(seconds // 3600)
-                                    minutes = int((seconds % 3600) // 60)
-                                    sec = seconds % 60
-                                    pretty = f"{hours}h {minutes}m {sec:.2f}s"
-                                elif seconds >= 60:
-                                    minutes = int(seconds // 60)
-                                    sec = seconds % 60
-                                    pretty = f"{minutes}m {sec:.2f}s"
-                                elif seconds >= 1:
-                                    pretty = f"{seconds:.2f}s"
-                                else:
-                                    pretty = f"{seconds * 1000:.2f}ms"
+                                pretty = f"{seconds:.4f} s"
                                 print(f"  {display_name}: {pretty}")
                             else:
                                 print(f"  {display_name}: {value:.4f}")
@@ -744,20 +738,50 @@ class EnhancedReportGenerator:
                         cos_fidelity_scores.values()
                     ) / len(cos_fidelity_scores)
             elif report_type == "time":
-                # Calculate overall average compression time across compressors
-                times = []
+                # Calculate overall average compression times across compressors
+                cpu_times = []
+                gpu_times = []
+                total_times = []
+
                 for compressor_data in report_data.values():
-                    metric = compressor_data.get("compression_time_seconds")
-                    if not metric:
-                        continue
-                    if "values" in metric and "avg" not in metric:
-                        values = metric["values"]
-                        if values:
-                            times.append(sum(values) / len(values))
-                    elif "avg" in metric:
-                        times.append(metric["avg"])
-                summary["overall_avg_compression_time_seconds"] = (
-                    sum(times) / len(times) if times else 0
+                    # CPU times
+                    cpu_metric = compressor_data.get("compression_time_cpu_seconds")
+                    if cpu_metric:
+                        if "values" in cpu_metric and "avg" not in cpu_metric:
+                            values = cpu_metric["values"]
+                            if values:
+                                cpu_times.append(sum(values) / len(values))
+                        elif "avg" in cpu_metric:
+                            cpu_times.append(cpu_metric["avg"])
+
+                    # GPU times
+                    gpu_metric = compressor_data.get("compression_time_gpu_seconds")
+                    if gpu_metric:
+                        if "values" in gpu_metric and "avg" not in gpu_metric:
+                            values = gpu_metric["values"]
+                            if values:
+                                gpu_times.append(sum(values) / len(values))
+                        elif "avg" in gpu_metric:
+                            gpu_times.append(gpu_metric["avg"])
+
+                    # Total times
+                    total_metric = compressor_data.get("compression_time_total_seconds")
+                    if total_metric:
+                        if "values" in total_metric and "avg" not in total_metric:
+                            values = total_metric["values"]
+                            if values:
+                                total_times.append(sum(values) / len(values))
+                        elif "avg" in total_metric:
+                            total_times.append(total_metric["avg"])
+
+                summary["overall_avg_compression_time_cpu_seconds"] = (
+                    sum(cpu_times) / len(cpu_times) if cpu_times else 0
+                )
+                summary["overall_avg_compression_time_gpu_seconds"] = (
+                    sum(gpu_times) / len(gpu_times) if gpu_times else 0
+                )
+                summary["overall_avg_compression_time_total_seconds"] = (
+                    sum(total_times) / len(total_times) if total_times else 0
                 )
 
             enhanced_report["summary"][report_type] = summary

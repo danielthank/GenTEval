@@ -16,7 +16,12 @@ class RCAEvalDataset(Dataset):
     def from_dataset(dataset: Dataset) -> "RCAEvalDataset":
         rca_eval_dataset = RCAEvalDataset()
         rca_eval_dataset._traces = dataset.traces
-        rca_eval_dataset.compression_time_seconds = dataset.compression_time_seconds
+        rca_eval_dataset.compression_time_cpu_seconds = (
+            dataset.compression_time_cpu_seconds
+        )
+        rca_eval_dataset.compression_time_gpu_seconds = (
+            dataset.compression_time_gpu_seconds
+        )
         return rca_eval_dataset
 
     @property
@@ -48,17 +53,28 @@ class RCAEvalDataset(Dataset):
         if traces is not None:
             pickle.dump(traces, open(dir.joinpath("traces.pkl"), "wb"))
 
-        if self.compression_time_seconds is not None:
-            with open(dir.joinpath("compression_time.txt"), "w") as f:
-                f.write(str(self.compression_time_seconds))
+        if self.compression_time_cpu_seconds is not None:
+            with open(dir.joinpath("compression_time_cpu.txt"), "w") as f:
+                f.write(str(self.compression_time_cpu_seconds))
+
+        if self.compression_time_gpu_seconds is not None:
+            with open(dir.joinpath("compression_time_gpu.txt"), "w") as f:
+                f.write(str(self.compression_time_gpu_seconds))
 
     def load(self, dataset_dir: pathlib.Path):
         self._spans = pd.read_pickle(dataset_dir.joinpath("spans.pkl"))
         self.traces = pickle.load(open(dataset_dir.joinpath("traces.pkl"), "rb"))
-        compression_time_path = dataset_dir.joinpath("compression_time.txt")
-        if compression_time_path.exists():
-            with open(compression_time_path) as f:
-                self.compression_time_seconds = float(f.read().strip())
+
+        compression_time_cpu_path = dataset_dir.joinpath("compression_time_cpu.txt")
+        if compression_time_cpu_path.exists():
+            with open(compression_time_cpu_path) as f:
+                self.compression_time_cpu_seconds = float(f.read().strip())
+
+        compression_time_gpu_path = dataset_dir.joinpath("compression_time_gpu.txt")
+        if compression_time_gpu_path.exists():
+            with open(compression_time_gpu_path) as f:
+                self.compression_time_gpu_seconds = float(f.read().strip())
+
         return self
 
     def _load_spans_from_run_dir(self):
