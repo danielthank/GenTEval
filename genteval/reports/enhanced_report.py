@@ -219,6 +219,32 @@ class EnhancedReportGenerator:
 
         return table
 
+    def create_count_over_time_table(self, report_data: dict[str, Any]) -> "Table":
+        """Create a specialized table for Count Over Time metrics."""
+        table = Table(
+            title="Count Over Time Performance Metrics",
+            box=box.ROUNDED,
+            title_style="bold magenta",
+        )
+        table.add_column("Compressor", style="cyan", no_wrap=True)
+        table.add_column("MAPE Fidelity (%)", justify="right", style="bold")
+        table.add_column("Cosine Fidelity (%)", justify="right", style="bold")
+
+        for compressor_group, metrics in sorted(report_data.items()):
+            row = [compressor_group]
+
+            # MAPE fidelity score
+            mape_fidelity = metrics.get("count_over_time_mape_fidelity_score", 0.0)
+            row.append(self.format_metric_value(mape_fidelity, "percentage"))
+
+            # Cosine fidelity score
+            cosine_fidelity = metrics.get("count_over_time_cosine_fidelity_score", 0.0)
+            row.append(self.format_metric_value(cosine_fidelity, "percentage"))
+
+            table.add_row(*row)
+
+        return table
+
     def _print_duration_sections(self, report_data: dict[str, Any]):
         """Print duration metrics organized by sections."""
         # Calculate and display both fidelity scores first
@@ -345,6 +371,22 @@ class EnhancedReportGenerator:
                 overview_text.append(
                     f"🏆 Best {report_type.replace('_', ' ').title()}: "
                     f"{best_compressor[0]} ({get_avg5_value(best_compressor):.4f})"
+                )
+            elif report_type == "count_over_time":
+                # For count over time, higher fidelity scores are better
+                def get_count_fidelity_value(x):
+                    mape_score = x[1].get("count_over_time_mape_fidelity_score", 0.0)
+                    cosine_score = x[1].get(
+                        "count_over_time_cosine_fidelity_score", 0.0
+                    )
+                    return (
+                        mape_score + cosine_score
+                    ) / 2  # Average of both fidelity scores
+
+                best_compressor = max(report_data.items(), key=get_count_fidelity_value)
+                overview_text.append(
+                    f"🏆 Best {report_type.replace('_', ' ').title()}: "
+                    f"{best_compressor[0]} ({get_count_fidelity_value(best_compressor):.1f}% avg fidelity)"
                 )
             elif report_type == "time":
                 # For compression time, lower is better
@@ -517,6 +559,10 @@ class EnhancedReportGenerator:
 
             if report_type in ["trace_rca", "micro_rank"]:
                 table = self.create_rca_table(report_data)
+                self.console.print(table)
+                self.console.print()
+            elif report_type == "count_over_time":
+                table = self.create_count_over_time_table(report_data)
                 self.console.print(table)
                 self.console.print()
             elif report_type == "duration":
@@ -696,95 +742,7 @@ class EnhancedReportGenerator:
                 ),
             },
             "reports": all_reports,
-            "summary": {},
         }
-
-        # Add summary statistics
-        for report_type, report_data in all_reports.items():
-            if not report_data:
-                continue
-
-            summary = {"compressors": list(report_data.keys())}
-
-            if report_type in ["trace_rca", "micro_rank"]:
-                # Calculate average accuracy across all compressors
-                avg_accuracies = []
-                for compressor_data in report_data.values():
-                    avg5_data = compressor_data["avg5"]
-                    if "values" in avg5_data and "avg" not in avg5_data:
-                        values = avg5_data["values"]
-                        avg_accuracies.append(
-                            sum(values) / len(values) if values else float("nan")
-                        )
-                    else:
-                        avg_accuracies.append(avg5_data["avg"])
-                summary["overall_avg_accuracy"] = (
-                    sum(avg_accuracies) / len(avg_accuracies) if avg_accuracies else 0
-                )
-            elif report_type == "duration":
-                # Calculate both fidelity scores for duration metrics
-                mape_fidelity_scores = self.calculate_mape_fidelity_score(report_data)
-                cos_fidelity_scores = self.calculate_cos_fidelity_score(report_data)
-
-                summary["mape_fidelity_scores"] = mape_fidelity_scores
-                summary["cos_fidelity_scores"] = cos_fidelity_scores
-
-                if mape_fidelity_scores:
-                    summary["overall_mape_fidelity"] = sum(
-                        mape_fidelity_scores.values()
-                    ) / len(mape_fidelity_scores)
-                if cos_fidelity_scores:
-                    summary["overall_cos_fidelity"] = sum(
-                        cos_fidelity_scores.values()
-                    ) / len(cos_fidelity_scores)
-            elif report_type == "time":
-                # Calculate overall average compression times across compressors
-                cpu_times = []
-                gpu_times = []
-                total_times = []
-
-                for compressor_data in report_data.values():
-                    # CPU times
-                    cpu_metric = compressor_data.get("compression_time_cpu_seconds")
-                    if cpu_metric:
-                        if "values" in cpu_metric and "avg" not in cpu_metric:
-                            values = cpu_metric["values"]
-                            if values:
-                                cpu_times.append(sum(values) / len(values))
-                        elif "avg" in cpu_metric:
-                            cpu_times.append(cpu_metric["avg"])
-
-                    # GPU times
-                    gpu_metric = compressor_data.get("compression_time_gpu_seconds")
-                    if gpu_metric:
-                        if "values" in gpu_metric and "avg" not in gpu_metric:
-                            values = gpu_metric["values"]
-                            if values:
-                                gpu_times.append(sum(values) / len(values))
-                        elif "avg" in gpu_metric:
-                            gpu_times.append(gpu_metric["avg"])
-
-                    # Total times
-                    total_metric = compressor_data.get("compression_time_total_seconds")
-                    if total_metric:
-                        if "values" in total_metric and "avg" not in total_metric:
-                            values = total_metric["values"]
-                            if values:
-                                total_times.append(sum(values) / len(values))
-                        elif "avg" in total_metric:
-                            total_times.append(total_metric["avg"])
-
-                summary["overall_avg_compression_time_cpu_seconds"] = (
-                    sum(cpu_times) / len(cpu_times) if cpu_times else 0
-                )
-                summary["overall_avg_compression_time_gpu_seconds"] = (
-                    sum(gpu_times) / len(gpu_times) if gpu_times else 0
-                )
-                summary["overall_avg_compression_time_total_seconds"] = (
-                    sum(total_times) / len(total_times) if total_times else 0
-                )
-
-            enhanced_report["summary"][report_type] = summary
 
         with open(output_path, "w") as f:
             json.dump(enhanced_report, f, indent=2, default=str)

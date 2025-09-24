@@ -2,6 +2,7 @@ import argparse
 import pathlib
 
 from genteval.reports import (
+    CountOverTimeReport,
     DurationReport,
     EnhancedReportGenerator,
     OperationReport,
@@ -60,6 +61,7 @@ def main():
         nargs="*",
         default=[
             "duration",
+            "count_over_time",
             "operation",
             "trace_rca",
             "micro_rank",
@@ -105,6 +107,11 @@ def main():
         report_generator = DurationReport(args.compressors, root_dir, plot=args.plot)
         report = report_generator.generate(run_dirs_func)
         all_reports["duration"] = report
+
+    if "count_over_time" in args.evaluators:
+        report_generator = CountOverTimeReport(args.compressors, root_dir, plot=args.plot)
+        report = report_generator.generate(run_dirs_func)
+        all_reports["count_over_time"] = report
 
     if "operation" in args.evaluators:
         report_generator = OperationReport(args.compressors, root_dir)

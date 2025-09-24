@@ -1,4 +1,4 @@
-"""Percentile comparison metric for duration analysis."""
+"""Generic time series comparison metric for both duration and count evaluations."""
 
 from pathlib import Path
 
@@ -7,13 +7,52 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-class PercentileComparisonMetric:
-    """Handles percentile comparison calculations and visualizations for duration data."""
+class TimeSeriesComparisonMetric:
+    """Generic time series comparison with MAPE and cosine similarity calculations."""
 
     def __init__(self):
         pass
 
-    def process_duration_by_time_percentile(
+    def calculate_time_series_metrics(self, original_time_series, results_time_series):
+        """
+        Core MAPE and cosine similarity calculation for any time series data.
+
+        Args:
+            original_time_series: List of original values over time
+            results_time_series: List of compressed/results values over time
+
+        Returns:
+            Dict with {"mape": float, "cosine_sim": float}
+        """
+        if len(original_time_series) == 0 or len(results_time_series) == 0:
+            return {"mape": float("inf"), "cosine_sim": 0.0}
+
+        # Calculate MAPE using correct formula: abs((orig - res) / (orig + res)) * 100
+        mape_values = []
+        for orig, res in zip(original_time_series, results_time_series, strict=False):
+            if orig > 0:
+                mape = abs((orig - res) / (orig + res)) * 100
+            else:
+                mape = 0 if res == 0 else float("inf")
+            mape_values.append(mape)
+
+        # Calculate average MAPE (excluding inf values)
+        finite_mape_values = [m for m in mape_values if not np.isinf(m)]
+        avg_mape = np.mean(finite_mape_values) if finite_mape_values else float("inf")
+
+        # Calculate cosine similarity
+        if len(original_time_series) > 1:
+            original_vector = np.array(original_time_series).reshape(1, -1)
+            results_vector = np.array(results_time_series).reshape(1, -1)
+            cosine_sim = cosine_similarity(original_vector, results_vector)[0, 0]
+        else:
+            cosine_sim = (
+                1.0 if original_time_series[0] == results_time_series[0] else 0.0
+            )
+
+        return {"mape": avg_mape, "cosine_sim": cosine_sim}
+
+    def process_duration_percentile_time_series(
         self,
         original_data,
         results_data,
@@ -26,7 +65,7 @@ class PercentileComparisonMetric:
         plot=True,
     ):
         """
-        Process duration_by_time_percentile data for a specific group with percentile format.
+        Process duration percentile data - maintains backward compatibility with PercentileComparisonMetric.
 
         Args:
             original_data: Duration percentile data from original dataset {time_bucket: {percentile: value}}
@@ -40,7 +79,7 @@ class PercentileComparisonMetric:
             plot: Whether to generate plots
 
         Returns:
-            Dict with structure {time_bucket: {percentile: {"mape": value, "cosine_sim": value}}}
+            Dict with structure {percentile: {"mape": value, "cosine_sim": value}}
         """
         # Define all percentiles to process
         percentiles = [
@@ -78,37 +117,11 @@ class PercentileComparisonMetric:
                     results_time_series.append(results_time_data[percentile])
 
             if len(original_time_series) > 0:
-                # Calculate MAPE across the time series for this percentile
-                mape_values = []
-                for orig, res in zip(
-                    original_time_series, results_time_series, strict=False
-                ):
-                    if orig > 0:
-                        mape = abs((orig - res) / (orig + res)) * 100
-                    else:
-                        mape = 0 if res == 0 else float("inf")
-                    mape_values.append(mape)
-
-                # Calculate average MAPE across time (excluding inf values)
-                finite_mape_values = [m for m in mape_values if not np.isinf(m)]
-                avg_mape = (
-                    np.mean(finite_mape_values) if finite_mape_values else float("inf")
+                # Use generic time series calculation
+                metrics = self.calculate_time_series_metrics(
+                    original_time_series, results_time_series
                 )
-
-                # Calculate cosine similarity across time series for this percentile
-                if len(original_time_series) > 1:
-                    original_vector = np.array(original_time_series).reshape(1, -1)
-                    results_vector = np.array(results_time_series).reshape(1, -1)
-                    cosine_sim = cosine_similarity(original_vector, results_vector)[
-                        0, 0
-                    ]
-                else:
-                    cosine_sim = 1.0
-
-                results[percentile] = {
-                    "mape": avg_mape,
-                    "cosine_sim": cosine_sim,
-                }
+                results[percentile] = metrics
 
         # Generate plots if requested
         if plot:
@@ -124,6 +137,49 @@ class PercentileComparisonMetric:
             )
 
         return results
+
+    def process_count_over_time_series(self, original_data, results_data, group_key):
+        """
+        Process count over time data - new method for count evaluation.
+
+        Args:
+            original_data: Original dataset with span_count_by_time structure
+            results_data: Compressed dataset with span_count_by_time structure
+            group_key: The group key (e.g., "depth_0", "depth_1", "all")
+
+        Returns:
+            Dict with {"mape": float, "cosine_sim": float}
+        """
+        try:
+            # Extract time series for the specific group
+            original_count_data = original_data.get("span_count_by_time", {}).get(
+                group_key, {}
+            )
+            results_count_data = results_data.get("span_count_by_time", {}).get(
+                group_key, {}
+            )
+
+            common_time_buckets = set(original_count_data.keys()) & set(
+                results_count_data.keys()
+            )
+
+            if not common_time_buckets:
+                return {"mape": float("inf"), "cosine_sim": 0.0}
+
+            original_time_series = []
+            results_time_series = []
+
+            for time_bucket in sorted(common_time_buckets):
+                original_time_series.append(original_count_data[time_bucket])
+                results_time_series.append(results_count_data[time_bucket])
+
+            # Use same generic calculation
+            return self.calculate_time_series_metrics(
+                original_time_series, results_time_series
+            )
+
+        except (KeyError, ValueError, TypeError):
+            return {"mape": float("inf"), "cosine_sim": 0.0}
 
     def _create_percentile_plots(
         self,
@@ -184,33 +240,11 @@ class PercentileComparisonMetric:
                     "results": results_time_series,
                 }
 
-                # Calculate MAPE across time series for this percentile
-                mape_values = []
-                for orig, res in zip(
-                    original_time_series, results_time_series, strict=False
-                ):
-                    if orig > 0:
-                        mape = abs((orig - res) / orig) * 100
-                    else:
-                        mape = 0 if res == 0 else float("inf")
-                    mape_values.append(mape)
-
-                finite_mape_values = [m for m in mape_values if not np.isinf(m)]
-                avg_mape = (
-                    np.mean(finite_mape_values) if finite_mape_values else float("inf")
+                # Use generic time series calculation for consistent MAPE formula
+                metrics = self.calculate_time_series_metrics(
+                    original_time_series, results_time_series
                 )
-
-                # Calculate cosine similarity across time series for this percentile
-                if len(original_time_series) > 1:
-                    original_vector = np.array(original_time_series).reshape(1, -1)
-                    results_vector = np.array(results_time_series).reshape(1, -1)
-                    cosine_sim = cosine_similarity(original_vector, results_vector)[
-                        0, 0
-                    ]
-                else:
-                    cosine_sim = 1.0
-
-                metrics_data[percentile] = {"mape": avg_mape, "cosine_sim": cosine_sim}
+                metrics_data[percentile] = metrics
 
         # Create 11 subplots (one for each percentile)
         fig, axes = plt.subplots(4, 3, figsize=(18, 20))
@@ -268,9 +302,11 @@ class PercentileComparisonMetric:
                         transform=ax.transAxes,
                         verticalalignment="top",
                         fontsize=10,
-                        bbox=dict(
-                            boxstyle="round,pad=0.3", facecolor="orange", alpha=0.7
-                        ),
+                        bbox={
+                            "boxstyle": "round,pad=0.3",
+                            "facecolor": "orange",
+                            "alpha": 0.7,
+                        },
                     )
                     ax.text(
                         0.02,
@@ -279,9 +315,11 @@ class PercentileComparisonMetric:
                         transform=ax.transAxes,
                         verticalalignment="top",
                         fontsize=10,
-                        bbox=dict(
-                            boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.7
-                        ),
+                        bbox={
+                            "boxstyle": "round,pad=0.3",
+                            "facecolor": "lightgreen",
+                            "alpha": 0.7,
+                        },
                     )
             else:
                 # If no data for this percentile, hide the subplot

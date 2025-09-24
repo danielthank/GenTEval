@@ -5,6 +5,7 @@ import pickle
 
 from genteval.dataset import RCAEvalDataset
 from genteval.evaluators import (
+    CountOverTimeEvaluator,
     DurationEvaluator,
     MicroRankEvaluator,
     OperationEvaluator,
@@ -36,7 +37,7 @@ def main():
     argparser.add_argument(
         "--evaluator",
         type=str,
-        help="Single evaluator to run (duration, operation, trace_rca, micro_rank, span_count)",
+        help="Single evaluator to run (duration, operation, trace_rca, micro_rank, span_count, count_over_time)",
     )
     argparser.add_argument(
         "--evaluated_dir",
@@ -89,6 +90,12 @@ def main():
         json.dump(
             results,
             open(evaluated_dir / "time_results.json", "w"),
+        )
+    elif args.evaluator == "count_over_time":
+        results = CountOverTimeEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "count_over_time_results.json", "w"),
         )
     elif args.evaluator == "size":
         # Size does not require a specific evaluator. It just needs reporting.

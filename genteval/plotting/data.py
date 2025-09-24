@@ -26,6 +26,10 @@ class ExperimentData:
     child_parent_depth2_fidelity: float
     child_parent_depth3_fidelity: float
     child_parent_depth4_fidelity: float
+    tracerca_avg5_fidelity: float
+    microrank_avg5_fidelity: float
+    count_over_time_mape_fidelity: float
+    count_over_time_cosine_fidelity: float
     size_kb: float
     cpu_time_seconds: float
     gpu_time_seconds: float
@@ -67,17 +71,8 @@ class ReportParser:
     def _get_compressor_names(self, report_data: dict) -> list[str]:
         compressor_names = set()
 
-        # First try to get from summary section (most reliable)
-        if "summary" in report_data:
-            for summary_content in report_data["summary"].values():
-                if (
-                    isinstance(summary_content, dict)
-                    and "compressors" in summary_content
-                ):
-                    compressor_names.update(summary_content["compressors"])
-
-        # Fallback to reports section
-        if not compressor_names and "reports" in report_data:
+        # Get from reports section
+        if "reports" in report_data:
             for report_content in report_data["reports"].values():
                 if "compressors" in report_content:
                     compressor_names.update(report_content["compressors"])
@@ -102,16 +97,18 @@ class ReportParser:
         child_parent_ratio_data = self._extract_child_parent_ratio_data(
             report_data, compressor_name
         )
+        rca_data = self._extract_rca_data(report_data, compressor_name)
+        count_over_time_data = self._extract_count_over_time_data(
+            report_data, compressor_name
+        )
 
         if not all([size_data, time_data, fidelity_data]):
             print(f"Warning: Missing data for {compressor_name}")
             return None
 
-        # Operation data is optional for backward compatibility
         if not operation_data:
             operation_data = {"operation_f1": 0.0, "operation_pair_f1": 0.0}
 
-        # Child/parent ratio data is optional for backward compatibility
         if not child_parent_ratio_data:
             child_parent_ratio_data = {
                 "child_parent_ratio_wdist": 0.0,
@@ -120,6 +117,18 @@ class ReportParser:
                 "child_parent_depth2_wdist": 0.0,
                 "child_parent_depth3_wdist": 0.0,
                 "child_parent_depth4_wdist": 0.0,
+            }
+
+        if not rca_data:
+            rca_data = {
+                "tracerca_avg5": 0.0,
+                "microrank_avg5": 0.0,
+            }
+
+        if not count_over_time_data:
+            count_over_time_data = {
+                "count_over_time_mape_fidelity": 0.0,
+                "count_over_time_cosine_fidelity": 0.0,
             }
 
         # Calculate costs
@@ -153,6 +162,14 @@ class ReportParser:
             child_parent_depth4_fidelity=max(
                 0, 100 - child_parent_ratio_data["child_parent_depth4_wdist"] * 1000
             ),
+            tracerca_avg5_fidelity=rca_data["tracerca_avg5"] * 100,
+            microrank_avg5_fidelity=rca_data["microrank_avg5"] * 100,
+            count_over_time_mape_fidelity=count_over_time_data[
+                "count_over_time_mape_fidelity"
+            ],
+            count_over_time_cosine_fidelity=count_over_time_data[
+                "count_over_time_cosine_fidelity"
+            ],
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
             gpu_time_seconds=time_data["gpu_seconds"],
@@ -236,27 +253,7 @@ class ReportParser:
         self, report_data: dict, compressor_name: str
     ) -> dict | None:
         try:
-            # Try to extract from summary section first
-            if "summary" in report_data and "duration" in report_data["summary"]:
-                summary_duration = report_data["summary"]["duration"]
-
-                mape = 0
-                cosine = 0
-
-                if "mape_fidelity_scores" in summary_duration:
-                    mape = summary_duration["mape_fidelity_scores"].get(
-                        compressor_name, 0
-                    )
-
-                if "cos_fidelity_scores" in summary_duration:
-                    cosine = summary_duration["cos_fidelity_scores"].get(
-                        compressor_name, 0
-                    )
-
-                if mape > 0 or cosine > 0:
-                    return {"mape": mape, "cosine": cosine}
-
-            # Fallback to duration report section
+            # Extract from duration report section
             duration_report = report_data["reports"]["duration"]
 
             # Try to extract from fidelity_scores first
@@ -279,10 +276,10 @@ class ReportParser:
                     compressor_name, 0
                 )
 
-            return {"mape": mape, "cosine": cosine}
-
         except KeyError:
             return None
+        else:
+            return {"mape": mape, "cosine": cosine}
 
     def _extract_operation_data(
         self, report_data: dict, compressor_name: str
@@ -399,3 +396,85 @@ class ReportParser:
             "total_cost_per_million": total_cost_per_million,
             "cost_per_minute": cost_per_minute,
         }
+
+    def _extract_rca_data(self, report_data: dict, compressor_name: str) -> dict | None:
+        """Extract TracerCA and MicroRank avg5 data from the JSON report."""
+        try:
+            result = {}
+
+            # Extract TracerCA avg5
+            if "trace_rca" in report_data.get("reports", {}):
+                trace_rca_report = report_data["reports"]["trace_rca"]
+                if compressor_name in trace_rca_report:
+                    avg5_data = trace_rca_report[compressor_name].get("avg5", {})
+                    if "avg" in avg5_data:
+                        result["tracerca_avg5"] = avg5_data["avg"]
+                    elif "values" in avg5_data:
+                        values = avg5_data["values"]
+                        result["tracerca_avg5"] = (
+                            sum(values) / len(values) if values else 0.0
+                        )
+                    else:
+                        result["tracerca_avg5"] = 0.0
+                else:
+                    result["tracerca_avg5"] = 0.0
+            else:
+                result["tracerca_avg5"] = 0.0
+
+            # Extract MicroRank avg5
+            if "micro_rank" in report_data.get("reports", {}):
+                micro_rank_report = report_data["reports"]["micro_rank"]
+                if compressor_name in micro_rank_report:
+                    avg5_data = micro_rank_report[compressor_name].get("avg5", {})
+                    if "avg" in avg5_data:
+                        result["microrank_avg5"] = avg5_data["avg"]
+                    elif "values" in avg5_data:
+                        values = avg5_data["values"]
+                        result["microrank_avg5"] = (
+                            sum(values) / len(values) if values else 0.0
+                        )
+                    else:
+                        result["microrank_avg5"] = 0.0
+                else:
+                    result["microrank_avg5"] = 0.0
+            else:
+                result["microrank_avg5"] = 0.0
+
+        except KeyError:
+            return None
+        else:
+            return result
+
+    def _extract_count_over_time_data(
+        self, report_data: dict, compressor_name: str
+    ) -> dict | None:
+        """Extract count over time fidelity data from the JSON report."""
+        try:
+            result = {}
+
+            # Extract count over time data
+            if "count_over_time" in report_data.get("reports", {}):
+                count_over_time_report = report_data["reports"]["count_over_time"]
+                if compressor_name in count_over_time_report:
+                    compressor_data = count_over_time_report[compressor_name]
+
+                    # Extract MAPE fidelity score
+                    result["count_over_time_mape_fidelity"] = compressor_data.get(
+                        "count_over_time_mape_fidelity_score", 0.0
+                    )
+
+                    # Extract Cosine fidelity score
+                    result["count_over_time_cosine_fidelity"] = compressor_data.get(
+                        "count_over_time_cosine_fidelity_score", 0.0
+                    )
+                else:
+                    result["count_over_time_mape_fidelity"] = 0.0
+                    result["count_over_time_cosine_fidelity"] = 0.0
+            else:
+                result["count_over_time_mape_fidelity"] = 0.0
+                result["count_over_time_cosine_fidelity"] = 0.0
+
+        except KeyError:
+            return None
+        else:
+            return result

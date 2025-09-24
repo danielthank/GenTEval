@@ -7,7 +7,7 @@ from genteval.bin.utils import get_dir_with_root
 from .base_report import BaseReport
 from .duration_metrics import (
     DepthBeforeAfterMetric,
-    PercentileComparisonMetric,
+    TimeSeriesComparisonMetric,
     WassersteinDistanceMetric,
 )
 
@@ -22,7 +22,7 @@ class DurationReport(BaseReport):
 
         self.wasserstein_metric = WassersteinDistanceMetric()
         self.depth_before_after_metric = DepthBeforeAfterMetric()
-        self.percentile_comparison_metric = PercentileComparisonMetric()
+        self.time_series_metric = TimeSeriesComparisonMetric()
 
     def _has_before_after_incident_data_for_depth(self, original, results, depth):
         """Check if both datasets have before/after incident data for the given depth."""
@@ -105,16 +105,18 @@ class DurationReport(BaseReport):
                     if group_key not in results["duration_by_time_percentiles"]:
                         continue
 
-                    mape_count_results = self.percentile_comparison_metric.process_duration_by_time_percentile(
-                        original["duration_by_time_percentiles"][group_key],
-                        results["duration_by_time_percentiles"][group_key],
-                        group_key,
-                        compressor,
-                        app_name,
-                        service,
-                        fault,
-                        run,
-                        self.plot,
+                    mape_count_results = (
+                        self.time_series_metric.process_duration_percentile_time_series(
+                            original["duration_by_time_percentiles"][group_key],
+                            results["duration_by_time_percentiles"][group_key],
+                            group_key,
+                            compressor,
+                            app_name,
+                            service,
+                            fault,
+                            run,
+                            self.plot,
+                        )
                     )
 
                     # Store MAPE and cosine sim results in report
@@ -125,14 +127,10 @@ class DurationReport(BaseReport):
                         key_prefix = f"{group_key}_{percentile}"
                         self.report[report_group][f"{key_prefix}_mape"][
                             "values"
-                        ].append(
-                            mape_count_results[percentile]["mape"]
-                        )
+                        ].append(mape_count_results[percentile]["mape"])
                         self.report[report_group][f"{key_prefix}_cosine_sim"][
                             "values"
-                        ].append(
-                            mape_count_results[percentile]["cosine_sim"]
-                        )
+                        ].append(mape_count_results[percentile]["cosine_sim"])
 
                 # Process duration before/after incident data for depths 0 and 1
                 """

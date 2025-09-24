@@ -1,4 +1,5 @@
 from .evaluator import Evaluator
+from .query.count_over_time_evaluator import CountOverTimeEvaluator
 from .query.duration_evaluator import DurationEvaluator
 from .query.operation_evaluator import OperationEvaluator
 from .query.span_count_evaluator import SpanCountEvaluator
@@ -8,6 +9,7 @@ from .rca.trace_rca_evaluator import TraceRCAEvaluator
 
 
 __all__ = [
+    "CountOverTimeEvaluator",
     "DurationEvaluator",
     "Evaluator",
     "MicroRankEvaluator",

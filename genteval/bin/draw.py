@@ -245,6 +245,16 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
         child_parent_depth4_fidelity = [
             exp.child_parent_depth4_fidelity for exp in all_experiments
         ]
+        tracerca_avg5_fidelity = [exp.tracerca_avg5_fidelity for exp in all_experiments]
+        microrank_avg5_fidelity = [
+            exp.microrank_avg5_fidelity for exp in all_experiments
+        ]
+        count_over_time_mape_fidelity = [
+            exp.count_over_time_mape_fidelity for exp in all_experiments
+        ]
+        count_over_time_cosine_fidelity = [
+            exp.count_over_time_cosine_fidelity for exp in all_experiments
+        ]
         cost_per_million_spans = [
             exp.total_cost_per_million_spans for exp in all_experiments
         ]
@@ -501,7 +511,41 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             out_fname="gent_vs_head_sampling_child_parent_depth4.png",
         )
 
-        return 0
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=tracerca_avg5_fidelity,
+            y_title="TracerCA Avg@5 Fidelity Score (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - TracerCA Avg@5 Fidelity Score",
+            out_fname="gent_vs_head_sampling_tracerca_avg5.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=microrank_avg5_fidelity,
+            y_title="MicroRank Avg@5 Fidelity Score (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - MicroRank Avg@5 Fidelity Score",
+            out_fname="gent_vs_head_sampling_microrank_avg5.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=count_over_time_mape_fidelity,
+            y_title="Count Over Time MAPE Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Count Over Time MAPE Fidelity",
+            out_fname="gent_vs_head_sampling_count_over_time_mape.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=count_over_time_cosine_fidelity,
+            y_title="Count Over Time Cosine Similarity Fidelity (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Count Over Time Cosine Similarity",
+            out_fname="gent_vs_head_sampling_count_over_time_cosine.png",
+        )
 
     except FileNotFoundError:
         print(f"Error: Could not find input file: {input_file}")
@@ -509,6 +553,8 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
     except Exception as e:
         print(f"Error creating plots: {e}")
         return 1
+    else:
+        return 0
 
 
 if __name__ == "__main__":
