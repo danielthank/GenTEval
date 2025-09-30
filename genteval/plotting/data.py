@@ -7,7 +7,7 @@ class CostConfig:
     transmission_per_gb: float = 0.1
     gpu_per_hour: float = 0.38
     cpu_per_hour: float = 0.16
-    span_count: int = 391997
+    span_count: int = 11433454
     time_duration_minutes: int = 25
 
 
@@ -253,18 +253,19 @@ class ReportParser:
         self, report_data: dict, compressor_name: str
     ) -> dict | None:
         try:
-            # Extract from duration report section
+            # Extract from metadata.fidelity_scores (new location after enhanced_report fix)
+            if "metadata" in report_data and "fidelity_scores" in report_data["metadata"]:
+                fidelity_scores = report_data["metadata"]["fidelity_scores"]
+
+                mape = fidelity_scores.get("mape_fidelity_scores", {}).get(compressor_name, 0)
+                cosine = fidelity_scores.get("cosine_similarity_fidelity_scores", {}).get(compressor_name, 0)
+
+                return {"mape": mape, "cosine": cosine}
+
+            # Fallback: Try legacy locations in duration report (for backward compatibility)
             duration_report = report_data["reports"]["duration"]
 
-            # Try to extract from fidelity_scores first
-            if "fidelity_scores" in duration_report:
-                fidelity_scores = duration_report["fidelity_scores"]
-                if compressor_name in fidelity_scores:
-                    mape = fidelity_scores[compressor_name]
-                    cosine = fidelity_scores[compressor_name]
-                    return {"mape": mape, "cosine": cosine}
-
-            # Try separate mape and cosine fields
+            # Try separate mape and cosine fields in duration report (legacy)
             mape = 0
             cosine = 0
 

@@ -20,11 +20,11 @@ class CountOverTimeReport(BaseReport):
         self.time_series_metric = TimeSeriesComparisonMetric()
 
     def _calculate_count_over_time_fidelity(
-        self, original_data, compressed_data, group_key
+        self, original_data, compressed_data, group_key, compressor_name
     ):
         """Calculate MAPE and Cosine similarity using the generic metric class with correct formula."""
         return self.time_series_metric.process_count_over_time_series(
-            original_data, compressed_data, group_key
+            original_data, compressed_data, group_key, compressor_name
         )
 
     def generate(self, run_dirs) -> dict[str, Any]:
@@ -86,20 +86,12 @@ class CountOverTimeReport(BaseReport):
                 for depth in range(5):
                     group_key = f"depth_{depth}"
                     fidelity_result = self._calculate_count_over_time_fidelity(
-                        original_data, compressed_data, group_key
+                        original_data, compressed_data, group_key, compressor
                     )
 
                     if not np.isinf(fidelity_result["mape"]):
                         depth_mape_scores.append(max(0, 100 - fidelity_result["mape"]))
                     depth_cosine_scores.append(fidelity_result["cosine_sim"] * 100)
-
-                # Also calculate for "all" spans
-                all_fidelity_result = self._calculate_count_over_time_fidelity(
-                    original_data, compressed_data, "all"
-                )
-                if not np.isinf(all_fidelity_result["mape"]):
-                    depth_mape_scores.append(max(0, 100 - all_fidelity_result["mape"]))
-                depth_cosine_scores.append(all_fidelity_result["cosine_sim"] * 100)
 
                 # Calculate overall fidelity scores
                 overall_mape_fidelity = (

@@ -138,7 +138,9 @@ class TimeSeriesComparisonMetric:
 
         return results
 
-    def process_count_over_time_series(self, original_data, results_data, group_key):
+    def process_count_over_time_series(
+        self, original_data, results_data, group_key, compressor_name=None
+    ):
         """
         Process count over time data - new method for count evaluation.
 
@@ -146,6 +148,7 @@ class TimeSeriesComparisonMetric:
             original_data: Original dataset with span_count_by_time structure
             results_data: Compressed dataset with span_count_by_time structure
             group_key: The group key (e.g., "depth_0", "depth_1", "all")
+            compressor_name: Name of the compressor to determine scaling factor
 
         Returns:
             Dict with {"mape": float, "cosine_sim": float}
@@ -169,9 +172,21 @@ class TimeSeriesComparisonMetric:
             original_time_series = []
             results_time_series = []
 
+            # Determine scaling factor for head sampling compressors
+            scale_factor = 1
+            if compressor_name and "head_sampling_" in compressor_name:
+                try:
+                    # Extract the sampling ratio from compressor name (e.g., "head_sampling_20" -> 20)
+                    ratio_str = compressor_name.split("head_sampling_")[1]
+                    scale_factor = int(ratio_str)
+                except (IndexError, ValueError):
+                    scale_factor = 1  # Default to 1 if parsing fails
+
             for time_bucket in sorted(common_time_buckets):
                 original_time_series.append(original_count_data[time_bucket])
-                results_time_series.append(results_count_data[time_bucket])
+                # Scale up the compressed count to account for sampling ratio
+                scaled_count = results_count_data[time_bucket] * scale_factor
+                results_time_series.append(scaled_count)
 
             # Use same generic calculation
             return self.calculate_time_series_metrics(

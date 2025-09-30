@@ -20,13 +20,10 @@ class SpanDurationBoundsModel:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
-        # Storage: {time_bucket: {NodeFeature: (min_duration, max_duration)}}
-        self.duration_bounds = defaultdict(dict)
-
-        # Temporary storage during fitting
-        self._temp_durations = defaultdict(
-            lambda: defaultdict(list)
-        )  # {time_bucket: {NodeFeature: [durations]}}
+        # Storage: {time_bucket: {NodeFeature: {'min': min_duration, 'max': max_duration}}}
+        self.duration_bounds = defaultdict(
+            lambda: defaultdict(lambda: {"min": float("inf"), "max": float("-inf")})
+        )
 
     def fit(self, traces):
         """Learn duration bounds for all spans from traces."""
@@ -41,12 +38,16 @@ class SpanDurationBoundsModel:
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
 
+            # Build parent-to-children count mapping once per trace (O(n))
+            child_counts = defaultdict(int)
+            for span_data in trace.spans.values():
+                parent_id = span_data.get("parentSpanId")
+                if parent_id:
+                    child_counts[parent_id] += 1
+
             # Process all spans (not just roots)
             for span_id, span_data in trace.spans.items():
-                # Count children for this span
-                child_count = sum(
-                    1 for s in trace.spans.values() if s.get("parentSpanId") == span_id
-                )
+                child_count = child_counts[span_id]
 
                 node_idx = span_data["nodeIdx"]
                 span_feature = NodeFeature(node_idx=node_idx, child_count=child_count)
@@ -57,7 +58,10 @@ class SpanDurationBoundsModel:
                 if duration <= 0:
                     continue
 
-                self._temp_durations[time_bucket][span_feature].append(duration)
+                # Update min/max bounds directly in final storage
+                bounds = self.duration_bounds[time_bucket][span_feature]
+                bounds["min"] = min(bounds["min"], duration)
+                bounds["max"] = max(bounds["max"], duration)
 
                 total_spans += 1
                 total_duration_samples += 1
@@ -66,41 +70,8 @@ class SpanDurationBoundsModel:
             f"Collected {total_duration_samples} duration samples from {total_spans} spans"
         )
         self.logger.info(
-            f"Found duration data for {len(self._temp_durations)} time buckets"
+            f"Found duration data for {len(self.duration_bounds)} time buckets"
         )
-
-        # Second pass: calculate min/max bounds for each (time_bucket, feature) combination
-        self.logger.info("Calculating min/max bounds for each feature")
-
-        # Calculate total work for progress bar
-        total_feature_combinations = sum(
-            len(bucket_features) for bucket_features in self._temp_durations.values()
-        )
-        self.logger.info(
-            f"Calculating bounds for {total_feature_combinations} unique (time_bucket, feature) combinations"
-        )
-
-        processed_combinations = 0
-
-        # Create progress bar for all feature combinations
-        with tqdm(
-            total=total_feature_combinations, desc="Calculating duration bounds"
-        ) as pbar:
-            for time_bucket, bucket_features in self._temp_durations.items():
-                for feature, durations in bucket_features.items():
-                    min_duration = min(durations)
-                    max_duration = max(durations)
-
-                    self.duration_bounds[time_bucket][feature] = (
-                        min_duration,
-                        max_duration,
-                    )
-                    processed_combinations += 1
-
-                    pbar.update(1)
-
-        # Clear temporary storage
-        self._temp_durations.clear()
 
         total_bounds = sum(len(bucket) for bucket in self.duration_bounds.values())
         self.logger.info(
@@ -116,7 +87,8 @@ class SpanDurationBoundsModel:
             time_bucket in self.duration_bounds
             and feature in self.duration_bounds[time_bucket]
         ):
-            return self.duration_bounds[time_bucket][feature]
+            bounds = self.duration_bounds[time_bucket][feature]
+            return bounds["min"], bounds["max"]
 
         # Fallback 1: same feature in closest time bucket
         if self.duration_bounds:
@@ -124,7 +96,8 @@ class SpanDurationBoundsModel:
                 self.duration_bounds.keys(), key=lambda t: abs(t - time_bucket)
             ):
                 if feature in self.duration_bounds[bucket_time]:
-                    return self.duration_bounds[bucket_time][feature]
+                    bounds = self.duration_bounds[bucket_time][feature]
+                    return bounds["min"], bounds["max"]
 
         # Fallback 2: same node name with any child count in closest time bucket
         if self.duration_bounds:
@@ -133,7 +106,8 @@ class SpanDurationBoundsModel:
             ):
                 for candidate_feature in self.duration_bounds[bucket_time]:
                     if candidate_feature.name == feature.name:
-                        return self.duration_bounds[bucket_time][candidate_feature]
+                        bounds = self.duration_bounds[bucket_time][candidate_feature]
+                        return bounds["min"], bounds["max"]
 
         # Fallback 3: any bounds in closest time bucket
         if self.duration_bounds:
@@ -142,7 +116,8 @@ class SpanDurationBoundsModel:
             )
             if self.duration_bounds[closest_bucket]:
                 # Use first available bounds
-                return next(iter(self.duration_bounds[closest_bucket].values()))
+                bounds = next(iter(self.duration_bounds[closest_bucket].values()))
+                return bounds["min"], bounds["max"]
 
         # Final fallback: default wide bounds
         return (1.0, float("inf"))
@@ -170,7 +145,9 @@ class SpanDurationBoundsModel:
             if time_bucket not in time_bucket_data:
                 time_bucket_data[time_bucket] = []
 
-            for feature, (min_dur, max_dur) in bucket_bounds.items():
+            for feature, bounds_info in bucket_bounds.items():
+                min_dur = bounds_info["min"]
+                max_dur = bounds_info["max"]
                 span_duration_bounds = simple_gent_pb2.SpanDurationBounds()
                 span_duration_bounds.feature.node_idx = feature.node_idx
                 span_duration_bounds.feature.child_count = feature.child_count
@@ -198,7 +175,9 @@ class SpanDurationBoundsModel:
     def load_state_dict(self, proto_models):
         """Load model state from protobuf message."""
 
-        self.duration_bounds = defaultdict(dict)
+        self.duration_bounds = defaultdict(
+            lambda: defaultdict(lambda: {"min": float("inf"), "max": float("-inf")})
+        )
 
         # Load from protobuf message
         for time_bucket_models in proto_models.time_buckets:
@@ -213,7 +192,10 @@ class SpanDurationBoundsModel:
                 min_dur = span_duration_bounds.min_duration
                 max_dur = span_duration_bounds.max_duration
 
-                self.duration_bounds[time_bucket][feature] = (min_dur, max_dur)
+                self.duration_bounds[time_bucket][feature] = {
+                    "min": min_dur,
+                    "max": max_dur,
+                }
 
         total_bounds = sum(len(bucket) for bucket in self.duration_bounds.values())
         self.logger.info(

@@ -1,5 +1,6 @@
 """Enhanced report generator with beautiful formatting and visualizations."""
 
+import copy
 import json
 import pathlib
 from typing import Any
@@ -732,16 +733,31 @@ class EnhancedReportGenerator:
     def save_enhanced_json_report(
         self, all_reports: dict[str, dict[str, Any]], output_path: pathlib.Path
     ):
-        """Save an enhanced JSON report with metadata."""
+        enhanced_reports = copy.deepcopy(all_reports)
+
+        fidelity_scores = {}
+        if "duration" in all_reports:
+            duration_data = all_reports["duration"]
+            mape_fidelity_scores = self.calculate_mape_fidelity_score(duration_data)
+            cosine_fidelity_scores = self.calculate_cos_fidelity_score(duration_data)
+
+            fidelity_scores = {
+                "mape_fidelity_scores": mape_fidelity_scores,
+                "cosine_similarity_fidelity_scores": cosine_fidelity_scores,
+            }
+
         enhanced_report = {
             "metadata": {
                 "generator": "GenTEval Enhanced Report Generator",
-                "report_types": list(all_reports.keys()),
+                "report_types": list(enhanced_reports.keys()),
                 "total_compressors": len(
-                    set().union(*[report.keys() for report in all_reports.values()])
+                    set().union(
+                        *[report.keys() for report in enhanced_reports.values()]
+                    )
                 ),
+                "fidelity_scores": fidelity_scores,
             },
-            "reports": all_reports,
+            "reports": enhanced_reports,
         }
 
         with open(output_path, "w") as f:

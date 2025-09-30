@@ -52,7 +52,7 @@ class SimpleGenTConfig:
     metadata_epochs: int = 500
     batch_size: int = 512
     beta: float = 10.0  # KL divergence weight
-    early_stopping_patience: int = 10
+    early_stopping_patience: int = 5
     sequential_training_lr_factor: float = 0.5  # LR reduction for sequential training
 
     # Reject sampling parameters
