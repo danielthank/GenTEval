@@ -106,9 +106,6 @@ class RCAEvalDataset(Dataset):
                         "parentSpanId": None
                         if pd.isna(row["parentSpanID"])
                         else row["parentSpanID"],
-                        "statusCode": None
-                        if pd.isna(row["statusCode"])
-                        else row["statusCode"],
                     },
                     axis=1,
                 )
@@ -142,7 +139,6 @@ class RCAEvalDataset(Dataset):
                         "startTime": span["startTime"],
                         "duration": span["duration"],
                         "parentSpanID": span["parentSpanId"],
-                        "statusCode": span["statusCode"],
                     }
                 )
         dtypes = {
@@ -154,6 +150,5 @@ class RCAEvalDataset(Dataset):
             "startTime": "int64",
             "duration": "int64",
             "parentSpanID": "string",
-            "statusCode": "string",
         }
         self._spans = pd.DataFrame(rows).astype(dtypes)

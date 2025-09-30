@@ -515,8 +515,8 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             x_values=cost_per_million_spans,
             x_title="Total Cost per Million Spans (log scale)",
             y_values=tracerca_avg5_fidelity,
-            y_title="TracerCA Avg@5 Fidelity Score (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - TracerCA Avg@5 Fidelity Score",
+            y_title="TraceRCA Avg@5 Fidelity Score (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - TraceRCA Avg@5 Fidelity Score",
             out_fname="gent_vs_head_sampling_tracerca_avg5.png",
         )
 

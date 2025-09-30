@@ -254,11 +254,18 @@ class ReportParser:
     ) -> dict | None:
         try:
             # Extract from metadata.fidelity_scores (new location after enhanced_report fix)
-            if "metadata" in report_data and "fidelity_scores" in report_data["metadata"]:
+            if (
+                "metadata" in report_data
+                and "fidelity_scores" in report_data["metadata"]
+            ):
                 fidelity_scores = report_data["metadata"]["fidelity_scores"]
 
-                mape = fidelity_scores.get("mape_fidelity_scores", {}).get(compressor_name, 0)
-                cosine = fidelity_scores.get("cosine_similarity_fidelity_scores", {}).get(compressor_name, 0)
+                mape = fidelity_scores.get("mape_fidelity_scores", {}).get(
+                    compressor_name, 0
+                )
+                cosine = fidelity_scores.get(
+                    "cosine_similarity_fidelity_scores", {}
+                ).get(compressor_name, 0)
 
                 return {"mape": mape, "cosine": cosine}
 
@@ -399,11 +406,11 @@ class ReportParser:
         }
 
     def _extract_rca_data(self, report_data: dict, compressor_name: str) -> dict | None:
-        """Extract TracerCA and MicroRank avg5 data from the JSON report."""
+        """Extract TraceRCA and MicroRank avg5 data from the JSON report."""
         try:
             result = {}
 
-            # Extract TracerCA avg5
+            # Extract TraceRCA avg5
             if "trace_rca" in report_data.get("reports", {}):
                 trace_rca_report = report_data["reports"]["trace_rca"]
                 if compressor_name in trace_rca_report:
