@@ -60,6 +60,51 @@ def extract_mape_data_for_heatmap(report_data, compressor_key):
     return mape_data, matching_keys[0]
 
 
+def extract_mape_data_for_status_code_heatmap(report_data, compressor_key):
+    """Extract MAPE data for status codes from the JSON report for a specific compressor."""
+    if "reports" not in report_data or "duration" not in report_data["reports"]:
+        raise ValueError("Invalid report format: missing duration data")
+
+    duration_data = report_data["reports"]["duration"]
+
+    # Find the matching compressor (could be part of a compound key like "app_compressor")
+    matching_keys = [key for key in duration_data.keys() if compressor_key in key]
+    if not matching_keys:
+        available_keys = list(duration_data.keys())
+        raise ValueError(
+            f"Compressor '{compressor_key}' not found. Available: {available_keys}"
+        )
+
+    if len(matching_keys) > 1:
+        print(f"Warning: Multiple matches for '{compressor_key}': {matching_keys}")
+        print(f"Using first match: {matching_keys[0]}")
+
+    compressor_data = duration_data[matching_keys[0]]
+
+    # Extract MAPE metrics - pattern: http.status_code_{code}_p{Y}_mape
+    mape_data = {}
+    for metric_name, metric_value in compressor_data.items():
+        if "_mape" in metric_name and "http.status_code_" in metric_name:
+            # Pattern: http.status_code_{code}_p{percentile}_mape
+            # When split by "_": ['http.status', 'code', '{code}', 'p{percentile}', 'mape']
+            parts = metric_name.split("_")
+
+            if len(parts) >= 5:
+                # Status code is at index 2 (after 'http.status' and 'code')
+                status_code = parts[2]
+
+                # Percentile is at index 3 (starts with 'p')
+                percentile_part = parts[3]
+                if percentile_part.startswith("p") and percentile_part[1:].isdigit():
+                    percentile_idx = int(percentile_part[1:])
+
+                    if status_code not in mape_data:
+                        mape_data[status_code] = {}
+                    mape_data[status_code][percentile_idx] = metric_value["avg"]
+
+    return mape_data, matching_keys[0]
+
+
 def create_mape_heatmap(mape_data, compressor_name, output_dir):
     """Create a 2D heatmap of MAPE values across depth and percentiles."""
 
@@ -130,6 +175,79 @@ def create_mape_heatmap(mape_data, compressor_name, output_dir):
     return output_path
 
 
+def create_status_code_mape_heatmap(mape_data, compressor_name, output_dir):
+    """Create a 2D heatmap of MAPE values across HTTP status codes and percentiles."""
+
+    # Get unique status codes and sort them
+    status_codes = sorted(mape_data.keys())
+    percentiles = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
+    # Create 2D array for heatmap
+    heatmap_data = np.full((len(status_codes), len(percentiles)), np.nan)
+
+    # Fill the array with available data
+    for code_idx, status_code in enumerate(status_codes):
+        if status_code in mape_data:
+            for perc_idx, percentile in enumerate(percentiles):
+                if percentile in mape_data[status_code]:
+                    heatmap_data[code_idx, perc_idx] = (
+                        100 - mape_data[status_code][percentile]
+                    )
+
+    # Create the heatmap
+    plt.figure(figsize=(12, 8))
+
+    # Use a colormap where lower values (better MAPE) are green
+    mask = np.isnan(heatmap_data)
+
+    # Create labels for status codes (use "empty" for empty string)
+    status_code_labels = [code if code else "empty" for code in status_codes]
+
+    sns.heatmap(
+        heatmap_data,
+        annot=True,
+        fmt=".1f",
+        cmap="RdYlGn",  # Red-Yellow-Green reversed (lower is better)
+        mask=mask,
+        xticklabels=[f"p{p}" for p in percentiles],
+        yticklabels=status_code_labels,
+        square=True,
+        cbar=False,
+        vmin=0,
+        vmax=100,
+    )
+
+    plt.title(
+        f"MAPE Heatmap by HTTP Status Code: {compressor_name}\n(Higher values = Better fidelity)",
+        fontsize=16,
+        fontweight="bold",
+        pad=20,
+    )
+    plt.xlabel("Percentiles", fontsize=14, fontweight="bold")
+    plt.ylabel("HTTP Status Code", fontsize=14, fontweight="bold")
+
+    # Improve layout
+    plt.tight_layout()
+
+    # Save the plot
+    output_path = Path(output_dir) / f"{compressor_name}_status_code_mape_heatmap.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(
+        output_path,
+        dpi=300,
+        bbox_inches="tight",
+        format="png",
+        facecolor="white",
+        edgecolor="none",
+    )
+
+    print(f"Saved status code MAPE heatmap to: {output_path.resolve()}")
+    plt.close()
+
+    return output_path
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(
@@ -139,9 +257,9 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["scatter", "heatmap"],
+        choices=["scatter", "heatmap", "heatmap_status_code"],
         default="scatter",
-        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default) or heatmap",
+        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), heatmap (depth heatmap), or heatmap_status_code (HTTP status code heatmap)",
     )
     parser.add_argument(
         "--input",
@@ -158,7 +276,7 @@ def main():
     parser.add_argument(
         "--compressor",
         type=str,
-        help="Compressor name to visualize (required for heatmap mode)",
+        help="Compressor name to visualize (required for heatmap modes)",
     )
 
     args = parser.parse_args()
@@ -195,6 +313,38 @@ def main():
             print(f"Error: {e}")
             return 1
 
+    elif args.mode == "heatmap_status_code":
+        # Status code heatmap mode - requires input JSON and compressor
+        if not args.input:
+            parser.error("--input is required for heatmap_status_code mode")
+        if not args.compressor:
+            parser.error("--compressor is required for heatmap_status_code mode")
+
+        # Load the JSON report
+        try:
+            with open(args.input) as f:
+                report_data = json.load(f)
+        except FileNotFoundError:
+            print(f"Error: Could not find input file: {args.input}")
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in input file: {e}")
+            return 1
+
+        # Extract MAPE data for status codes and create heatmap
+        try:
+            mape_data, full_compressor_name = extract_mape_data_for_status_code_heatmap(
+                report_data, args.compressor
+            )
+            create_status_code_mape_heatmap(mape_data, full_compressor_name, args.output_dir)
+            print(
+                f"Successfully generated status code heatmap for compressor: {full_compressor_name}"
+            )
+            return 0
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
+
     else:
         # Default scatter plot mode: GenT CPU vs head sampling
         return _create_gent_vs_head_sampling_plot(args.input, args.output_dir)
@@ -223,6 +373,8 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
         names = [exp.name for exp in all_experiments]
         mape_fidelity = [exp.mape_fidelity for exp in all_experiments]
         cos_fidelity = [exp.cos_fidelity for exp in all_experiments]
+        mape_fidelity_by_status_code = [exp.mape_fidelity_by_status_code for exp in all_experiments]
+        cos_fidelity_by_status_code = [exp.cos_fidelity_by_status_code for exp in all_experiments]
         operation_f1_fidelity = [exp.operation_f1_fidelity for exp in all_experiments]
         operation_pair_f1_fidelity = [
             exp.operation_pair_f1_fidelity for exp in all_experiments
@@ -426,8 +578,8 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             x_title="Total Cost per Million Spans (log scale)",
             y_values=mape_fidelity,
             y_title="MAPE Fidelity (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - MAPE Fidelity",
-            out_fname="gent_vs_head_sampling_mape.png",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - MAPE Fidelity (Depth)",
+            out_fname="gent_vs_head_sampling_depth_mape.png",
         )
 
         draw_and_save_enhanced(
@@ -435,8 +587,8 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             x_title="Total Cost per Million Spans (log scale)",
             y_values=cos_fidelity,
             y_title="Cosine Similarity Fidelity (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Cosine Similarity",
-            out_fname="gent_vs_head_sampling_cosine.png",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Cosine Similarity (Depth)",
+            out_fname="gent_vs_head_sampling_depth_cosine.png",
         )
 
         draw_and_save_enhanced(
@@ -545,6 +697,24 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             y_title="Count Over Time Cosine Similarity Fidelity (%)",
             plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Count Over Time Cosine Similarity",
             out_fname="gent_vs_head_sampling_count_over_time_cosine.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=mape_fidelity_by_status_code,
+            y_title="MAPE Fidelity by Status Code (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - MAPE Fidelity (HTTP Status Code)",
+            out_fname="gent_vs_head_sampling_http.status_code_mape.png",
+        )
+
+        draw_and_save_enhanced(
+            x_values=cost_per_million_spans,
+            x_title="Total Cost per Million Spans (log scale)",
+            y_values=cos_fidelity_by_status_code,
+            y_title="Cosine Similarity Fidelity by Status Code (%)",
+            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Cosine Similarity (HTTP Status Code)",
+            out_fname="gent_vs_head_sampling_http.status_code_cosine.png",
         )
 
     except FileNotFoundError:

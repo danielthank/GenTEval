@@ -47,7 +47,7 @@ class RCAEvalDataset(Dataset):
         spans = self.spans
         if spans is not None:
             spans.to_pickle(dir.joinpath("spans.pkl"))
-            spans.to_csv(dir.joinpath("spans.csv"), index=False)
+            spans.to_csv(dir.joinpath("spans.csv"), index=False, na_rep="")
 
         traces = self.traces
         if traces is not None:
@@ -78,7 +78,18 @@ class RCAEvalDataset(Dataset):
         return self
 
     def _load_spans_from_run_dir(self):
-        self._spans = pd.read_csv(self.run_dir.joinpath("traces.csv"))
+        dtypes = {
+            "traceID": "string",
+            "spanID": "string",
+            "serviceName": "string",
+            "methodName": "string",
+            "operationName": "string",
+            "startTime": "int64",
+            "duration": "int64",
+            "parentSpanID": "string",
+            "http.status_code": "string",
+        }
+        self._spans = pd.read_csv(self.run_dir.joinpath("traces.csv"), dtype=dtypes)
         return self
 
     def _spans_to_traces(self):
@@ -100,12 +111,15 @@ class RCAEvalDataset(Dataset):
                 valid_trace_group.set_index("spanID")
                 .apply(
                     lambda row: {
-                        "nodeName": f"{row['serviceName']}!@#{row['methodName']}!@#{row['operationName']}",
+                        "nodeName": f"{row['serviceName'] if pd.notna(row['serviceName']) else ''}!@#{row['methodName'] if pd.notna(row['methodName']) else ''}!@#{row['operationName'] if pd.notna(row['operationName']) else ''}",
                         "startTime": row["startTime"],
                         "duration": row["duration"],
                         "parentSpanId": None
                         if pd.isna(row["parentSpanID"])
                         else row["parentSpanID"],
+                        "http.status_code": None
+                        if pd.isna(row.get("http.status_code"))
+                        else row.get("http.status_code"),
                     },
                     axis=1,
                 )
@@ -120,7 +134,7 @@ class RCAEvalDataset(Dataset):
     def _traces_to_spans(self):
         def parse_node_name(node_name):
             parts = node_name.split("!@#")
-            return [None if part == "nan" else part for part in parts]
+            return ["" if part == "nan" else part for part in parts]
 
         rows = []
 
@@ -139,6 +153,7 @@ class RCAEvalDataset(Dataset):
                         "startTime": span["startTime"],
                         "duration": span["duration"],
                         "parentSpanID": span["parentSpanId"],
+                        "http.status_code": span.get("http.status_code", ""),
                     }
                 )
         dtypes = {
@@ -150,5 +165,6 @@ class RCAEvalDataset(Dataset):
             "startTime": "int64",
             "duration": "int64",
             "parentSpanID": "string",
+            "http.status_code": "string",
         }
         self._spans = pd.DataFrame(rows).astype(dtypes)

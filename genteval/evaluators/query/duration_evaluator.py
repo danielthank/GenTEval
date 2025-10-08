@@ -62,12 +62,19 @@ class DurationEvaluator(Evaluator):
                                 )
 
                 span_depth = get_span_depth(span_id, trace)
+                status_code = span.get("http.status_code", "")
+                span_start_time = span["startTime"]
+                span_duration = span["duration"]
+                start_time = span_start_time // (60 * 1000000)  # minute bucket
+
+                # Collect by status code
+                duration[f"http.status_code_{status_code}"].append(span_duration)
+                duration_by_time[f"http.status_code_{status_code}"][start_time].append(
+                    span_duration
+                )
 
                 if 0 <= span_depth <= 4:
                     service = span["nodeName"].split("!@#")[0]
-                    span_start_time = span["startTime"]
-                    span_duration = span["duration"]
-                    start_time = span_start_time // (60 * 1000000)  # minute bucket
 
                     duration[f"depth_{span_depth}"].append(span_duration)
 

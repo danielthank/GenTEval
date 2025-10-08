@@ -7,8 +7,8 @@ class CostConfig:
     transmission_per_gb: float = 0.1
     gpu_per_hour: float = 0.38
     cpu_per_hour: float = 0.16
-    span_count: int = 11433454
-    time_duration_minutes: int = 25
+    span_count: int = 1845349
+    time_duration_minutes: int = 48 * 30 * 24 * 60
 
 
 @dataclass
@@ -18,6 +18,8 @@ class ExperimentData:
     duration: str
     mape_fidelity: float
     cos_fidelity: float
+    mape_fidelity_by_status_code: float
+    cos_fidelity_by_status_code: float
     operation_f1_fidelity: float
     operation_pair_f1_fidelity: float
     child_parent_ratio_fidelity: float
@@ -84,15 +86,13 @@ class ReportParser:
     def _parse_compressor(
         self, report_data: dict, compressor_name: str
     ) -> ExperimentData | None:
-        # Parse compressor name to extract metadata
-        name_parts = self._parse_compressor_name(compressor_name)
-        if not name_parts:
-            return None
-
-        # Extract data from different report sections
+        # Extract data from different report sections first (needed for compute type detection)
         size_data = self._extract_size_data(report_data, compressor_name)
         time_data = self._extract_time_data(report_data, compressor_name)
         fidelity_data = self._extract_fidelity_data(report_data, compressor_name)
+        fidelity_data_by_status_code = self._extract_fidelity_data_by_status_code(
+            report_data, compressor_name
+        )
         operation_data = self._extract_operation_data(report_data, compressor_name)
         child_parent_ratio_data = self._extract_child_parent_ratio_data(
             report_data, compressor_name
@@ -101,6 +101,11 @@ class ReportParser:
         count_over_time_data = self._extract_count_over_time_data(
             report_data, compressor_name
         )
+
+        # Parse compressor name to extract metadata (pass time_data for compute type detection)
+        name_parts = self._parse_compressor_name(compressor_name, time_data)
+        if not name_parts:
+            return None
 
         if not all([size_data, time_data, fidelity_data]):
             print(f"Warning: Missing data for {compressor_name}")
@@ -131,6 +136,12 @@ class ReportParser:
                 "count_over_time_cosine_fidelity": 0.0,
             }
 
+        if not fidelity_data_by_status_code:
+            fidelity_data_by_status_code = {
+                "mape": 0.0,
+                "cosine": 0.0,
+            }
+
         # Calculate costs
         cost_data = self._calculate_costs(
             size_data["size_bytes"], time_data["cpu_seconds"], time_data["gpu_seconds"]
@@ -142,6 +153,8 @@ class ReportParser:
             duration=name_parts["duration"],
             mape_fidelity=fidelity_data["mape"],
             cos_fidelity=fidelity_data["cosine"],
+            mape_fidelity_by_status_code=fidelity_data_by_status_code["mape"],
+            cos_fidelity_by_status_code=fidelity_data_by_status_code["cosine"],
             operation_f1_fidelity=operation_data["operation_f1"] * 100,
             operation_pair_f1_fidelity=operation_data["operation_pair_f1"] * 100,
             child_parent_ratio_fidelity=max(
@@ -187,7 +200,9 @@ class ReportParser:
             is_head_sampling=name_parts["is_head_sampling"],
         )
 
-    def _parse_compressor_name(self, compressor_name: str) -> dict | None:
+    def _parse_compressor_name(
+        self, compressor_name: str, time_data: dict | None = None
+    ) -> dict | None:
         if "head_sampling" in compressor_name:
             ratio = compressor_name.split("_")[-1]
             return {
@@ -204,7 +219,21 @@ class ReportParser:
                 if duration_idx < len(parts):
                     duration_num = parts[duration_idx]
                     duration = f"{duration_num}min"
-                    compute_type = parts[-1].upper()
+
+                    # Determine compute type from time data if available
+                    compute_type = "CPU"  # Default
+                    if time_data:
+                        gpu_seconds = time_data.get("gpu_seconds", 0)
+                        cpu_seconds = time_data.get("cpu_seconds", 0)
+                        if gpu_seconds > 0:
+                            compute_type = "GPU"
+                        elif cpu_seconds > 0:
+                            compute_type = "CPU"
+
+                    # Also check name suffix if time data doesn't help
+                    last_part = parts[-1].lower()
+                    if last_part in ["cpu", "gpu"]:
+                        compute_type = last_part.upper()
 
                     return {
                         "display_name": f"GenT {duration}",
@@ -246,6 +275,30 @@ class ReportParser:
         # For head sampling, no computation time (0 for both CPU and GPU)
         if "head_sampling" in compressor_name:
             return {"cpu_seconds": 0, "gpu_seconds": 0}
+
+        return None
+
+    def _extract_fidelity_data_by_status_code(
+        self, report_data: dict, compressor_name: str
+    ) -> dict | None:
+        try:
+            # Extract from metadata.fidelity_scores
+            if (
+                "metadata" in report_data
+                and "fidelity_scores" in report_data["metadata"]
+            ):
+                fidelity_scores = report_data["metadata"]["fidelity_scores"]
+
+                mape_by_status_code = fidelity_scores.get(
+                    "mape_fidelity_scores_by_status_code", {}
+                ).get(compressor_name, 0)
+                cosine_by_status_code = fidelity_scores.get(
+                    "cosine_similarity_fidelity_scores_by_status_code", {}
+                ).get(compressor_name, 0)
+
+                return {"mape": mape_by_status_code, "cosine": cosine_by_status_code}
+        except KeyError:
+            pass
 
         return None
 

@@ -13,6 +13,11 @@ from genteval.models import MetadataVAE
 from .node_feature import NodeFeature
 
 
+# Status code vocabulary for http.status_code prediction
+STATUS_CODE_VOCAB = ["", "200", "308", "0", "504", "400", "304", "503"]
+STATUS_CODE_TO_IDX = {code: idx for idx, code in enumerate(STATUS_CODE_VOCAB)}
+
+
 class MetadataVAEModel:
     """
     MetadataVAE model adapter for simple_gent that replaces both gap_ratio_model and duration_ratio_model.
@@ -168,10 +173,10 @@ class MetadataVAEModel:
                     )
 
                     # Unpack model output
-                    recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
+                    recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z, status_code_logits = (
                         model_output
                     )
-                    total_loss, recon_loss, kl_loss = model.loss_function(
+                    total_loss, recon_loss, kl_loss, status_code_loss = model.loss_function(
                         recon,
                         targets_device,
                         x_scale,
@@ -181,6 +186,7 @@ class MetadataVAEModel:
                         mu,
                         logvar,
                         z,
+                        status_code_logits,
                         current_beta,
                     )
                     total_loss.backward()
@@ -275,6 +281,10 @@ class MetadataVAEModel:
                         child_duration = span_data["duration"]
                         gap_from_parent = child_start_time - parent_start_time
 
+                        # Extract status code
+                        child_status_code = span_data.get("http.status_code", "")
+                        status_code_idx = STATUS_CODE_TO_IDX.get(child_status_code, 0)
+
                         # Skip invalid data
                         if parent_duration <= 0 or child_duration <= 0:
                             continue
@@ -308,6 +318,7 @@ class MetadataVAEModel:
                                 "child_node_idx": child_node_idx,
                                 "gap_from_parent_ratio": gap_from_parent_ratio,
                                 "child_duration_ratio": child_duration_ratio,
+                                "status_code_idx": status_code_idx,
                             }
                         )
 
@@ -330,8 +341,8 @@ class MetadataVAEModel:
 
             # Create training arrays for this bucket
             num_examples = len(raw_training_data)
-            training_inputs = np.zeros((num_examples, 4))  # Reduced from 5 to 4 inputs
-            training_targets = np.zeros((num_examples, 2))
+            training_inputs = np.zeros((num_examples, 4))  # 4 inputs: duration, child_idx, parent_node, child_node
+            training_targets = np.zeros((num_examples, 3))  # 3 targets: gap_ratio, duration_ratio, status_code
 
             # Extract all data at once using list comprehensions (vectorized)
             training_inputs[:, 0] = [
@@ -348,6 +359,9 @@ class MetadataVAEModel:
             ]
             training_targets[:, 1] = [
                 item["child_duration_ratio"] for item in raw_training_data
+            ]
+            training_targets[:, 2] = [
+                item["status_code_idx"] for item in raw_training_data
             ]
 
             # No manual normalization - let the model handle it
@@ -381,10 +395,10 @@ class MetadataVAEModel:
                 )
 
                 # Unpack model output
-                recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z = (
+                recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z, status_code_logits = (
                     model_output
                 )
-                val_loss, _, _ = model.loss_function(
+                val_loss, _, _, _ = model.loss_function(
                     recon,
                     targets_device,
                     x_scale,
@@ -394,6 +408,7 @@ class MetadataVAEModel:
                     mu,
                     logvar,
                     z,
+                    status_code_logits,
                     beta,
                 )
 
@@ -514,8 +529,9 @@ class MetadataVAEModel:
                     duration_ratio = float(
                         np.clip(batch_samples[j, 1].item(), 0.0, 1.0)
                     )
+                    status_code_idx = int(batch_samples[j, 2].item())
 
-                    results[original_idx] = (gap_ratio, duration_ratio)
+                    results[original_idx] = (gap_ratio, duration_ratio, status_code_idx)
 
         # Apply reject sampling if duration bounds are provided
         if duration_bounds is not None:
@@ -542,7 +558,7 @@ class MetadataVAEModel:
 
         # Find indices that need resampling
         indices_to_resample = []
-        for i, ((_, duration_ratio), (min_dur, max_dur)) in enumerate(
+        for i, ((_, duration_ratio, _), (min_dur, max_dur)) in enumerate(
             zip(results, duration_bounds, strict=False)
         ):
             if duration_bounds[i] is None:
@@ -625,12 +641,13 @@ class MetadataVAEModel:
                         duration_ratio = float(
                             np.clip(batch_samples[j, 1].item(), 0.0, 1.0)
                         )
-                        results[orig_idx] = (gap_ratio, duration_ratio)
+                        status_code_idx = int(batch_samples[j, 2].item())
+                        results[orig_idx] = (gap_ratio, duration_ratio, status_code_idx)
 
             # Check which indices still need resampling
             new_indices_to_resample = []
             for i in indices_to_resample:
-                gap_ratio, duration_ratio = results[i]
+                gap_ratio, duration_ratio, status_code_idx = results[i]
                 min_dur, max_dur = duration_bounds[i]
                 parent_duration = requests[i][3]
                 child_duration = duration_ratio * parent_duration
@@ -642,7 +659,7 @@ class MetadataVAEModel:
 
         # Apply fallback clamping for any remaining out-of-bounds samples
         for i in indices_to_resample:
-            gap_ratio, duration_ratio = results[i]
+            gap_ratio, duration_ratio, status_code_idx = results[i]
             min_dur, max_dur = duration_bounds[i]
             parent_duration = requests[i][3]
 
@@ -655,7 +672,7 @@ class MetadataVAEModel:
                 duration_ratio, max(0.0, min_ratio), min(1.0, max_ratio)
             )
 
-            results[i] = (gap_ratio, float(clamped_duration_ratio))
+            results[i] = (gap_ratio, float(clamped_duration_ratio), status_code_idx)
 
         return results
 

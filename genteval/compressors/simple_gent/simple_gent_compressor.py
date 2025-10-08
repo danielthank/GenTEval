@@ -19,15 +19,18 @@ from .models import (
     SpanDurationBoundsModel,
     TopologyModel,
 )
+from .models.metadata_vae_model import STATUS_CODE_VOCAB
 from .timing_utils import SplitTimer
 
 
 def _get_random_trace_id():
-    return "trace" + uuid.uuid4().hex
+    # Generate 32-character hex string (128 bits) for OpenTelemetry trace ID
+    return uuid.uuid4().hex
 
 
 def _get_random_span_id():
-    return "span" + uuid.uuid4().hex
+    # Generate 16-character hex string (64 bits) for OpenTelemetry span ID
+    return uuid.uuid4().hex[:16]
 
 
 class SimpleGenTCompressor(Compressor):
@@ -317,7 +320,7 @@ class SimpleGenTCompressor(Compressor):
             )
 
         # Step 4: Batch generate timing for ALL traces simultaneously
-        self.logger.info(f"Batch generating timing for {len(trace_infos)} traces")
+        self.logger.info(f"Batch generating metadata for {len(trace_infos)} traces")
         all_traces_spans = self._generate_traces_batch(trace_infos)
 
         # Add all generated traces to dataset
@@ -331,13 +334,31 @@ class SimpleGenTCompressor(Compressor):
         """Generate timing information for the tree using depth-based batch sampling."""
         spans = {}
 
-        # Create root span
+        # Create root span with status code
         root_span_id = _get_random_span_id()
+
+        # Generate status code for root span using NO_PARENT token
+        vocab_size = self.node_encoder.get_vocab_size()
+        root_status_request = [
+            (
+                time_bucket,
+                type("Feature", (), {"node_idx": vocab_size})(),  # NO_PARENT token
+                root_tree.feature,  # child is the root node
+                root_duration,  # parent_duration (use root_duration)
+                0.0,  # normalized_child_idx (0 for root)
+            )
+        ]
+
+        [(_, _, root_status_code_idx)] = self.metadata_vae_model.sample_ratios_batch(
+            root_status_request
+        )
+        root_status_code_str = STATUS_CODE_VOCAB[root_status_code_idx]
+
         spans[root_span_id] = {
             "nodeIdx": root_tree.feature.node_idx,
             "startTime": int(trace_start_time),
             "duration": int(root_duration),
-            "statusCode": None,
+            "http.status_code": root_status_code_str,
             "parentSpanId": None,
         }
 
@@ -406,9 +427,10 @@ class SimpleGenTCompressor(Compressor):
                 )
 
                 # Phase 3: Create child spans and prepare next level
-                for i, ((gap_ratio, duration_ratio), child_info) in enumerate(
-                    zip(batch_results, child_infos, strict=False)
-                ):
+                for i, (
+                    (gap_ratio, duration_ratio, status_code_idx),
+                    child_info,
+                ) in enumerate(zip(batch_results, child_infos, strict=False)):
                     (
                         child_tree_node,
                         child_span_id,
@@ -426,12 +448,15 @@ class SimpleGenTCompressor(Compressor):
                     child_start_time = max(parent_start_time, child_start_time)
                     child_duration = max(1.0, child_duration)
 
+                    # Decode status code
+                    status_code_str = STATUS_CODE_VOCAB[status_code_idx]
+
                     # Create child span
                     spans[child_span_id] = {
                         "nodeIdx": child_tree_node.feature.node_idx,
                         "startTime": int(child_start_time),
                         "duration": int(child_duration),
-                        "statusCode": None,
+                        "http.status_code": status_code_str,
                         "parentSpanId": parent_span_id,
                     }
 
@@ -468,6 +493,11 @@ class SimpleGenTCompressor(Compressor):
         # Initialize: Create root spans for all traces and set up first level
         current_level_all_traces = []  # [(trace_id, tree_node, span_id, start_time, duration)]
 
+        # Generate status codes for all root spans in batch
+        vocab_size = self.node_encoder.get_vocab_size()
+        root_status_requests = []
+        root_trace_info = []
+
         for (
             trace_id,
             time_bucket,
@@ -475,14 +505,52 @@ class SimpleGenTCompressor(Compressor):
             trace_start_time,
             root_duration,
         ) in trace_infos:
-            # Create root span
             root_span_id = _get_random_span_id()
+
+            # Create request for root status code
+            root_status_requests.append(
+                (
+                    time_bucket,
+                    type("Feature", (), {"node_idx": vocab_size})(),  # NO_PARENT token
+                    root_tree.feature,  # child is the root node
+                    root_duration,  # parent_duration (use root_duration)
+                    0.0,  # normalized_child_idx (0 for root)
+                )
+            )
+
+            root_trace_info.append(
+                (
+                    trace_id,
+                    time_bucket,
+                    root_tree,
+                    root_span_id,
+                    trace_start_time,
+                    root_duration,
+                )
+            )
+
+        # Generate status codes for all roots in batch
+        root_batch_results = self.metadata_vae_model.sample_ratios_batch(
+            root_status_requests
+        )
+
+        # Create root spans with status codes
+        for (_, _, root_status_code_idx), (
+            trace_id,
+            time_bucket,
+            root_tree,
+            root_span_id,
+            trace_start_time,
+            root_duration,
+        ) in zip(root_batch_results, root_trace_info, strict=False):
+            root_status_code_str = STATUS_CODE_VOCAB[root_status_code_idx]
+
             all_traces_spans[trace_id] = {
                 root_span_id: {
                     "nodeIdx": root_tree.feature.node_idx,
                     "startTime": int(trace_start_time),
                     "duration": int(root_duration),
-                    "statusCode": None,
+                    "http.status_code": root_status_code_str,
                     "parentSpanId": None,
                 }
             }
@@ -565,7 +633,7 @@ class SimpleGenTCompressor(Compressor):
                 )
 
                 # Phase 3: Apply batch results back to respective traces
-                for (gap_ratio, duration_ratio), trace_info in zip(
+                for (gap_ratio, duration_ratio, status_code_idx), trace_info in zip(
                     mega_batch_results, request_to_trace_info, strict=False
                 ):
                     (
@@ -587,12 +655,15 @@ class SimpleGenTCompressor(Compressor):
                     child_start_time = max(parent_start_time, child_start_time)
                     child_duration = max(1.0, child_duration)
 
+                    # Decode status code
+                    status_code_str = STATUS_CODE_VOCAB[status_code_idx]
+
                     # Create child span in the appropriate trace
                     all_traces_spans[trace_id][child_span_id] = {
                         "nodeIdx": child_tree_node.feature.node_idx,
                         "startTime": int(child_start_time),
                         "duration": int(child_duration),
-                        "statusCode": None,
+                        "http.status_code": status_code_str,
                         "parentSpanId": parent_span_id,
                     }
 

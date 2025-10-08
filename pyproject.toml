@@ -41,6 +41,8 @@ collect_request_data = "genteval.bin.collect_request_data:main"
 export_feb_traces = "genteval.bin.export_feb_traces:main"
 adjust_duration = "genteval.bin.adjust_duration:main"
 remove_query_param = "genteval.data_collection.utils.remove_query_param:main"
+analyze_otel_attributes = "genteval.bin.analyze_otel_attributes:main"
+export_otel_traces = "genteval.bin.export_otel_traces:main"
 
 convert_trajectory = "genteval.data_collection.ai_agent.cli:main"
 batch_convert_trajectory = "genteval.data_collection.ai_agent.batch_convert_cli:main"

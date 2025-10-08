@@ -85,12 +85,12 @@ class HeadSamplingCompressor(Compressor):
                         )
 
                     if (
-                        "statusCode" in span_data
-                        and span_data["statusCode"] is not None
+                        "http.status_code" in span_data
+                        and span_data["http.status_code"] is not None
                     ):
                         attr = span.attributes.add()
-                        attr.key = "statusCode"
-                        attr.value.int_value = int(span_data["statusCode"])
+                        attr.key = "http.status_code"
+                        attr.value.string_value = str(span_data["http.status_code"])
             else:
                 # Handle simple trace format
                 span = scope_spans.spans.add()
@@ -118,7 +118,7 @@ class HeadSamplingCompressor(Compressor):
                         "nodeName": span.name,
                         "startTime": 0,  # Default values to ensure all fields exist
                         "duration": 0,
-                        "statusCode": 0,
+                        "http.status_code": "",
                         "parentSpanId": None,
                     }
 
@@ -128,8 +128,8 @@ class HeadSamplingCompressor(Compressor):
                             span_data["startTime"] = attr.value.int_value
                         elif attr.key == "duration":
                             span_data["duration"] = attr.value.int_value
-                        elif attr.key == "statusCode":
-                            span_data["statusCode"] = attr.value.int_value
+                        elif attr.key == "http.status_code":
+                            span_data["http.status_code"] = attr.value.string_value
 
                     # Handle parent span ID
                     if span.parent_span_id and span.parent_span_id != b"\x00" * 8:
