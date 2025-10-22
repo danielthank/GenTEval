@@ -352,10 +352,13 @@ class TimeSeriesComparisonMetric:
         )
         plt.tight_layout(rect=[0, 0, 1, 0.96])  # Leave space at top for title
 
+        # Build path correctly handling None fault
+        service_fault_dir = f"{service}_{fault}" if fault is not None else service
+
         plot_dir = (
             Path("output")
             / app_name
-            / f"{service}_{fault}"
+            / service_fault_dir
             / f"{run}"
             / "visualization"
             / "percentile"

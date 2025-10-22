@@ -12,6 +12,301 @@ from genteval.plotting.data import ReportParser
 # Hardcoded data arrays removed - now using JSON data source
 
 
+def extract_reference_counts(report_data: dict, reference_compressor: str) -> dict:
+    """
+    Extract sample counts from reference compressor (head_sampling_1).
+
+    Args:
+        report_data: Full report data with "reports" -> "duration" structure
+        reference_compressor: Name of reference compressor (default: head_sampling_1)
+
+    Returns:
+        Dict mapping group names to sample counts
+        Example: {"depth_0": 6704, "http.status_code_504": 41}
+    """
+    if "reports" not in report_data or "duration" not in report_data["reports"]:
+        return {}
+
+    duration_data = report_data["reports"]["duration"]
+
+    # Find reference compressor (could be part of compound key like "app_head_sampling_1")
+    # Use exact matching by checking if key ends with reference_compressor
+    ref_key = None
+    for key in duration_data:
+        if key.endswith(f"_{reference_compressor}"):
+            ref_key = key
+            break
+
+    if not ref_key:
+        print(f"Warning: Reference compressor '{reference_compressor}' not found")
+        return {}
+
+    ref_metrics = duration_data[ref_key]
+    counts = {}
+
+    # Extract depth counts
+    for depth in range(5):
+        key = f"depth_{depth}_sample_count"
+        if (
+            key in ref_metrics
+            and isinstance(ref_metrics[key], dict)
+            and "avg" in ref_metrics[key]
+        ):
+            counts[f"depth_{depth}"] = ref_metrics[key]["avg"]
+
+    # Extract status code counts
+    for metric_name in ref_metrics:
+        if "http.status_code_" in metric_name and "_sample_count" in metric_name:
+            # Extract status code: http.status_code_504_sample_count -> 504
+            code = metric_name.replace("http.status_code_", "").replace(
+                "_sample_count", ""
+            )
+            if (
+                isinstance(ref_metrics[metric_name], dict)
+                and "avg" in ref_metrics[metric_name]
+            ):
+                counts[f"http.status_code_{code}"] = ref_metrics[metric_name]["avg"]
+
+    return counts
+
+
+def get_metric_or_default(
+    metrics: dict,
+    group: str,
+    metric_type: str,
+    default_mape: float,
+    default_cosine: float,
+) -> float:
+    """
+    Get average metric value for a group, or return worst-case default if missing.
+
+    Args:
+        metrics: Compressor's metrics dict
+        group: Group name like "depth_0" or "http.status_code_504"
+        metric_type: "mape" or "cosine"
+        default_mape: Default MAPE value if missing (worst case: 100.0)
+        default_cosine: Default cosine sim value if missing (worst case: 0.0)
+
+    Returns:
+        Average metric value across all percentiles, or default if no data
+    """
+    suffix = "_mape" if metric_type == "mape" else "_cosine_sim"
+
+    # Collect all percentile values for this group
+    values = []
+    for metric_name, metric_data in metrics.items():
+        if group in metric_name and suffix in metric_name:
+            if isinstance(metric_data, dict) and "avg" in metric_data:
+                val = metric_data["avg"]
+                # Skip inf/nan values
+                if not (isinstance(val, float) and (val == float("inf") or val != val)):
+                    values.append(val)
+
+    if values:
+        # Average across all percentiles for this group
+        return sum(values) / len(values)
+    # No data -> worst case
+    return default_mape if metric_type == "mape" else default_cosine
+
+
+def calculate_depth_fidelity(
+    report_data: dict, metric_type: str, use_weighted_average: bool = True
+) -> dict:
+    """
+    Calculate fidelity scores for depth groups (depth_0 through depth_4) only.
+
+    Args:
+        report_data: Full report data with "reports" -> "duration" structure
+        metric_type: "mape" or "cosine"
+        use_weighted_average: If True, use reference counts as weights. If False, simple average
+                             where missing groups contribute 0% fidelity.
+
+    Returns:
+        Dict mapping compressor name to depth fidelity score (0-100)
+    """
+    reference_compressor = "head_sampling_1"
+    reference_counts = extract_reference_counts(report_data, reference_compressor)
+
+    if not reference_counts:
+        print("Warning: Could not extract reference counts, returning empty dict")
+        return {}
+
+    # Filter to only depth groups
+    depth_counts = {k: v for k, v in reference_counts.items() if k.startswith("depth_")}
+
+    if not depth_counts:
+        print("Warning: No depth reference counts found")
+        return {}
+
+    if "reports" not in report_data or "duration" not in report_data["reports"]:
+        return {}
+
+    duration_data = report_data["reports"]["duration"]
+    fidelity_scores = {}
+
+    for compressor, metrics in duration_data.items():
+        if use_weighted_average:
+            # Weighted average: missing groups get worst case penalty (100% MAPE or 0% Cosine)
+            weighted_sum = 0
+            total_weight = 0
+
+            for group, ref_count in depth_counts.items():
+                metric_value = get_metric_or_default(
+                    metrics,
+                    group,
+                    metric_type,
+                    default_mape=100.0,
+                    default_cosine=0.0,
+                )
+                weighted_sum += metric_value * ref_count
+                total_weight += ref_count
+
+            if total_weight > 0:
+                if metric_type == "mape":
+                    avg_mape = weighted_sum / total_weight
+                    fidelity = 100 - avg_mape
+                else:  # cosine
+                    avg_cosine = weighted_sum / total_weight
+                    fidelity = avg_cosine * 100
+                fidelity_scores[compressor] = fidelity
+            else:
+                fidelity_scores[compressor] = 0.0
+        else:
+            # Simple average: missing groups contribute 0% fidelity
+            fidelity_sum = 0
+            total_groups = len(depth_counts)
+
+            for group in depth_counts:
+                # Check if group has data
+                has_data = any(
+                    group in k
+                    for k in metrics.keys()
+                    if (metric_type == "mape" and "_mape" in k)
+                    or (metric_type == "cosine" and "_cosine_sim" in k)
+                )
+
+                if has_data:
+                    metric_value = get_metric_or_default(
+                        metrics,
+                        group,
+                        metric_type,
+                        default_mape=100.0,
+                        default_cosine=0.0,
+                    )
+                    if metric_type == "mape":
+                        fidelity_sum += 100 - metric_value
+                    else:  # cosine
+                        fidelity_sum += metric_value * 100
+                # Missing groups contribute 0 (nothing added to sum)
+
+            # Divide by total groups (missing groups count as 0 in numerator)
+            fidelity_scores[compressor] = (
+                fidelity_sum / total_groups if total_groups > 0 else 0.0
+            )
+
+    return fidelity_scores
+
+
+def calculate_status_code_fidelity(
+    report_data: dict, metric_type: str, use_weighted_average: bool = True
+) -> dict:
+    """
+    Calculate fidelity scores for HTTP status code groups only.
+
+    Args:
+        report_data: Full report data with "reports" -> "duration" structure
+        metric_type: "mape" or "cosine"
+        use_weighted_average: If True, use reference counts as weights. If False, simple average
+                             where missing groups contribute 0% fidelity.
+
+    Returns:
+        Dict mapping compressor name to status code fidelity score (0-100)
+    """
+    reference_compressor = "head_sampling_1"
+    reference_counts = extract_reference_counts(report_data, reference_compressor)
+
+    if not reference_counts:
+        print("Warning: Could not extract reference counts, returning empty dict")
+        return {}
+
+    # Filter to only status code groups
+    status_code_counts = {
+        k: v for k, v in reference_counts.items() if k.startswith("http.status_code_")
+    }
+
+    if not status_code_counts:
+        print("Warning: No status code reference counts found")
+        return {}
+
+    if "reports" not in report_data or "duration" not in report_data["reports"]:
+        return {}
+
+    duration_data = report_data["reports"]["duration"]
+    fidelity_scores = {}
+
+    for compressor, metrics in duration_data.items():
+        if use_weighted_average:
+            # Weighted average: missing groups get worst case penalty (100% MAPE or 0% Cosine)
+            weighted_sum = 0
+            total_weight = 0
+
+            for group, ref_count in status_code_counts.items():
+                metric_value = get_metric_or_default(
+                    metrics,
+                    group,
+                    metric_type,
+                    default_mape=100.0,
+                    default_cosine=0.0,
+                )
+                weighted_sum += metric_value * ref_count
+                total_weight += ref_count
+
+            if total_weight > 0:
+                if metric_type == "mape":
+                    avg_mape = weighted_sum / total_weight
+                    fidelity = 100 - avg_mape
+                else:  # cosine
+                    avg_cosine = weighted_sum / total_weight
+                    fidelity = avg_cosine * 100
+                fidelity_scores[compressor] = fidelity
+            else:
+                fidelity_scores[compressor] = 0.0
+        else:
+            # Simple average: missing groups contribute 0% fidelity
+            fidelity_sum = 0
+            total_groups = len(status_code_counts)
+
+            for group in status_code_counts:
+                # Check if group has data
+                has_data = any(
+                    group in k
+                    for k in metrics.keys()
+                    if (metric_type == "mape" and "_mape" in k)
+                    or (metric_type == "cosine" and "_cosine_sim" in k)
+                )
+
+                if has_data:
+                    metric_value = get_metric_or_default(
+                        metrics,
+                        group,
+                        metric_type,
+                        default_mape=100.0,
+                        default_cosine=0.0,
+                    )
+                    if metric_type == "mape":
+                        fidelity_sum += 100 - metric_value
+                    else:  # cosine
+                        fidelity_sum += metric_value * 100
+                # Missing groups contribute 0 (nothing added to sum)
+
+            # Divide by total groups (missing groups count as 0 in numerator)
+            fidelity_scores[compressor] = (
+                fidelity_sum / total_groups if total_groups > 0 else 0.0
+            )
+
+    return fidelity_scores
+
+
 def extract_mape_data_for_heatmap(report_data, compressor_key):
     """Extract MAPE data from the JSON report for a specific compressor."""
     if "reports" not in report_data or "duration" not in report_data["reports"]:
@@ -336,7 +631,9 @@ def main():
             mape_data, full_compressor_name = extract_mape_data_for_status_code_heatmap(
                 report_data, args.compressor
             )
-            create_status_code_mape_heatmap(mape_data, full_compressor_name, args.output_dir)
+            create_status_code_mape_heatmap(
+                mape_data, full_compressor_name, args.output_dir
+            )
             print(
                 f"Successfully generated status code heatmap for compressor: {full_compressor_name}"
             )
@@ -353,7 +650,27 @@ def main():
 def _create_gent_vs_head_sampling_plot(input_file, output_dir):
     """Create scatter plot comparing GenT CPU (all durations) vs head sampling."""
     try:
-        # Parse data from JSON report
+        # Load JSON report for reference-weighted fidelity calculation
+        with open(input_file) as f:
+            report_data = json.load(f)
+
+        # Calculate depth fidelity scores (depths 0-4 only)
+        mape_fidelity_depth_scores = calculate_depth_fidelity(
+            report_data, "mape", use_weighted_average=False
+        )
+        cos_fidelity_depth_scores = calculate_depth_fidelity(
+            report_data, "cosine", use_weighted_average=False
+        )
+
+        # Calculate status code fidelity scores (status codes only)
+        mape_fidelity_status_code_scores = calculate_status_code_fidelity(
+            report_data, "mape", use_weighted_average=False
+        )
+        cos_fidelity_status_code_scores = calculate_status_code_fidelity(
+            report_data, "cosine", use_weighted_average=False
+        )
+
+        # Parse data from JSON report for other metrics
         parser = ReportParser()
         experiments = parser.parse_report(input_file)
 
@@ -371,10 +688,48 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
 
         # Convert to the format expected by existing plotting functions
         names = [exp.name for exp in all_experiments]
-        mape_fidelity = [exp.mape_fidelity for exp in all_experiments]
-        cos_fidelity = [exp.cos_fidelity for exp in all_experiments]
-        mape_fidelity_by_status_code = [exp.mape_fidelity_by_status_code for exp in all_experiments]
-        cos_fidelity_by_status_code = [exp.cos_fidelity_by_status_code for exp in all_experiments]
+
+        # Use reference-weighted fidelity scores for depth-based metrics
+        mape_fidelity = []
+        cos_fidelity = []
+        for exp in all_experiments:
+            # Use the compressor_key to directly look up fidelity scores
+            if exp.compressor_key in mape_fidelity_depth_scores:
+                mape_fidelity.append(mape_fidelity_depth_scores[exp.compressor_key])
+                cos_fidelity.append(cos_fidelity_depth_scores[exp.compressor_key])
+            else:
+                # Fallback if not found
+                mape_fidelity.append(
+                    exp.mape_fidelity if hasattr(exp, "mape_fidelity") else 0
+                )
+                cos_fidelity.append(
+                    exp.cos_fidelity if hasattr(exp, "cos_fidelity") else 0
+                )
+
+        # Status code metrics use separate status code fidelity calculation
+        mape_fidelity_by_status_code = []
+        cos_fidelity_by_status_code = []
+        for exp in all_experiments:
+            # Use the compressor_key to directly look up status code fidelity scores
+            if exp.compressor_key in mape_fidelity_status_code_scores:
+                mape_fidelity_by_status_code.append(
+                    mape_fidelity_status_code_scores[exp.compressor_key]
+                )
+                cos_fidelity_by_status_code.append(
+                    cos_fidelity_status_code_scores[exp.compressor_key]
+                )
+            else:
+                # Fallback if not found
+                mape_fidelity_by_status_code.append(
+                    exp.mape_fidelity_by_status_code
+                    if hasattr(exp, "mape_fidelity_by_status_code")
+                    else 0
+                )
+                cos_fidelity_by_status_code.append(
+                    exp.cos_fidelity_by_status_code
+                    if hasattr(exp, "cos_fidelity_by_status_code")
+                    else 0
+                )
         operation_f1_fidelity = [exp.operation_f1_fidelity for exp in all_experiments]
         operation_pair_f1_fidelity = [
             exp.operation_pair_f1_fidelity for exp in all_experiments

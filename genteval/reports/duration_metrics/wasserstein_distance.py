@@ -97,11 +97,14 @@ class WassersteinDistanceMetric:
 
         filename = f"{compressor}.png"
 
+        # Build path correctly handling None fault
+        service_fault_dir = f"{service}_{fault}" if fault is not None else service
+
         # Determine subdirectory based on group type
         plot_dir = (
             Path("output")
             / app_name
-            / f"{service}_{fault}"
+            / service_fault_dir
             / f"{run}"
             / "visualization"
             / "wdist"
@@ -273,6 +276,9 @@ class WassersteinDistanceMetric:
         # Save the plot using new directory structure
         filename = f"{compressor}.png"
 
+        # Build path correctly handling None fault
+        service_fault_dir = f"{service}_{fault}" if fault is not None else service
+
         # Determine subdirectory based on group type
         if "by_service" in group_name:
             # Extract depth from group name (e.g., "duration_depth_2_by_service")
@@ -280,7 +286,7 @@ class WassersteinDistanceMetric:
             plot_dir = (
                 Path("output")
                 / app_name
-                / f"{service}_{fault}"
+                / service_fault_dir
                 / f"{run}"
                 / "visualization"
                 / "duration"
@@ -293,7 +299,7 @@ class WassersteinDistanceMetric:
             plot_dir = (
                 Path("output")
                 / app_name
-                / f"{service}_{fault}"
+                / service_fault_dir
                 / f"{run}"
                 / "visualization"
                 / "duration"

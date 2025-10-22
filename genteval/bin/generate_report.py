@@ -78,7 +78,7 @@ def main():
         help="Enable plotting for duration evaluator (default: True)",
     )
     argparser.add_argument(
-        "--no-plot",
+        "--no_plot",
         dest="plot",
         action="store_false",
         help="Disable plotting for duration evaluator",

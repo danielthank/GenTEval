@@ -253,37 +253,6 @@ class EnhancedReportGenerator:
 
     def _print_duration_sections(self, report_data: dict[str, Any]):
         """Print duration metrics organized by sections."""
-        # Calculate and display both fidelity scores first
-        mape_fidelity_scores = self.calculate_mape_fidelity_score(report_data)
-        cos_fidelity_scores = self.calculate_cos_fidelity_score(report_data)
-
-        if mape_fidelity_scores or cos_fidelity_scores:
-            fidelity_table = Table(
-                title="Duration Fidelity Scores",
-                box=box.ROUNDED,
-                title_style="bold magenta",
-            )
-            fidelity_table.add_column("Compressor", style="cyan", no_wrap=True)
-            fidelity_table.add_column("MAPE Fidelity", justify="right")
-            fidelity_table.add_column("Cos Fidelity", justify="right")
-
-            # Get all compressors from both scores
-            all_compressors = set(mape_fidelity_scores.keys()) | set(
-                cos_fidelity_scores.keys()
-            )
-
-            for compressor in sorted(all_compressors):
-                mape_score = mape_fidelity_scores.get(compressor, 0.0)
-                cos_score = cos_fidelity_scores.get(compressor, 0.0)
-
-                formatted_mape = self.format_metric_value(mape_score, "accuracy")
-                formatted_cos = self.format_metric_value(cos_score, "accuracy")
-
-                fidelity_table.add_row(compressor, formatted_mape, formatted_cos)
-
-            self.console.print(fidelity_table)
-            self.console.print()
-
         # Create separate data structures for each section
         wdist_data = {}
         depth0_data = {}
@@ -448,154 +417,6 @@ class EnhancedReportGenerator:
 
         return overview_panel
 
-    def calculate_mape_fidelity_score(
-        self, duration_data: dict[str, Any]
-    ) -> dict[str, float]:
-        """Calculate MAPE fidelity score by averaging MAPE across depths 0-4 and all percentiles."""
-        mape_fidelity_scores = {}
-
-        for compressor, metrics in duration_data.items():
-            mape_values = []
-
-            # Collect MAPE values for depth 0-4 and all percentiles (p0-p100)
-            for metric_name, metric_data in metrics.items():
-                if "_mape" in metric_name:
-                    # Check if it's a depth metric (depth_0, depth_1, depth_2, depth_3, depth_4)
-                    for depth in range(5):  # 0-4
-                        if f"depth_{depth}_" in metric_name:
-                            # Extract MAPE value
-                            if isinstance(metric_data, dict) and "avg" in metric_data:
-                                mape_val = metric_data["avg"]
-                                # Only include finite values
-                                if not (
-                                    isinstance(mape_val, float)
-                                    and (
-                                        mape_val == float("inf") or mape_val != mape_val
-                                    )
-                                ):
-                                    mape_values.append(mape_val)
-                            break
-
-            # Calculate average MAPE (lower is better, so fidelity = 100 - avg_mape)
-            if mape_values:
-                avg_mape = sum(mape_values) / len(mape_values)
-                # Convert MAPE to fidelity score (100% - MAPE%, clamped to 0-100)
-                mape_fidelity_score = max(0, min(100, 100 - avg_mape))
-                mape_fidelity_scores[compressor] = mape_fidelity_score
-            else:
-                mape_fidelity_scores[compressor] = 0.0
-
-        return mape_fidelity_scores
-
-    def calculate_cos_fidelity_score(
-        self, duration_data: dict[str, Any]
-    ) -> dict[str, float]:
-        """Calculate Cos fidelity score by averaging cosine similarity across depths 0-4 and all percentiles."""
-        cos_fidelity_scores = {}
-
-        for compressor, metrics in duration_data.items():
-            cos_sim_values = []
-
-            # Collect cosine similarity values for depth 0-4 and all percentiles (p0-p100)
-            for metric_name, metric_data in metrics.items():
-                if "_cosine_sim" in metric_name:
-                    # Check if it's a depth metric (depth_0, depth_1, depth_2, depth_3, depth_4)
-                    for depth in range(5):  # 0-4
-                        if f"depth_{depth}_" in metric_name:
-                            # Extract cosine similarity value
-                            if isinstance(metric_data, dict) and "avg" in metric_data:
-                                cos_sim_val = metric_data["avg"]
-                                # Only include finite values
-                                if not (
-                                    isinstance(cos_sim_val, float)
-                                    and (
-                                        cos_sim_val == float("inf")
-                                        or cos_sim_val != cos_sim_val
-                                    )
-                                ):
-                                    cos_sim_values.append(cos_sim_val)
-                            break
-
-            # Calculate average cosine similarity and scale to 0-100
-            if cos_sim_values:
-                avg_cos_sim = sum(cos_sim_values) / len(cos_sim_values)
-                # Scale cosine similarity (0-1) to fidelity score (0-100)
-                cos_fidelity_score = avg_cos_sim * 100
-                cos_fidelity_scores[compressor] = cos_fidelity_score
-            else:
-                cos_fidelity_scores[compressor] = 0.0
-
-        return cos_fidelity_scores
-
-    def calculate_mape_fidelity_score_by_status_code(
-        self, duration_data: dict[str, Any]
-    ) -> dict[str, float]:
-        """Calculate MAPE fidelity score by averaging MAPE across all status codes and percentiles."""
-        mape_fidelity_scores = {}
-
-        for compressor, metrics in duration_data.items():
-            mape_values = []
-
-            # Collect MAPE values for all status codes and all percentiles (p0-p100)
-            for metric_name, metric_data in metrics.items():
-                if "_mape" in metric_name and "http.status_code_" in metric_name:
-                    # Extract MAPE value
-                    if isinstance(metric_data, dict) and "avg" in metric_data:
-                        mape_val = metric_data["avg"]
-                        # Only include finite values
-                        if not (
-                            isinstance(mape_val, float)
-                            and (mape_val == float("inf") or mape_val != mape_val)
-                        ):
-                            mape_values.append(mape_val)
-
-            # Calculate average MAPE (lower is better, so fidelity = 100 - avg_mape)
-            if mape_values:
-                avg_mape = sum(mape_values) / len(mape_values)
-                # Convert MAPE to fidelity score (100% - MAPE%, clamped to 0-100)
-                mape_fidelity_score = max(0, min(100, 100 - avg_mape))
-                mape_fidelity_scores[compressor] = mape_fidelity_score
-            else:
-                mape_fidelity_scores[compressor] = 0.0
-
-        return mape_fidelity_scores
-
-    def calculate_cos_fidelity_score_by_status_code(
-        self, duration_data: dict[str, Any]
-    ) -> dict[str, float]:
-        """Calculate Cos fidelity score by averaging cosine similarity across all status codes and percentiles."""
-        cos_fidelity_scores = {}
-
-        for compressor, metrics in duration_data.items():
-            cos_sim_values = []
-
-            # Collect cosine similarity values for all status codes and all percentiles (p0-p100)
-            for metric_name, metric_data in metrics.items():
-                if "_cosine_sim" in metric_name and "http.status_code_" in metric_name:
-                    # Extract cosine similarity value
-                    if isinstance(metric_data, dict) and "avg" in metric_data:
-                        cos_sim_val = metric_data["avg"]
-                        # Only include finite values
-                        if not (
-                            isinstance(cos_sim_val, float)
-                            and (
-                                cos_sim_val == float("inf")
-                                or cos_sim_val != cos_sim_val
-                            )
-                        ):
-                            cos_sim_values.append(cos_sim_val)
-
-            # Calculate average cosine similarity and scale to 0-100
-            if cos_sim_values:
-                avg_cos_sim = sum(cos_sim_values) / len(cos_sim_values)
-                # Scale cosine similarity (0-1) to fidelity score (0-100)
-                cos_fidelity_score = avg_cos_sim * 100
-                cos_fidelity_scores[compressor] = cos_fidelity_score
-            else:
-                cos_fidelity_scores[compressor] = 0.0
-
-        return cos_fidelity_scores
-
     def print_enhanced_report(self, all_reports: dict[str, dict[str, Any]]):
         """Print enhanced, beautifully formatted reports."""
 
@@ -729,25 +550,6 @@ class EnhancedReportGenerator:
 
     def _print_duration_sections_fallback(self, report_data: dict[str, Any]):
         """Print duration sections for fallback mode."""
-        # Calculate and display both fidelity scores first
-        mape_fidelity_scores = self.calculate_mape_fidelity_score(report_data)
-        cos_fidelity_scores = self.calculate_cos_fidelity_score(report_data)
-
-        if mape_fidelity_scores or cos_fidelity_scores:
-            print("\nDuration Fidelity Scores")
-            print("-" * 50)
-            print(f"{'Compressor':<20} {'MAPE Fidelity':<15} {'Cos Fidelity':<15}")
-            print("-" * 50)
-
-            all_compressors = set(mape_fidelity_scores.keys()) | set(
-                cos_fidelity_scores.keys()
-            )
-            for compressor in sorted(all_compressors):
-                mape_score = mape_fidelity_scores.get(compressor, 0.0)
-                cos_score = cos_fidelity_scores.get(compressor, 0.0)
-                print(f"{compressor:<20} {mape_score:>13.2f}% {cos_score:>13.2f}%")
-            print()
-
         # Create separate data structures for each section
         wdist_data = {}
         depth0_data = {}
@@ -809,25 +611,6 @@ class EnhancedReportGenerator:
     ):
         enhanced_reports = copy.deepcopy(all_reports)
 
-        fidelity_scores = {}
-        if "duration" in all_reports:
-            duration_data = all_reports["duration"]
-            mape_fidelity_scores = self.calculate_mape_fidelity_score(duration_data)
-            cosine_fidelity_scores = self.calculate_cos_fidelity_score(duration_data)
-            mape_fidelity_scores_by_status_code = (
-                self.calculate_mape_fidelity_score_by_status_code(duration_data)
-            )
-            cosine_fidelity_scores_by_status_code = (
-                self.calculate_cos_fidelity_score_by_status_code(duration_data)
-            )
-
-            fidelity_scores = {
-                "mape_fidelity_scores": mape_fidelity_scores,
-                "cosine_similarity_fidelity_scores": cosine_fidelity_scores,
-                "mape_fidelity_scores_by_status_code": mape_fidelity_scores_by_status_code,
-                "cosine_similarity_fidelity_scores_by_status_code": cosine_fidelity_scores_by_status_code,
-            }
-
         enhanced_report = {
             "metadata": {
                 "generator": "GenTEval Enhanced Report Generator",
@@ -837,7 +620,6 @@ class EnhancedReportGenerator:
                         *[report.keys() for report in enhanced_reports.values()]
                     )
                 ),
-                "fidelity_scores": fidelity_scores,
             },
             "reports": enhanced_reports,
         }

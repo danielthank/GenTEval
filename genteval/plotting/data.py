@@ -14,6 +14,7 @@ class CostConfig:
 @dataclass
 class ExperimentData:
     name: str
+    compressor_key: str
     compute_type: str
     duration: str
     mape_fidelity: float
@@ -149,6 +150,7 @@ class ReportParser:
 
         return ExperimentData(
             name=name_parts["display_name"],
+            compressor_key=compressor_name,
             compute_type=name_parts["compute_type"],
             duration=name_parts["duration"],
             mape_fidelity=fidelity_data["mape"],

@@ -42,7 +42,7 @@ class DurationReport(BaseReport):
         """Generate duration report with Wasserstein distance calculations and visualizations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
-                if compressor in {"original", "head_sampling_1"}:
+                if compressor in {"original"}:
                     self.print_skip_message(
                         f"Compressor {compressor} is not supported for duration evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."
@@ -77,6 +77,25 @@ class DurationReport(BaseReport):
 
                 original = self.load_json_file(original_results_path)
                 results = self.load_json_file(results_path)
+
+                # Store sample counts for each depth group to enable weighted averaging
+                for depth in range(5):
+                    depth_key = f"depth_{depth}"
+                    if depth_key in original["duration"]:
+                        sample_count = len(original["duration"][depth_key])
+                        report_group = f"{app_name}_{compressor}"
+                        self.report[report_group][f"{depth_key}_sample_count"]["values"].append(
+                            sample_count
+                        )
+
+                # Store sample counts for each HTTP status code group to enable weighted averaging
+                for group_key in original["duration"]:
+                    if "http.status_code_" in group_key:
+                        sample_count = len(original["duration"][group_key])
+                        report_group = f"{app_name}_{compressor}"
+                        self.report[report_group][f"{group_key}_sample_count"]["values"].append(
+                            sample_count
+                        )
 
                 # Process duration data
                 for group_key in original["duration"]:
