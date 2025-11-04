@@ -6,26 +6,21 @@ CLI tool to compare two graph_results.json files, export diagrams, and calculate
 import argparse
 import json
 import pathlib
-from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
 import networkx as nx
-from matplotlib.patches import FancyBboxPatch
 
 from genteval.reports.graph_report import GraphReport
 
 
 def load_graph_json(json_path: pathlib.Path) -> dict:
     """Load graph_results.json file."""
-    with open(json_path, 'r') as f:
+    with open(json_path) as f:
         return json.load(f)
 
 
 def export_graph_diagram(
-    G: nx.DiGraph,
-    output_path: pathlib.Path,
-    title: str,
-    highlight_edges: dict = None
+    G: nx.DiGraph, output_path: pathlib.Path, title: str, highlight_edges: dict = None
 ):
     """
     Export graph diagram as PNG using matplotlib and networkx.
@@ -47,56 +42,56 @@ def export_graph_diagram(
 
     # Draw nodes
     nx.draw_networkx_nodes(
-        G, pos,
-        node_color='lightblue',
+        G,
+        pos,
+        node_color="lightblue",
         node_size=3000,
         alpha=0.9,
-        edgecolors='black',
-        linewidths=2
+        edgecolors="black",
+        linewidths=2,
     )
 
     # Draw edges with weights
     edges = G.edges()
-    weights = [G[u][v].get('weight', 1) for u, v in edges]
+    weights = [G[u][v].get("weight", 1) for u, v in edges]
 
     # Normalize weights for edge width
     max_weight = max(weights) if weights else 1
     edge_widths = [2 + (w / max_weight) * 3 for w in weights]
 
     nx.draw_networkx_edges(
-        G, pos,
+        G,
+        pos,
         edgelist=edges,
         width=edge_widths,
         alpha=0.6,
-        edge_color='gray',
+        edge_color="gray",
         arrows=True,
         arrowsize=20,
-        arrowstyle='->'
+        arrowstyle="->",
     )
 
     # Draw labels
     nx.draw_networkx_labels(
-        G, pos,
-        font_size=9,
-        font_weight='bold',
-        font_family='sans-serif'
+        G, pos, font_size=9, font_weight="bold", font_family="sans-serif"
     )
 
     # Draw edge labels (weights)
     edge_labels = {(u, v): f"{G[u][v].get('weight', 1)}" for u, v in G.edges()}
     nx.draw_networkx_edge_labels(
-        G, pos,
+        G,
+        pos,
         edge_labels,
         font_size=8,
-        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7)
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7),
     )
 
-    plt.title(title, fontsize=16, fontweight='bold', pad=20)
-    plt.axis('off')
+    plt.title(title, fontsize=16, fontweight="bold", pad=20)
+    plt.axis("off")
     plt.tight_layout()
 
     # Save the figure
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
 
     print(f"  Exported diagram: {output_path}")
@@ -107,8 +102,8 @@ def compare_graphs(
     graph2_path: pathlib.Path,
     timestamp: str,
     output_dir: pathlib.Path,
-    graph_report: GraphReport
-) -> Tuple[float, float]:
+    graph_report: GraphReport,
+) -> tuple[float, float]:
     """
     Compare two graphs and export diagrams.
 
@@ -143,12 +138,11 @@ def compare_graphs(
     distance = graph_report.calculate_distance(G1, G2)
 
     num_nodes = G1.number_of_nodes()
-    total_edge_weight = sum(
-        data.get('weight', 0)
-        for _, _, data in G1.edges(data=True)
-    )
+    total_edge_weight = sum(data.get("weight", 0) for _, _, data in G1.edges(data=True))
     # Calculate fidelity using GraphReport method
-    fidelity = graph_report.calculate_graph_fidelity(distance, num_nodes, total_edge_weight)
+    fidelity = graph_report.calculate_graph_fidelity(
+        distance, num_nodes, total_edge_weight
+    )
 
     # Export diagrams
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -159,13 +153,13 @@ def compare_graphs(
     export_graph_diagram(
         G1,
         output_dir / f"graph1_{graph1_name}_{timestamp}.png",
-        f"Graph 1: {graph1_name} (Time: {timestamp})"
+        f"Graph 1: {graph1_name} (Time: {timestamp})",
     )
 
     export_graph_diagram(
         G2,
         output_dir / f"graph2_{graph2_name}_{timestamp}.png",
-        f"Graph 2: {graph2_name} (Time: {timestamp})"
+        f"Graph 2: {graph2_name} (Time: {timestamp})",
     )
 
     return distance, fidelity
@@ -178,7 +172,7 @@ def print_graph_statistics(G: nx.DiGraph, name: str):
     print(f"  Edges: {G.number_of_edges()}")
 
     if G.number_of_edges() > 0:
-        total_weight = sum(data.get('weight', 0) for _, _, data in G.edges(data=True))
+        total_weight = sum(data.get("weight", 0) for _, _, data in G.edges(data=True))
         avg_weight = total_weight / G.number_of_edges()
         print(f"  Total edge weight: {total_weight}")
         print(f"  Average edge weight: {avg_weight:.2f}")
@@ -192,32 +186,26 @@ def main():
         description="Compare two graph_results.json files and calculate graph edit distance"
     )
     parser.add_argument(
-        "graph1",
-        type=str,
-        help="Path to first graph_results.json file"
+        "graph1", type=str, help="Path to first graph_results.json file"
     )
     parser.add_argument(
-        "graph2",
-        type=str,
-        help="Path to second graph_results.json file"
+        "graph2", type=str, help="Path to second graph_results.json file"
     )
     parser.add_argument(
-        "timestamp",
-        type=str,
-        help="Timestamp (time bucket) to compare"
+        "timestamp", type=str, help="Timestamp (time bucket) to compare"
     )
     parser.add_argument(
         "--output-dir",
         "-o",
         type=str,
         default="graph_comparison_output",
-        help="Output directory for graph diagrams (default: graph_comparison_output)"
+        help="Output directory for graph diagrams (default: graph_comparison_output)",
     )
     parser.add_argument(
         "--list-timestamps",
         "-l",
         action="store_true",
-        help="List available timestamps in both graphs and exit"
+        help="List available timestamps in both graphs and exit",
     )
 
     args = parser.parse_args()
@@ -262,9 +250,9 @@ def main():
     graph_report = GraphReport(root_dir=pathlib.Path.cwd(), compressors=[])
 
     # Perform comparison
-    print(f"\n{'='*70}")
-    print(f"Graph Comparison Tool")
-    print(f"{'='*70}")
+    print(f"\n{'=' * 70}")
+    print("Graph Comparison Tool")
+    print(f"{'=' * 70}")
     print(f"\nGraph 1: {graph1_path}")
     print(f"Graph 2: {graph2_path}")
     print(f"Timestamp: {args.timestamp}")
@@ -286,32 +274,29 @@ def main():
         print_graph_statistics(G2, "Graph 2 Statistics")
 
         # Compare and export
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("Comparing graphs and exporting diagrams...")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         distance, fidelity = compare_graphs(
-            graph1_path,
-            graph2_path,
-            args.timestamp,
-            output_dir,
-            graph_report
+            graph1_path, graph2_path, args.timestamp, output_dir, graph_report
         )
 
         # Display results
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("RESULTS")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         print(f"\nGraph Edit Distance: {distance:.2f}")
         print(f"Graph Fidelity Score: {fidelity:.2f}%")
         print(f"\nDiagrams exported to: {output_dir.absolute()}")
-        print(f"{'='*70}\n")
+        print(f"{'=' * 70}\n")
 
         return 0
 
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
