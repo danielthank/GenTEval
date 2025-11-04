@@ -274,7 +274,19 @@ def export_comparison_diagram(
         G2, pos, ax2, f"Graph 2: {graph2_name}", node_colors_g2, edge_colors_g2
     )
 
-    # Add legend
+    # Add metrics text box (positioned above legend)
+    metrics_text = f"Graph Edit Distance: {distance:.2f}\nGraph Fidelity: {fidelity:.2f}%"
+    fig.text(
+        0.5, 0.065,
+        metrics_text,
+        ha='center',
+        va='bottom',
+        fontsize=16,
+        fontweight='bold',
+        bbox=dict(boxstyle='round,pad=0.8', facecolor='lightyellow', edgecolor='black', linewidth=2),
+    )
+
+    # Add legend (positioned below metrics)
     from matplotlib.patches import Patch
     legend_elements = [
         Patch(facecolor=node_color_g1_only, edgecolor="black", label="Only in Graph 1"),
@@ -284,7 +296,8 @@ def export_comparison_diagram(
     ]
     fig.legend(
         handles=legend_elements,
-        loc="lower center",
+        loc='lower center',
+        bbox_to_anchor=(0.5, 0.01),
         ncol=4,
         fontsize=14,
         frameon=True,
@@ -292,19 +305,7 @@ def export_comparison_diagram(
         shadow=True,
     )
 
-    # Add metrics text box
-    metrics_text = f"Graph Edit Distance: {distance:.2f}\nGraph Fidelity: {fidelity:.2f}%"
-    fig.text(
-        0.5, 0.015,
-        metrics_text,
-        ha='center',
-        va='bottom',
-        fontsize=16,
-        fontweight='bold',
-        bbox=dict(boxstyle='round,pad=0.8', facecolor='lightyellow', edgecolor='black', linewidth=2),
-    )
-
-    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
+    plt.tight_layout(rect=[0, 0.12, 1, 0.96])
 
     # Save the figure
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
