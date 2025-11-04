@@ -14,9 +14,8 @@ dependencies = [
   "grpcio-tools>=1.74.0",
   "rich>=14.0.0",
   "scipy>=1.15.3",
-  "sdv>=1.21.0",
-  "wandb>=0.21.0",
   "seaborn>=0.13.2",
+  "networkx>=3.0",
 ]
 
 [project.scripts]
@@ -24,12 +23,8 @@ delete_experiment_all = "genteval.bin.delete_experiment_all:main"
 evaluate = "genteval.bin.evaluate:main"
 evaluate_all = "genteval.bin.evaluate_all:main"
 generate_report = "genteval.bin.generate_report:main"
-gent_all = "genteval.bin.gent_all:main"
-gent = "genteval.bin.gent:main"
 head_sampling_all = "genteval.bin.head_sampling_all:main"
 head_sampling = "genteval.bin.head_sampling:main"
-markov_gent_all = "genteval.bin.markov_gent_all:main"
-markov_gent = "genteval.bin.markov_gent:main"
 normalize_all = "genteval.bin.normalize_all:main"
 normalize = "genteval.bin.normalize:main"
 simple_gent_all = "genteval.bin.simple_gent_all:main"
