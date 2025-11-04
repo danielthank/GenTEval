@@ -173,17 +173,21 @@ def export_comparison_diagram(
     graph1_name: str,
     graph2_name: str,
     timestamp: str,
+    distance: float,
+    fidelity: float,
 ):
     """
     Export side-by-side comparison of two graphs with color-coded differences.
 
     Args:
-        G1: First graph
-        G2: Second graph
+        G1: First graph (with scaled weights if applicable)
+        G2: Second graph (with scaled weights if applicable)
         output_path: Path to save the PNG file
         graph1_name: Name of first graph
         graph2_name: Name of second graph
         timestamp: Timestamp being compared
+        distance: Graph edit distance
+        fidelity: Graph fidelity score (0-100)
     """
     # Create union graph for consistent layout
     G_union = nx.DiGraph()
@@ -288,7 +292,19 @@ def export_comparison_diagram(
         shadow=True,
     )
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    # Add metrics text box
+    metrics_text = f"Graph Edit Distance: {distance:.2f}\nGraph Fidelity: {fidelity:.2f}%"
+    fig.text(
+        0.5, 0.015,
+        metrics_text,
+        ha='center',
+        va='bottom',
+        fontsize=16,
+        fontweight='bold',
+        bbox=dict(boxstyle='round,pad=0.8', facecolor='lightyellow', edgecolor='black', linewidth=2),
+    )
+
+    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
 
     # Save the figure
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
@@ -370,7 +386,7 @@ def compare_graphs(
     graph1_name = graph1_path.parent.parent.name
     graph2_name = graph2_path.parent.parent.name
 
-    # Export side-by-side comparison diagram
+    # Export side-by-side comparison diagram with scaled weights
     export_comparison_diagram(
         G1,
         G2,
@@ -378,6 +394,8 @@ def compare_graphs(
         graph1_name,
         graph2_name,
         timestamp,
+        distance,
+        fidelity,
     )
 
     return distance, fidelity
