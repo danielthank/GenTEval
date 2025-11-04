@@ -13,6 +13,7 @@ dependencies = [
   "protobuf>=6.32.0",
   "grpcio-tools>=1.74.0",
   "rich>=14.0.0",
+  "scikit-learn>=1.5.0",
   "scipy>=1.15.3",
   "seaborn>=0.13.2",
   "networkx>=3.0",
@@ -41,6 +42,8 @@ export_otel_traces = "genteval.bin.export_otel_traces:main"
 
 convert_trajectory = "genteval.data_collection.ai_agent.cli:main"
 batch_convert_trajectory = "genteval.data_collection.ai_agent.batch_convert_cli:main"
+
+compare_graphs = "genteval.bin.compare_graphs:main"
 
 # Development tools
 generate-proto = "genteval.bin.generate_proto:main"
