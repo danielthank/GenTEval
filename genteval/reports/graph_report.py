@@ -249,10 +249,15 @@ class GraphReport(BaseReport):
 
                     # Calculate fidelity
                     num_nodes = G_original.number_of_nodes()
-                    total_edge_weight = sum(
+                    total_edge_weight_g1 = sum(
                         data.get('weight', 0)
                         for _, _, data in G_original.edges(data=True)
                     )
+                    total_edge_weight_g2 = sum(
+                        data.get('weight', 0)
+                        for _, _, data in G_compressed.edges(data=True)
+                    )
+                    total_edge_weight = total_edge_weight_g1 + total_edge_weight_g2
                     fidelity = self.calculate_graph_fidelity(distance, num_nodes, total_edge_weight)
 
                     # Store in report with time_bucket key

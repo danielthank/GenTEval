@@ -6,6 +6,7 @@ CLI tool to compare two graph_results.json files, export diagrams, and calculate
 import argparse
 import json
 import pathlib
+import re
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -17,6 +18,50 @@ def load_graph_json(json_path: pathlib.Path) -> dict:
     """Load graph_results.json file."""
     with open(json_path) as f:
         return json.load(f)
+
+
+def detect_head_sampling_rate(file_path: pathlib.Path) -> float:
+    """
+    Detect head_sampling rate from file path.
+
+    Args:
+        file_path: Path to graph_results.json file
+
+    Returns:
+        Sampling rate (0.0 to 1.0), or 1.0 if not head_sampling
+    """
+    # Check parent directories for head_sampling pattern
+    path_str = str(file_path)
+    match = re.search(r'head_sampling_(\d+(?:\.\d+)?)', path_str)
+    if match:
+        rate = float(match.group(1))
+        # Convert to decimal if it's like head_sampling_10 (meaning 10%)
+        if rate > 1.0:
+            rate = rate / 100.0
+        return rate
+    return 1.0
+
+
+def scale_graph_weights(graph_data: dict, scale_factor: float) -> dict:
+    """
+    Scale edge weights in graph data by a factor.
+
+    Args:
+        graph_data: Dictionary with "nodes" and "edges" keys
+        scale_factor: Factor to multiply edge weights by
+
+    Returns:
+        New graph data with scaled edge weights
+    """
+    scaled_data = {
+        "nodes": graph_data.get("nodes", []),
+        "edges": {},
+    }
+
+    for edge_str, weight in graph_data.get("edges", {}).items():
+        scaled_data["edges"][edge_str] = weight * scale_factor
+
+    return scaled_data
 
 
 def export_single_graph_diagram(
@@ -285,15 +330,36 @@ def compare_graphs(
     if timestamp not in graphs2:
         raise ValueError(f"Timestamp {timestamp} not found in {graph2_path}")
 
+    graph1_timestamp_data = graphs1[timestamp]
+    graph2_timestamp_data = graphs2[timestamp]
+
+    # Detect head_sampling rates and scale weights if needed
+    rate1 = detect_head_sampling_rate(graph1_path)
+    rate2 = detect_head_sampling_rate(graph2_path)
+
+    if rate1 < 1.0:
+        scale_factor1 = 1.0 / rate1
+        graph1_timestamp_data = scale_graph_weights(graph1_timestamp_data, scale_factor1)
+        print(f"\n  Detected head_sampling_{rate1*100:.0f}% in Graph 1, scaling weights by {scale_factor1:.2f}")
+
+    if rate2 < 1.0:
+        scale_factor2 = 1.0 / rate2
+        graph2_timestamp_data = scale_graph_weights(graph2_timestamp_data, scale_factor2)
+        print(f"  Detected head_sampling_{rate2*100:.0f}% in Graph 2, scaling weights by {scale_factor2:.2f}")
+
     # Convert to NetworkX using GraphReport method
-    G1 = graph_report.json_to_networkx(graphs1[timestamp])
-    G2 = graph_report.json_to_networkx(graphs2[timestamp])
+    G1 = graph_report.json_to_networkx(graph1_timestamp_data)
+    G2 = graph_report.json_to_networkx(graph2_timestamp_data)
 
     # Calculate distance using GraphReport method
     distance = graph_report.calculate_distance(G1, G2)
 
+    # Calculate total edge weight from both graphs
     num_nodes = G1.number_of_nodes()
-    total_edge_weight = sum(data.get("weight", 0) for _, _, data in G1.edges(data=True))
+    total_edge_weight_g1 = sum(data.get("weight", 0) for _, _, data in G1.edges(data=True))
+    total_edge_weight_g2 = sum(data.get("weight", 0) for _, _, data in G2.edges(data=True))
+    total_edge_weight = total_edge_weight_g1 + total_edge_weight_g2
+
     # Calculate fidelity using GraphReport method
     fidelity = graph_report.calculate_graph_fidelity(
         distance, num_nodes, total_edge_weight
