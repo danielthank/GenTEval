@@ -4,6 +4,7 @@ from .base_report import BaseReport
 from .count_over_time_report import CountOverTimeReport
 from .duration_report import DurationReport
 from .enhanced_report import EnhancedReportGenerator
+from .graph_report import GraphReport
 from .operation_report import OperationReport
 from .rca_report import RCAReport
 from .size_report import SizeReport
@@ -16,6 +17,7 @@ __all__ = [
     "CountOverTimeReport",
     "DurationReport",
     "EnhancedReportGenerator",
+    "GraphReport",
     "OperationReport",
     "RCAReport",
     "SizeReport",

@@ -7,6 +7,7 @@ from genteval.dataset import RCAEvalDataset
 from genteval.evaluators import (
     CountOverTimeEvaluator,
     DurationEvaluator,
+    GraphEvaluator,
     MicroRankEvaluator,
     OperationEvaluator,
     SpanCountEvaluator,
@@ -37,7 +38,7 @@ def main():
     argparser.add_argument(
         "--evaluator",
         type=str,
-        help="Single evaluator to run (duration, operation, trace_rca, micro_rank, span_count, count_over_time)",
+        help="Single evaluator to run (duration, operation, trace_rca, micro_rank, span_count, count_over_time, graph)",
     )
     argparser.add_argument(
         "--evaluated_dir",
@@ -96,6 +97,12 @@ def main():
         json.dump(
             results,
             open(evaluated_dir / "count_over_time_results.json", "w"),
+        )
+    elif args.evaluator == "graph":
+        results = GraphEvaluator().evaluate(dataset, labels)
+        json.dump(
+            results,
+            open(evaluated_dir / "graph_results.json", "w"),
         )
     elif args.evaluator == "size":
         # Size does not require a specific evaluator. It just needs reporting.

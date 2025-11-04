@@ -552,9 +552,9 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["scatter", "heatmap", "heatmap_status_code"],
+        choices=["scatter", "scatter_graph", "heatmap", "heatmap_status_code"],
         default="scatter",
-        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), heatmap (depth heatmap), or heatmap_status_code (HTTP status code heatmap)",
+        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), scatter_graph (graph fidelity scatter plot), heatmap (depth heatmap), or heatmap_status_code (HTTP status code heatmap)",
     )
     parser.add_argument(
         "--input",
@@ -642,9 +642,209 @@ def main():
             print(f"Error: {e}")
             return 1
 
+    elif args.mode == "scatter_graph":
+        # Graph fidelity scatter plot mode
+        return _create_graph_fidelity_scatter_plot(args.input, args.output_dir)
+
     else:
         # Default scatter plot mode: GenT CPU vs head sampling
         return _create_gent_vs_head_sampling_plot(args.input, args.output_dir)
+
+
+def _create_graph_fidelity_scatter_plot(input_file, output_dir):
+    """Create scatter plot for graph fidelity scores."""
+    from genteval.plotting.data import CostConfig, ReportParser
+
+    # Parse the report
+    parser = ReportParser(cost_config=CostConfig())
+    experiments = parser.parse_report(input_file)
+
+    if not experiments:
+        print("Error: No experiments found in report")
+        return 1
+
+    # Filter experiments with graph fidelity data (>= 0, not just > 0)
+    valid_experiments = [e for e in experiments if e.graph_fidelity >= 0]
+
+    if not valid_experiments:
+        print("Error: No experiments with graph fidelity data found")
+        return 1
+
+    # Create output directory
+    import pathlib
+
+    output_path = pathlib.Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Separate GenT CPU and head sampling experiments by duration
+    # Handle gent_{min}_{run} naming pattern (e.g., gent_1_2 = 1min, run 2)
+    gent_1min = []
+    gent_5min = []
+    gent_10min = []
+
+    for e in valid_experiments:
+        if "gent" in e.compressor_key and "_gent_" in e.compressor_key:
+            # Extract duration from app_gent_{min}_{run} pattern
+            # e.g., otel-demo-transformed_gent_1_2
+            parts = e.compressor_key.split("_gent_")
+            if len(parts) == 2:
+                gent_parts = parts[1].split("_")
+                if len(gent_parts) >= 2:
+                    try:
+                        duration_min = int(gent_parts[0])
+                        if duration_min == 1:
+                            gent_1min.append(e)
+                        elif duration_min == 5:
+                            gent_5min.append(e)
+                        elif duration_min == 10:
+                            gent_10min.append(e)
+                    except (ValueError, IndexError):
+                        pass
+
+    head_sampling_exps = [
+        e
+        for e in valid_experiments
+        if "head_sampling" in e.compressor_key and not e.compressor_key.endswith("_1")
+    ]
+
+    # Prepare data for plotting
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    plt.figure(figsize=(12, 8))
+    plt.style.use("default")
+    plt.rcParams["font.size"] = 11
+    plt.rcParams["axes.labelsize"] = 12
+    plt.rcParams["axes.titlesize"] = 14
+
+    # Color scheme matching the standard scatter plot
+    colors = {"1min": "red", "5min": "blue", "10min": "green"}
+    markers = {"1min": "o", "5min": "s", "10min": "^"}
+
+    # Plot GenT experiments by duration
+    duration_data = [
+        ("1min", gent_1min, "GenT 1min CPU"),
+        ("5min", gent_5min, "GenT 5min CPU"),
+        ("10min", gent_10min, "GenT 10min CPU"),
+    ]
+
+    for duration, exps, label in duration_data:
+        if exps:
+            x_vals = [e.total_cost_per_million_spans for e in exps]
+            y_vals = [e.graph_fidelity for e in exps]
+
+            color = colors[duration]
+            marker = markers[duration]
+
+            # Calculate mean and std
+            mean_x = np.mean(x_vals)
+            mean_y = np.mean(y_vals)
+            std_x = np.std(x_vals)
+            std_y = np.std(y_vals)
+
+            # Plot error bars (mean ± std)
+            plt.errorbar(
+                x=mean_x,
+                y=mean_y,
+                xerr=std_x,
+                yerr=std_y,
+                marker=marker,
+                markersize=12,
+                label=f"{label} (mean ± std)",
+                color=color,
+                alpha=0.8,
+                capsize=5,
+                capthick=2,
+                linewidth=2,
+            )
+
+            # Plot individual points
+            plt.scatter(
+                x=x_vals,
+                y=y_vals,
+                marker=marker,
+                s=60,
+                color=color,
+                alpha=0.4,
+                edgecolors="black",
+                linewidth=1,
+            )
+
+            # Annotate mean
+            plt.annotate(
+                label,
+                (mean_x, mean_y),
+                xytext=(8, 8),
+                textcoords="offset points",
+                fontsize=9,
+                fontweight="bold",
+                bbox={
+                    "boxstyle": "round,pad=0.2",
+                    "facecolor": "white",
+                    "alpha": 0.7,
+                },
+                arrowprops={"arrowstyle": "->", "color": "gray", "alpha": 0.5},
+            )
+
+    # Plot head sampling experiments
+    if head_sampling_exps:
+        x_vals = [e.total_cost_per_million_spans for e in head_sampling_exps]
+        y_vals = [e.graph_fidelity for e in head_sampling_exps]
+        names = [e.name for e in head_sampling_exps]
+
+        plt.scatter(
+            x=x_vals,
+            y=y_vals,
+            marker="D",
+            s=120,
+            label="Head Sampling",
+            alpha=0.8,
+            edgecolors="black",
+            linewidth=1,
+        )
+
+        # Annotate each head sampling point
+        for x, y, name in zip(x_vals, y_vals, names, strict=False):
+            plt.annotate(
+                name,
+                (x, y),
+                xytext=(8, 8),
+                textcoords="offset points",
+                fontsize=9,
+                fontweight="bold",
+                bbox={
+                    "boxstyle": "round,pad=0.2",
+                    "facecolor": "white",
+                    "alpha": 0.7,
+                },
+                arrowprops={"arrowstyle": "->", "color": "gray", "alpha": 0.5},
+            )
+
+    # Formatting
+    plt.title("Graph Fidelity vs Cost", fontsize=18, fontweight="bold", pad=20)
+    plt.xlabel("Cost per Million Spans ($)", fontsize=14, fontweight="bold")
+    plt.ylabel("Graph Fidelity Score (%)", fontsize=14, fontweight="bold")
+    plt.xscale("log")
+    plt.ylim(0, 105)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+    plt.grid(True, which="minor", linestyle=":", linewidth=0.3, alpha=0.5)
+    plt.legend(
+        loc="best",
+        fontsize=10,
+        frameon=True,
+        shadow=True,
+        fancybox=True,
+        framealpha=0.9,
+    )
+    plt.tight_layout()
+
+    # Save plot
+    output_file = output_path / "gent_vs_head_sampling_graph_fidelity.png"
+    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Successfully generated graph fidelity scatter plot: {output_file}")
+    return 0
 
 
 def _create_gent_vs_head_sampling_plot(input_file, output_dir):

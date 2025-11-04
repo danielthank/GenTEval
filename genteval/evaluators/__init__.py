@@ -1,4 +1,5 @@
 from .evaluator import Evaluator
+from .graph.graph_evaluator import GraphEvaluator
 from .query.count_over_time_evaluator import CountOverTimeEvaluator
 from .query.duration_evaluator import DurationEvaluator
 from .query.operation_evaluator import OperationEvaluator
@@ -12,6 +13,7 @@ __all__ = [
     "CountOverTimeEvaluator",
     "DurationEvaluator",
     "Evaluator",
+    "GraphEvaluator",
     "MicroRankEvaluator",
     "OperationEvaluator",
     "SpanCountEvaluator",

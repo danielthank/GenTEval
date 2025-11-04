@@ -5,6 +5,7 @@ from genteval.reports import (
     CountOverTimeReport,
     DurationReport,
     EnhancedReportGenerator,
+    GraphReport,
     OperationReport,
     RCAReport,
     SizeReport,
@@ -68,6 +69,7 @@ def main():
             "size",
             "span_count",
             "time",
+            "graph",
         ],
         help="Evaluators to run (default: all evaluators)",
     )
@@ -146,6 +148,11 @@ def main():
         report_generator = TimeReport(args.compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["time"] = report
+
+    if "graph" in args.evaluators:
+        report_generator = GraphReport(args.compressors, root_dir)
+        report = report_generator.generate(run_dirs_func)
+        all_reports["graph"] = report
 
     # Always use enhanced formatting
     if all_reports:

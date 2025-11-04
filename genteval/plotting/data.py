@@ -33,6 +33,7 @@ class ExperimentData:
     microrank_avg5_fidelity: float
     count_over_time_mape_fidelity: float
     count_over_time_cosine_fidelity: float
+    graph_fidelity: float
     size_kb: float
     cpu_time_seconds: float
     gpu_time_seconds: float
@@ -102,6 +103,7 @@ class ReportParser:
         count_over_time_data = self._extract_count_over_time_data(
             report_data, compressor_name
         )
+        graph_data = self._extract_graph_data(report_data, compressor_name)
 
         # Parse compressor name to extract metadata (pass time_data for compute type detection)
         name_parts = self._parse_compressor_name(compressor_name, time_data)
@@ -136,6 +138,9 @@ class ReportParser:
                 "count_over_time_mape_fidelity": 0.0,
                 "count_over_time_cosine_fidelity": 0.0,
             }
+
+        if not graph_data:
+            graph_data = {"graph_fidelity": 0.0}
 
         if not fidelity_data_by_status_code:
             fidelity_data_by_status_code = {
@@ -185,6 +190,7 @@ class ReportParser:
             count_over_time_cosine_fidelity=count_over_time_data[
                 "count_over_time_cosine_fidelity"
             ],
+            graph_fidelity=graph_data["graph_fidelity"],
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
             gpu_time_seconds=time_data["gpu_seconds"],
@@ -536,6 +542,43 @@ class ReportParser:
             else:
                 result["count_over_time_mape_fidelity"] = 0.0
                 result["count_over_time_cosine_fidelity"] = 0.0
+
+        except KeyError:
+            return None
+        else:
+            return result
+
+    def _extract_graph_data(
+        self, report_data: dict, compressor_name: str
+    ) -> dict | None:
+        """Extract graph fidelity data from the JSON report by averaging time bucket fidelities."""
+        try:
+            result = {}
+
+            # Extract from graph report
+            if "graph" in report_data.get("reports", {}):
+                graph_report = report_data["reports"]["graph"]
+                if compressor_name in graph_report:
+                    compressor_data = graph_report[compressor_name]
+
+                    # Collect fidelity scores from all time buckets
+                    fidelity_scores = []
+                    for key, value in compressor_data.items():
+                        if key.startswith("time_") and isinstance(value, dict):
+                            if "fidelity" in value:
+                                fidelity_scores.append(value["fidelity"])
+
+                    # Calculate average fidelity
+                    if fidelity_scores:
+                        result["graph_fidelity"] = sum(fidelity_scores) / len(
+                            fidelity_scores
+                        )
+                    else:
+                        result["graph_fidelity"] = 0.0
+                else:
+                    result["graph_fidelity"] = 0.0
+            else:
+                result["graph_fidelity"] = 0.0
 
         except KeyError:
             return None

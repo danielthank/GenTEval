@@ -112,6 +112,7 @@ async def evaluate_all():
             "span_count",
             "time",
             "count_over_time",
+            "graph",
         ],
         help="Evaluators to run (default: all evaluators)",
     )
