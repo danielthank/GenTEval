@@ -75,6 +75,10 @@ def export_single_graph_diagram(
         # Calculate edge widths based on weights
         edge_widths = [2 + (w / max_weight) * 4 for w in weights]
 
+        # Calculate node radius in data coordinates to position arrows properly
+        # Node size is in points^2, we need to convert to data coordinates
+        node_radius = 35  # Approximation for margin
+
         nx.draw_networkx_edges(
             G,
             pos,
@@ -83,10 +87,12 @@ def export_single_graph_diagram(
             alpha=0.7,
             edge_color=edge_color_list,
             arrows=True,
-            arrowsize=25,
-            arrowstyle="->",
+            arrowsize=30,
+            arrowstyle="-|>",
             ax=ax,
-            connectionstyle="arc3,rad=0.1",
+            connectionstyle="arc3,rad=0.15",
+            min_source_margin=node_radius,
+            min_target_margin=node_radius,
         )
 
         # Draw edge labels (weights)
