@@ -97,49 +97,30 @@ class GraphReport(BaseReport):
         self, app_name: str, service: str, fault: str, run: int, compressor: str
     ) -> float:
         """
-        Calculate compression ratio by comparing directory sizes.
+        Calculate compression ratio by parsing compressor name.
+
+        head_sampling_N means 1 out of N spans is sampled, so compression ratio is N.
 
         Args:
             app_name: Application name
             service: Service name
             fault: Fault type
             run: Run number
-            compressor: Compressor name
+            compressor: Compressor name (e.g., "head_sampling_50")
 
         Returns:
-            Compression ratio (original_size / compressed_size)
+            Compression ratio (N from head_sampling_N, or 1.0 if not head_sampling)
         """
-        # Original size (ground truth)
-        original_dir = (
-            get_dir_with_root(self.root_dir, app_name, service, fault, run)
-            / "head_sampling_1"
-            / "compressed"
-            / "data"
-        )
+        import re
 
-        # Compressed size
-        compressed_dir = (
-            get_dir_with_root(self.root_dir, app_name, service, fault, run)
-            / compressor
-            / "compressed"
-            / "data"
-        )
+        # Parse head_sampling_N pattern
+        match = re.search(r'head_sampling_(\d+(?:\.\d+)?)', compressor)
+        if match:
+            ratio = float(match.group(1))
+            return ratio
 
-        if not original_dir.exists() or not compressed_dir.exists():
-            return 1.0
-
-        # Calculate sizes
-        original_size = sum(
-            f.stat().st_size for f in original_dir.glob("**/*") if f.is_file()
-        )
-        compressed_size = sum(
-            f.stat().st_size for f in compressed_dir.glob("**/*") if f.is_file()
-        )
-
-        if compressed_size == 0:
-            return float("inf")
-
-        return original_size / compressed_size
+        # Default to 1.0 (no compression)
+        return 1.0
 
     def scale_edge_weights(self, graph_data: dict, scale_factor: float) -> dict:
         """

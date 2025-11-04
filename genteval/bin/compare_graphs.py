@@ -20,25 +20,25 @@ def load_graph_json(json_path: pathlib.Path) -> dict:
         return json.load(f)
 
 
-def detect_head_sampling_rate(file_path: pathlib.Path) -> float:
+def detect_head_sampling_ratio(file_path: pathlib.Path) -> float:
     """
-    Detect head_sampling rate from file path.
+    Detect head_sampling ratio from file path.
+
+    head_sampling_N means sample 1 out of N spans.
+    So head_sampling_50 means 1/50 sampling rate, and compression ratio is 50.
 
     Args:
         file_path: Path to graph_results.json file
 
     Returns:
-        Sampling rate (0.0 to 1.0), or 1.0 if not head_sampling
+        Compression ratio (N from head_sampling_N), or 1.0 if not head_sampling
     """
     # Check parent directories for head_sampling pattern
     path_str = str(file_path)
     match = re.search(r'head_sampling_(\d+(?:\.\d+)?)', path_str)
     if match:
-        rate = float(match.group(1))
-        # Convert to decimal if it's like head_sampling_10 (meaning 10%)
-        if rate > 1.0:
-            rate = rate / 100.0
-        return rate
+        ratio = float(match.group(1))
+        return ratio
     return 1.0
 
 
@@ -333,19 +333,18 @@ def compare_graphs(
     graph1_timestamp_data = graphs1[timestamp]
     graph2_timestamp_data = graphs2[timestamp]
 
-    # Detect head_sampling rates and scale weights if needed
-    rate1 = detect_head_sampling_rate(graph1_path)
-    rate2 = detect_head_sampling_rate(graph2_path)
+    # Detect head_sampling ratios and scale weights if needed
+    # head_sampling_N means 1 out of N spans is sampled, so multiply weights by N
+    ratio1 = detect_head_sampling_ratio(graph1_path)
+    ratio2 = detect_head_sampling_ratio(graph2_path)
 
-    if rate1 < 1.0:
-        scale_factor1 = 1.0 / rate1
-        graph1_timestamp_data = scale_graph_weights(graph1_timestamp_data, scale_factor1)
-        print(f"\n  Detected head_sampling_{rate1*100:.0f}% in Graph 1, scaling weights by {scale_factor1:.2f}")
+    if ratio1 > 1.0:
+        graph1_timestamp_data = scale_graph_weights(graph1_timestamp_data, ratio1)
+        print(f"\n  Detected head_sampling_{ratio1:.0f} in Graph 1, scaling weights by {ratio1:.0f}x")
 
-    if rate2 < 1.0:
-        scale_factor2 = 1.0 / rate2
-        graph2_timestamp_data = scale_graph_weights(graph2_timestamp_data, scale_factor2)
-        print(f"  Detected head_sampling_{rate2*100:.0f}% in Graph 2, scaling weights by {scale_factor2:.2f}")
+    if ratio2 > 1.0:
+        graph2_timestamp_data = scale_graph_weights(graph2_timestamp_data, ratio2)
+        print(f"  Detected head_sampling_{ratio2:.0f} in Graph 2, scaling weights by {ratio2:.0f}x")
 
     # Convert to NetworkX using GraphReport method
     G1 = graph_report.json_to_networkx(graph1_timestamp_data)
