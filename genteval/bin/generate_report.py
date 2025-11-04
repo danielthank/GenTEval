@@ -1,10 +1,10 @@
 import argparse
+import json
 import pathlib
 
 from genteval.reports import (
     CountOverTimeReport,
     DurationReport,
-    EnhancedReportGenerator,
     GraphReport,
     OperationReport,
     RCAReport,
@@ -88,7 +88,7 @@ def main():
     argparser.add_argument(
         "--output",
         type=str,
-        help="Output file for enhanced JSON report",
+        help="Output file for JSON report",
     )
     args = argparser.parse_args()
 
@@ -111,7 +111,9 @@ def main():
         all_reports["duration"] = report
 
     if "count_over_time" in args.evaluators:
-        report_generator = CountOverTimeReport(args.compressors, root_dir, plot=args.plot)
+        report_generator = CountOverTimeReport(
+            args.compressors, root_dir, plot=args.plot
+        )
         report = report_generator.generate(run_dirs_func)
         all_reports["count_over_time"] = report
 
@@ -154,15 +156,20 @@ def main():
         report = report_generator.generate(run_dirs_func)
         all_reports["graph"] = report
 
-    # Always use enhanced formatting
-    if all_reports:
-        enhanced_generator = EnhancedReportGenerator()
-        enhanced_generator.print_enhanced_report(all_reports)
+    # Save JSON report if output file is specified
+    if args.output and all_reports:
+        output_path = pathlib.Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save enhanced JSON report if output file is specified
-        if args.output:
-            output_path = pathlib.Path(args.output)
-            enhanced_generator.save_enhanced_json_report(all_reports, output_path)
-            print(f"\n📄 Enhanced JSON report saved to: {output_path}")
-    else:
-        print("No reports generated to display.")
+        output_data = {
+            "metadata": {
+                "generator": "GenTEval Report Generator",
+                "report_types": list(all_reports.keys()),
+            },
+            "reports": all_reports,
+        }
+
+        with open(output_path, "w") as f:
+            json.dump(output_data, f, indent=2, default=str)
+
+        print(f"Report saved to: {output_path}")
