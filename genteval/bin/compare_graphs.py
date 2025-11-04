@@ -12,88 +12,13 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib.patches import FancyBboxPatch
 
+from genteval.reports.graph_report import GraphReport
+
 
 def load_graph_json(json_path: pathlib.Path) -> dict:
     """Load graph_results.json file."""
     with open(json_path, 'r') as f:
         return json.load(f)
-
-
-def json_to_networkx(graph_data: dict) -> nx.DiGraph:
-    """
-    Convert JSON graph representation to NetworkX DiGraph.
-
-    Args:
-        graph_data: Dictionary with "nodes" and "edges" keys
-
-    Returns:
-        NetworkX directed graph
-    """
-    G = nx.DiGraph()
-
-    # Add nodes
-    nodes = graph_data.get("nodes", [])
-    G.add_nodes_from(nodes)
-
-    # Add edges with weights
-    edges = graph_data.get("edges", {})
-    for edge_str, weight in edges.items():
-        if "->" in edge_str:
-            parent, child = edge_str.split("->")
-            G.add_edge(parent, child, weight=weight)
-
-    return G
-
-
-def calculate_distance(G1: nx.DiGraph, G2: nx.DiGraph) -> float:
-    """
-    Calculate graph edit distance with custom cost functions.
-
-    Args:
-        G1: First graph
-        G2: Second graph
-
-    Returns:
-        Approximate graph edit distance
-    """
-    distance_generator = nx.optimize_graph_edit_distance(
-        G1,
-        G2,
-        node_subst_cost=lambda n1, n2: 0 if n1 == n2 else 1,
-        node_del_cost=lambda n: 1,
-        node_ins_cost=lambda n: 1,
-        edge_subst_cost=lambda e1, e2: abs(
-            e1.get("weight", 0) - e2.get("weight", 0)
-        ),
-        edge_del_cost=lambda e: e.get("weight", 1),
-        edge_ins_cost=lambda e: e.get("weight", 1),
-    )
-    return next(distance_generator)
-
-
-def calculate_graph_fidelity(distance: float, num_nodes: int, total_edge_weight: float) -> float:
-    """
-    Calculate fidelity score from graph edit distance.
-
-    Args:
-        distance: Graph edit distance
-        num_nodes: Number of nodes in reference graph
-        total_edge_weight: Sum of all edge weights in reference graph
-
-    Returns:
-        Fidelity score (0-100), where 100 is perfect match
-    """
-    reference_size = num_nodes + total_edge_weight
-    if reference_size == 0:
-        return 100.0
-
-    # Distance as percentage of graph size
-    distance_ratio = distance / reference_size
-
-    # Invert to get fidelity (lower distance = higher fidelity)
-    fidelity = max(0.0, 100.0 - distance_ratio * 100)
-
-    return fidelity
 
 
 def export_graph_diagram(
@@ -181,7 +106,8 @@ def compare_graphs(
     graph1_path: pathlib.Path,
     graph2_path: pathlib.Path,
     timestamp: str,
-    output_dir: pathlib.Path
+    output_dir: pathlib.Path,
+    graph_report: GraphReport
 ) -> Tuple[float, float]:
     """
     Compare two graphs and export diagrams.
@@ -191,6 +117,7 @@ def compare_graphs(
         graph2_path: Path to second graph_results.json
         timestamp: Time bucket to compare
         output_dir: Directory to export diagrams
+        graph_report: GraphReport instance for calculations
 
     Returns:
         Tuple of (graph_edit_distance, fidelity_score)
@@ -208,19 +135,20 @@ def compare_graphs(
     if timestamp not in graphs2:
         raise ValueError(f"Timestamp {timestamp} not found in {graph2_path}")
 
-    # Convert to NetworkX
-    G1 = json_to_networkx(graphs1[timestamp])
-    G2 = json_to_networkx(graphs2[timestamp])
+    # Convert to NetworkX using GraphReport method
+    G1 = graph_report.json_to_networkx(graphs1[timestamp])
+    G2 = graph_report.json_to_networkx(graphs2[timestamp])
 
-    # Calculate distance and fidelity
-    distance = calculate_distance(G1, G2)
+    # Calculate distance using GraphReport method
+    distance = graph_report.calculate_distance(G1, G2)
 
     num_nodes = G1.number_of_nodes()
     total_edge_weight = sum(
         data.get('weight', 0)
         for _, _, data in G1.edges(data=True)
     )
-    fidelity = calculate_graph_fidelity(distance, num_nodes, total_edge_weight)
+    # Calculate fidelity using GraphReport method
+    fidelity = graph_report.calculate_graph_fidelity(distance, num_nodes, total_edge_weight)
 
     # Export diagrams
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -330,6 +258,9 @@ def main():
 
         return 0
 
+    # Create GraphReport instance for using its methods
+    graph_report = GraphReport(root_dir=pathlib.Path.cwd(), compressors=[])
+
     # Perform comparison
     print(f"\n{'='*70}")
     print(f"Graph Comparison Tool")
@@ -347,8 +278,9 @@ def main():
         graphs1 = graph1_data.get("service_graph_by_time", {})
         graphs2 = graph2_data.get("service_graph_by_time", {})
 
-        G1 = json_to_networkx(graphs1[args.timestamp])
-        G2 = json_to_networkx(graphs2[args.timestamp])
+        # Use GraphReport's json_to_networkx method
+        G1 = graph_report.json_to_networkx(graphs1[args.timestamp])
+        G2 = graph_report.json_to_networkx(graphs2[args.timestamp])
 
         print_graph_statistics(G1, "Graph 1 Statistics")
         print_graph_statistics(G2, "Graph 2 Statistics")
@@ -362,7 +294,8 @@ def main():
             graph1_path,
             graph2_path,
             args.timestamp,
-            output_dir
+            output_dir,
+            graph_report
         )
 
         # Display results
