@@ -37,7 +37,7 @@ def detect_head_sampling_ratio(file_path: pathlib.Path) -> float:
     """
     # Check parent directories for head_sampling pattern
     path_str = str(file_path)
-    match = re.search(r'head_sampling_(\d+(?:\.\d+)?)', path_str)
+    match = re.search(r"head_sampling_(\d+(?:\.\d+)?)", path_str)
     if match:
         ratio = float(match.group(1))
         return ratio
@@ -91,7 +91,9 @@ def export_single_graph_diagram(
 
     # Determine node colors
     if node_colors:
-        node_color_list = [node_colors.get(node, default_node_color) for node in G.nodes()]
+        node_color_list = [
+            node_colors.get(node, default_node_color) for node in G.nodes()
+        ]
     else:
         node_color_list = [default_node_color] * G.number_of_nodes()
 
@@ -115,7 +117,9 @@ def export_single_graph_diagram(
 
         # Determine edge colors
         if edge_colors:
-            edge_color_list = [edge_colors.get((u, v), default_edge_color) for u, v in edges]
+            edge_color_list = [
+                edge_colors.get((u, v), default_edge_color) for u, v in edges
+            ]
         else:
             edge_color_list = [default_edge_color] * len(edges)
 
@@ -150,7 +154,9 @@ def export_single_graph_diagram(
             edge_labels,
             font_size=10,
             font_weight="bold",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor="gray"),
+            bbox=dict(
+                boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor="gray"
+            ),
             ax=ax,
         )
 
@@ -217,12 +223,12 @@ def export_comparison_diagram(
     # Color schemes
     node_color_g1_only = "#FF6B6B"  # Red
     node_color_g2_only = "#51CF66"  # Green
-    node_color_common = "#87CEEB"   # Sky blue
+    node_color_common = "#87CEEB"  # Sky blue
 
     edge_color_g1_only = "#FF6B6B"  # Red
     edge_color_g2_only = "#51CF66"  # Green
-    edge_color_common = "#666666"   # Gray
-    edge_color_diff = "#FFA500"     # Orange (different weights)
+    edge_color_common = "#666666"  # Gray
+    edge_color_diff = "#FFA500"  # Orange (different weights)
 
     # Determine node colors for G1
     node_colors_g1 = {}
@@ -247,7 +253,9 @@ def export_comparison_diagram(
             edge_colors_g1[edge] = edge_color_g1_only
         elif edge in common_edges:
             # Check if weights differ
-            if G1[edge[0]][edge[1]].get("weight", 0) != G2[edge[0]][edge[1]].get("weight", 0):
+            if G1[edge[0]][edge[1]].get("weight", 0) != G2[edge[0]][edge[1]].get(
+                "weight", 0
+            ):
                 edge_colors_g1[edge] = edge_color_diff
             else:
                 edge_colors_g1[edge] = edge_color_common
@@ -259,14 +267,21 @@ def export_comparison_diagram(
             edge_colors_g2[edge] = edge_color_g2_only
         elif edge in common_edges:
             # Check if weights differ
-            if G1[edge[0]][edge[1]].get("weight", 0) != G2[edge[0]][edge[1]].get("weight", 0):
+            if G1[edge[0]][edge[1]].get("weight", 0) != G2[edge[0]][edge[1]].get(
+                "weight", 0
+            ):
                 edge_colors_g2[edge] = edge_color_diff
             else:
                 edge_colors_g2[edge] = edge_color_common
 
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
-    fig.suptitle(f"Graph Comparison - Timestamp: {timestamp}", fontsize=22, fontweight="bold", y=0.98)
+    fig.suptitle(
+        f"Graph Comparison - Timestamp: {timestamp}",
+        fontsize=22,
+        fontweight="bold",
+        y=0.98,
+    )
 
     # Draw both graphs
     export_single_graph_diagram(
@@ -277,19 +292,28 @@ def export_comparison_diagram(
     )
 
     # Add metrics text box (positioned above legend)
-    metrics_text = f"Graph Edit Distance: {distance:.2f}\nGraph Fidelity: {fidelity:.2f}%"
+    metrics_text = (
+        f"Graph Edit Distance: {distance:.2f}\nGraph Fidelity: {fidelity:.2f}%"
+    )
     fig.text(
-        0.5, 0.065,
+        0.5,
+        0.085,
         metrics_text,
-        ha='center',
-        va='bottom',
+        ha="center",
+        va="bottom",
         fontsize=16,
-        fontweight='bold',
-        bbox=dict(boxstyle='round,pad=0.8', facecolor='lightyellow', edgecolor='black', linewidth=2),
+        fontweight="bold",
+        bbox=dict(
+            boxstyle="round,pad=0.8",
+            facecolor="lightyellow",
+            edgecolor="black",
+            linewidth=2,
+        ),
     )
 
     # Add legend (positioned below metrics)
     from matplotlib.patches import Patch
+
     legend_elements = [
         Patch(facecolor=node_color_g1_only, edgecolor="black", label="Only in Graph 1"),
         Patch(facecolor=node_color_g2_only, edgecolor="black", label="Only in Graph 2"),
@@ -298,7 +322,7 @@ def export_comparison_diagram(
     ]
     fig.legend(
         handles=legend_elements,
-        loc='lower center',
+        loc="lower center",
         bbox_to_anchor=(0.5, 0.01),
         ncol=4,
         fontsize=14,
@@ -359,11 +383,15 @@ def compare_graphs(
 
     if ratio1 > 1.0:
         graph1_timestamp_data = scale_graph_weights(graph1_timestamp_data, ratio1)
-        print(f"\n  Detected head_sampling_{ratio1:.0f} in Graph 1, scaling weights by {ratio1:.0f}x")
+        print(
+            f"\n  Detected head_sampling_{ratio1:.0f} in Graph 1, scaling weights by {ratio1:.0f}x"
+        )
 
     if ratio2 > 1.0:
         graph2_timestamp_data = scale_graph_weights(graph2_timestamp_data, ratio2)
-        print(f"  Detected head_sampling_{ratio2:.0f} in Graph 2, scaling weights by {ratio2:.0f}x")
+        print(
+            f"  Detected head_sampling_{ratio2:.0f} in Graph 2, scaling weights by {ratio2:.0f}x"
+        )
 
     # Convert to NetworkX using GraphReport method
     G1 = graph_report.json_to_networkx(graph1_timestamp_data)
@@ -374,8 +402,12 @@ def compare_graphs(
 
     # Calculate total edge weight from both graphs
     num_nodes = G1.number_of_nodes()
-    total_edge_weight_g1 = sum(data.get("weight", 0) for _, _, data in G1.edges(data=True))
-    total_edge_weight_g2 = sum(data.get("weight", 0) for _, _, data in G2.edges(data=True))
+    total_edge_weight_g1 = sum(
+        data.get("weight", 0) for _, _, data in G1.edges(data=True)
+    )
+    total_edge_weight_g2 = sum(
+        data.get("weight", 0) for _, _, data in G2.edges(data=True)
+    )
     total_edge_weight = total_edge_weight_g1 + total_edge_weight_g2
 
     # Calculate fidelity using GraphReport method
@@ -435,9 +467,9 @@ def print_graph_differences(G1: nx.DiGraph, G2: nx.DiGraph):
     edges2_only = edges2 - edges1
     common_edges = edges1 & edges2
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("GRAPH DIFFERENCES")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Node differences
     print(f"\nNodes only in Graph 1 ({len(nodes1_only)}):")
@@ -474,7 +506,7 @@ def print_graph_differences(G1: nx.DiGraph, G2: nx.DiGraph):
         print("  None")
 
     # Common edges with different weights
-    print(f"\nCommon edges with different weights:")
+    print("\nCommon edges with different weights:")
     diff_weight_edges = []
     for edge in sorted(common_edges):
         w1 = G1[edge[0]][edge[1]].get("weight", 0)
@@ -490,7 +522,9 @@ def print_graph_differences(G1: nx.DiGraph, G2: nx.DiGraph):
     else:
         print("  None")
 
-    print(f"\nCommon edges with same weights ({len(common_edges) - len(diff_weight_edges)}):")
+    print(
+        f"\nCommon edges with same weights ({len(common_edges) - len(diff_weight_edges)}):"
+    )
 
 
 def main():
