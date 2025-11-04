@@ -11,6 +11,8 @@ import re
 import matplotlib.pyplot as plt
 import networkx as nx
 
+# Note: GraphReport itself doesn't need sklearn, but it's required by other
+# reports (CountOverTimeReport) that are imported via genteval.reports.__init__.py
 from genteval.reports.graph_report import GraphReport
 
 
