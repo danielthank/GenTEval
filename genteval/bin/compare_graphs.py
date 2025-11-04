@@ -19,82 +19,231 @@ def load_graph_json(json_path: pathlib.Path) -> dict:
         return json.load(f)
 
 
-def export_graph_diagram(
-    G: nx.DiGraph, output_path: pathlib.Path, title: str, highlight_edges: dict = None
+def export_single_graph_diagram(
+    G: nx.DiGraph,
+    pos: dict,
+    ax: plt.Axes,
+    title: str,
+    node_colors: dict = None,
+    edge_colors: dict = None,
 ):
     """
-    Export graph diagram as PNG using matplotlib and networkx.
+    Export a single graph diagram on a matplotlib axis.
 
     Args:
         G: NetworkX graph to visualize
-        output_path: Path to save the PNG file
+        pos: Node positions (for consistent layout across graphs)
+        ax: Matplotlib axis to draw on
         title: Title for the diagram
-        highlight_edges: Dictionary of edges to highlight with different colors
+        node_colors: Dictionary mapping nodes to colors
+        edge_colors: Dictionary mapping edges to colors
     """
-    plt.figure(figsize=(12, 8))
+    # Default colors
+    default_node_color = "#87CEEB"  # Sky blue
+    default_edge_color = "#666666"  # Gray
 
-    # Use hierarchical layout for directed graphs
-    try:
-        pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
-    except:
-        # Fallback to shell layout if spring layout fails
-        pos = nx.shell_layout(G)
+    # Determine node colors
+    if node_colors:
+        node_color_list = [node_colors.get(node, default_node_color) for node in G.nodes()]
+    else:
+        node_color_list = [default_node_color] * G.number_of_nodes()
 
     # Draw nodes
     nx.draw_networkx_nodes(
         G,
         pos,
-        node_color="lightblue",
-        node_size=3000,
+        node_color=node_color_list,
+        node_size=4000,
         alpha=0.9,
         edgecolors="black",
-        linewidths=2,
+        linewidths=2.5,
+        ax=ax,
     )
 
     # Draw edges with weights
-    edges = G.edges()
-    weights = [G[u][v].get("weight", 1) for u, v in edges]
+    edges = list(G.edges())
+    if edges:
+        weights = [G[u][v].get("weight", 1) for u, v in edges]
+        max_weight = max(weights) if weights else 1
 
-    # Normalize weights for edge width
-    max_weight = max(weights) if weights else 1
-    edge_widths = [2 + (w / max_weight) * 3 for w in weights]
+        # Determine edge colors
+        if edge_colors:
+            edge_color_list = [edge_colors.get((u, v), default_edge_color) for u, v in edges]
+        else:
+            edge_color_list = [default_edge_color] * len(edges)
 
-    nx.draw_networkx_edges(
-        G,
-        pos,
-        edgelist=edges,
-        width=edge_widths,
-        alpha=0.6,
-        edge_color="gray",
-        arrows=True,
-        arrowsize=20,
-        arrowstyle="->",
-    )
+        # Calculate edge widths based on weights
+        edge_widths = [2 + (w / max_weight) * 4 for w in weights]
+
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            edgelist=edges,
+            width=edge_widths,
+            alpha=0.7,
+            edge_color=edge_color_list,
+            arrows=True,
+            arrowsize=25,
+            arrowstyle="->",
+            ax=ax,
+            connectionstyle="arc3,rad=0.1",
+        )
+
+        # Draw edge labels (weights)
+        edge_labels = {(u, v): f"{G[u][v].get('weight', 1)}" for u, v in edges}
+        nx.draw_networkx_edge_labels(
+            G,
+            pos,
+            edge_labels,
+            font_size=10,
+            font_weight="bold",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor="gray"),
+            ax=ax,
+        )
 
     # Draw labels
     nx.draw_networkx_labels(
-        G, pos, font_size=9, font_weight="bold", font_family="sans-serif"
-    )
-
-    # Draw edge labels (weights)
-    edge_labels = {(u, v): f"{G[u][v].get('weight', 1)}" for u, v in G.edges()}
-    nx.draw_networkx_edge_labels(
         G,
         pos,
-        edge_labels,
-        font_size=8,
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7),
+        font_size=11,
+        font_weight="bold",
+        font_family="sans-serif",
+        ax=ax,
     )
 
-    plt.title(title, fontsize=16, fontweight="bold", pad=20)
-    plt.axis("off")
-    plt.tight_layout()
+    ax.set_title(title, fontsize=18, fontweight="bold", pad=20)
+    ax.axis("off")
+
+
+def export_comparison_diagram(
+    G1: nx.DiGraph,
+    G2: nx.DiGraph,
+    output_path: pathlib.Path,
+    graph1_name: str,
+    graph2_name: str,
+    timestamp: str,
+):
+    """
+    Export side-by-side comparison of two graphs with color-coded differences.
+
+    Args:
+        G1: First graph
+        G2: Second graph
+        output_path: Path to save the PNG file
+        graph1_name: Name of first graph
+        graph2_name: Name of second graph
+        timestamp: Timestamp being compared
+    """
+    # Create union graph for consistent layout
+    G_union = nx.DiGraph()
+    G_union.add_nodes_from(set(G1.nodes()) | set(G2.nodes()))
+    G_union.add_edges_from(set(G1.edges()) | set(G2.edges()))
+
+    # Calculate layout once for consistent positioning
+    if G_union.number_of_nodes() > 0:
+        try:
+            pos = nx.spring_layout(G_union, k=2.5, iterations=100, seed=42)
+        except:
+            pos = nx.shell_layout(G_union)
+    else:
+        pos = {}
+
+    # Analyze differences
+    nodes1_only = set(G1.nodes()) - set(G2.nodes())
+    nodes2_only = set(G2.nodes()) - set(G1.nodes())
+    common_nodes = set(G1.nodes()) & set(G2.nodes())
+
+    edges1_only = set(G1.edges()) - set(G2.edges())
+    edges2_only = set(G2.edges()) - set(G1.edges())
+    common_edges = set(G1.edges()) & set(G2.edges())
+
+    # Color schemes
+    node_color_g1_only = "#FF6B6B"  # Red
+    node_color_g2_only = "#51CF66"  # Green
+    node_color_common = "#87CEEB"   # Sky blue
+
+    edge_color_g1_only = "#FF6B6B"  # Red
+    edge_color_g2_only = "#51CF66"  # Green
+    edge_color_common = "#666666"   # Gray
+    edge_color_diff = "#FFA500"     # Orange (different weights)
+
+    # Determine node colors for G1
+    node_colors_g1 = {}
+    for node in G1.nodes():
+        if node in nodes1_only:
+            node_colors_g1[node] = node_color_g1_only
+        else:
+            node_colors_g1[node] = node_color_common
+
+    # Determine node colors for G2
+    node_colors_g2 = {}
+    for node in G2.nodes():
+        if node in nodes2_only:
+            node_colors_g2[node] = node_color_g2_only
+        else:
+            node_colors_g2[node] = node_color_common
+
+    # Determine edge colors for G1
+    edge_colors_g1 = {}
+    for edge in G1.edges():
+        if edge in edges1_only:
+            edge_colors_g1[edge] = edge_color_g1_only
+        elif edge in common_edges:
+            # Check if weights differ
+            if G1[edge[0]][edge[1]].get("weight", 0) != G2[edge[0]][edge[1]].get("weight", 0):
+                edge_colors_g1[edge] = edge_color_diff
+            else:
+                edge_colors_g1[edge] = edge_color_common
+
+    # Determine edge colors for G2
+    edge_colors_g2 = {}
+    for edge in G2.edges():
+        if edge in edges2_only:
+            edge_colors_g2[edge] = edge_color_g2_only
+        elif edge in common_edges:
+            # Check if weights differ
+            if G1[edge[0]][edge[1]].get("weight", 0) != G2[edge[0]][edge[1]].get("weight", 0):
+                edge_colors_g2[edge] = edge_color_diff
+            else:
+                edge_colors_g2[edge] = edge_color_common
+
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
+    fig.suptitle(f"Graph Comparison - Timestamp: {timestamp}", fontsize=22, fontweight="bold", y=0.98)
+
+    # Draw both graphs
+    export_single_graph_diagram(
+        G1, pos, ax1, f"Graph 1: {graph1_name}", node_colors_g1, edge_colors_g1
+    )
+    export_single_graph_diagram(
+        G2, pos, ax2, f"Graph 2: {graph2_name}", node_colors_g2, edge_colors_g2
+    )
+
+    # Add legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=node_color_g1_only, edgecolor="black", label="Only in Graph 1"),
+        Patch(facecolor=node_color_g2_only, edgecolor="black", label="Only in Graph 2"),
+        Patch(facecolor=node_color_common, edgecolor="black", label="In Both Graphs"),
+        Patch(facecolor=edge_color_diff, edgecolor="black", label="Different Weight"),
+    ]
+    fig.legend(
+        handles=legend_elements,
+        loc="lower center",
+        ncol=4,
+        fontsize=14,
+        frameon=True,
+        fancybox=True,
+        shadow=True,
+    )
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
 
     # Save the figure
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
 
-    print(f"  Exported diagram: {output_path}")
+    print(f"  Exported comparison diagram: {output_path}")
 
 
 def compare_graphs(
@@ -150,16 +299,14 @@ def compare_graphs(
     graph1_name = graph1_path.parent.parent.name
     graph2_name = graph2_path.parent.parent.name
 
-    export_graph_diagram(
+    # Export side-by-side comparison diagram
+    export_comparison_diagram(
         G1,
-        output_dir / f"graph1_{graph1_name}_{timestamp}.png",
-        f"Graph 1: {graph1_name} (Time: {timestamp})",
-    )
-
-    export_graph_diagram(
         G2,
-        output_dir / f"graph2_{graph2_name}_{timestamp}.png",
-        f"Graph 2: {graph2_name} (Time: {timestamp})",
+        output_dir / f"comparison_{graph1_name}_vs_{graph2_name}_{timestamp}.png",
+        graph1_name,
+        graph2_name,
+        timestamp,
     )
 
     return distance, fidelity
@@ -179,6 +326,79 @@ def print_graph_statistics(G: nx.DiGraph, name: str):
 
     if G.number_of_nodes() > 0:
         print(f"  Nodes: {', '.join(sorted(G.nodes()))}")
+
+
+def print_graph_differences(G1: nx.DiGraph, G2: nx.DiGraph):
+    """Print detailed differences between two graphs."""
+    nodes1 = set(G1.nodes())
+    nodes2 = set(G2.nodes())
+    edges1 = set(G1.edges())
+    edges2 = set(G2.edges())
+
+    nodes1_only = nodes1 - nodes2
+    nodes2_only = nodes2 - nodes1
+    common_nodes = nodes1 & nodes2
+
+    edges1_only = edges1 - edges2
+    edges2_only = edges2 - edges1
+    common_edges = edges1 & edges2
+
+    print(f"\n{'='*70}")
+    print("GRAPH DIFFERENCES")
+    print(f"{'='*70}")
+
+    # Node differences
+    print(f"\nNodes only in Graph 1 ({len(nodes1_only)}):")
+    if nodes1_only:
+        print(f"  {', '.join(sorted(nodes1_only))}")
+    else:
+        print("  None")
+
+    print(f"\nNodes only in Graph 2 ({len(nodes2_only)}):")
+    if nodes2_only:
+        print(f"  {', '.join(sorted(nodes2_only))}")
+    else:
+        print("  None")
+
+    print(f"\nCommon nodes ({len(common_nodes)}):")
+    if common_nodes:
+        print(f"  {', '.join(sorted(common_nodes))}")
+
+    # Edge differences
+    print(f"\nEdges only in Graph 1 ({len(edges1_only)}):")
+    if edges1_only:
+        for u, v in sorted(edges1_only):
+            weight = G1[u][v].get("weight", 1)
+            print(f"  {u} -> {v} (weight: {weight})")
+    else:
+        print("  None")
+
+    print(f"\nEdges only in Graph 2 ({len(edges2_only)}):")
+    if edges2_only:
+        for u, v in sorted(edges2_only):
+            weight = G2[u][v].get("weight", 1)
+            print(f"  {u} -> {v} (weight: {weight})")
+    else:
+        print("  None")
+
+    # Common edges with different weights
+    print(f"\nCommon edges with different weights:")
+    diff_weight_edges = []
+    for edge in sorted(common_edges):
+        w1 = G1[edge[0]][edge[1]].get("weight", 0)
+        w2 = G2[edge[0]][edge[1]].get("weight", 0)
+        if w1 != w2:
+            diff_weight_edges.append((edge, w1, w2))
+
+    if diff_weight_edges:
+        for (u, v), w1, w2 in diff_weight_edges:
+            diff = w2 - w1
+            sign = "+" if diff > 0 else ""
+            print(f"  {u} -> {v}: {w1} vs {w2} ({sign}{diff})")
+    else:
+        print("  None")
+
+    print(f"\nCommon edges with same weights ({len(common_edges) - len(diff_weight_edges)}):")
 
 
 def main():
@@ -272,6 +492,9 @@ def main():
 
         print_graph_statistics(G1, "Graph 1 Statistics")
         print_graph_statistics(G2, "Graph 2 Statistics")
+
+        # Print detailed differences
+        print_graph_differences(G1, G2)
 
         # Compare and export
         print(f"\n{'=' * 70}")
