@@ -47,10 +47,13 @@ class RootModel:
             min_start_time = min(min_start_time, trace_start_time)
             max_start_time = max(max_start_time, trace_start_time)
 
-            # Find root spans (spans with no parent)
+            # Find root spans (spans with no parent or missing parent)
             trace_root_count = 0
             for span_id, span_data in trace.spans.items():
-                if span_data.get("parentSpanId") is None:
+                parent_id = span_data.get("parentSpanId")
+
+                # Treat as root if: no parent, or parent doesn't exist in trace
+                if parent_id is None or parent_id not in trace.spans:
                     # Count children of this root span
                     child_count = sum(
                         1

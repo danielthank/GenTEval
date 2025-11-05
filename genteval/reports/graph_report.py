@@ -31,7 +31,7 @@ class GraphReport(BaseReport):
         distance_generator = nx.optimize_graph_edit_distance(
             G1,
             G2,
-            node_subst_cost=lambda n1, n2: 0 if n1 == n2 else 1,
+            node_subst_cost=lambda n1, n2: 0 if n1 == n2 else float("inf"),
             node_del_cost=lambda n: 1,
             node_ins_cost=lambda n: 1,
             edge_subst_cost=lambda e1, e2: abs(
@@ -114,7 +114,7 @@ class GraphReport(BaseReport):
         import re
 
         # Parse head_sampling_N pattern
-        match = re.search(r'head_sampling_(\d+(?:\.\d+)?)', compressor)
+        match = re.search(r"head_sampling_(\d+(?:\.\d+)?)", compressor)
         if match:
             ratio = float(match.group(1))
             return ratio
@@ -231,21 +231,27 @@ class GraphReport(BaseReport):
                     # Calculate fidelity
                     num_nodes = G_original.number_of_nodes()
                     total_edge_weight_g1 = sum(
-                        data.get('weight', 0)
+                        data.get("weight", 0)
                         for _, _, data in G_original.edges(data=True)
                     )
                     total_edge_weight_g2 = sum(
-                        data.get('weight', 0)
+                        data.get("weight", 0)
                         for _, _, data in G_compressed.edges(data=True)
                     )
                     total_edge_weight = total_edge_weight_g1 + total_edge_weight_g2
-                    fidelity = self.calculate_graph_fidelity(distance, num_nodes, total_edge_weight)
+                    fidelity = self.calculate_graph_fidelity(
+                        distance, num_nodes, total_edge_weight
+                    )
 
                     # Store in report with time_bucket key
                     metric_key = f"time_{time_bucket}"
                     self.report[report_group][metric_key]["values"].append(distance)
-                    self.report[report_group][metric_key]["fidelity_values"] = self.report[report_group][metric_key].get("fidelity_values", [])
-                    self.report[report_group][metric_key]["fidelity_values"].append(fidelity)
+                    self.report[report_group][metric_key]["fidelity_values"] = (
+                        self.report[report_group][metric_key].get("fidelity_values", [])
+                    )
+                    self.report[report_group][metric_key]["fidelity_values"].append(
+                        fidelity
+                    )
 
         # Calculate averages and cleanup
         for report_group in self.report.values():
@@ -261,7 +267,8 @@ class GraphReport(BaseReport):
                 # Calculate fidelity average
                 if isinstance(metric_group, dict) and "fidelity_values" in metric_group:
                     metric_group["fidelity"] = (
-                        sum(metric_group["fidelity_values"]) / len(metric_group["fidelity_values"])
+                        sum(metric_group["fidelity_values"])
+                        / len(metric_group["fidelity_values"])
                         if metric_group["fidelity_values"]
                         else float("nan")
                     )

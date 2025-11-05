@@ -25,7 +25,7 @@ class SimpleGenTConfig:
     """Configuration for Simple GenT algorithm."""
 
     # Time bucketing configuration
-    time_bucket_duration_us: int = 1 * 60 * 1000000  # 1 minute in microseconds
+    time_bucket_duration_us: int = 1 * 60 * 1000000
 
     # Model selection
     topology_model: TopologyModelType = TopologyModelType.MRF
@@ -50,9 +50,9 @@ class SimpleGenTConfig:
     num_beta_components: int = 5
     learning_rate: float = 1e-3
     metadata_epochs: int = 500
-    batch_size: int = 512
+    batch_size: int = 1024
     beta: float = 10.0  # KL divergence weight
-    early_stopping_patience: int = 5
+    early_stopping_patience: int = 3
     sequential_training_lr_factor: float = 0.5  # LR reduction for sequential training
 
     # Reject sampling parameters

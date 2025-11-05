@@ -45,10 +45,13 @@ class RootDurationModel:
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
 
-            # Find root spans
+            # Find root spans (spans with no parent or missing parent)
             trace_root_count = 0
             for span_id, span_data in trace.spans.items():
-                if span_data.get("parentSpanId") is None:
+                parent_id = span_data.get("parentSpanId")
+
+                # Treat as root if: no parent, or parent doesn't exist in trace
+                if parent_id is None or parent_id not in trace.spans:
                     # Count children
                     child_count = sum(
                         1

@@ -173,12 +173,8 @@ class MetadataVAEModel:
                     )
 
                     # Unpack model output
-                    recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z, status_code_logits = (
-                        model_output
-                    )
-                    total_loss, recon_loss, kl_loss, status_code_loss = model.loss_function(
+                    (
                         recon,
-                        targets_device,
                         x_scale,
                         mixture_weights,
                         alphas,
@@ -187,7 +183,21 @@ class MetadataVAEModel:
                         logvar,
                         z,
                         status_code_logits,
-                        current_beta,
+                    ) = model_output
+                    total_loss, recon_loss, kl_loss, status_code_loss = (
+                        model.loss_function(
+                            recon,
+                            targets_device,
+                            x_scale,
+                            mixture_weights,
+                            alphas,
+                            betas,
+                            mu,
+                            logvar,
+                            z,
+                            status_code_logits,
+                            current_beta,
+                        )
                     )
                     total_loss.backward()
                     self.optimizer.step()
@@ -341,8 +351,12 @@ class MetadataVAEModel:
 
             # Create training arrays for this bucket
             num_examples = len(raw_training_data)
-            training_inputs = np.zeros((num_examples, 4))  # 4 inputs: duration, child_idx, parent_node, child_node
-            training_targets = np.zeros((num_examples, 3))  # 3 targets: gap_ratio, duration_ratio, status_code
+            training_inputs = np.zeros(
+                (num_examples, 4)
+            )  # 4 inputs: duration, child_idx, parent_node, child_node
+            training_targets = np.zeros(
+                (num_examples, 3)
+            )  # 3 targets: gap_ratio, duration_ratio, status_code
 
             # Extract all data at once using list comprehensions (vectorized)
             training_inputs[:, 0] = [
@@ -395,9 +409,17 @@ class MetadataVAEModel:
                 )
 
                 # Unpack model output
-                recon, x_scale, mixture_weights, alphas, betas, mu, logvar, z, status_code_logits = (
-                    model_output
-                )
+                (
+                    recon,
+                    x_scale,
+                    mixture_weights,
+                    alphas,
+                    betas,
+                    mu,
+                    logvar,
+                    z,
+                    status_code_logits,
+                ) = model_output
                 val_loss, _, _, _ = model.loss_function(
                     recon,
                     targets_device,

@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 from tqdm import tqdm
 
+from genteval.compressors.simple_gent.proto import simple_gent_pb2
 from genteval.utils.data_structures import count_spans_per_tree
 
 from .node_feature import NodeFeature
@@ -60,7 +61,6 @@ class TopologyModel:
 
     def _calculate_max_nodes_per_bucket(self, traces):
         """Calculate the maximum number of nodes per time bucket."""
-        from collections import defaultdict
 
         self.logger.info("Calculating maximum nodes per time bucket")
         max_nodes_per_bucket = defaultdict(int)
@@ -110,12 +110,17 @@ class TopologyModel:
 
             for span_id, span_data in trace.spans.items():
                 graph.add_node(span_id, **span_data)
-                if span_data.get("parentSpanId") is None:
+                parent_id = span_data.get("parentSpanId")
+
+                if parent_id is None:
+                    # No parent - this is a root span
                     root_spans.append(span_id)
+                elif parent_id in trace.spans:
+                    # Parent exists - add edge
+                    graph.add_edge(parent_id, span_id)
                 else:
-                    parent_id = span_data["parentSpanId"]
-                    if parent_id in trace.spans:
-                        graph.add_edge(parent_id, span_id)
+                    # Parent doesn't exist - treat as root span
+                    root_spans.append(span_id)
 
             total_root_spans += len(root_spans)
 
@@ -380,7 +385,6 @@ class TopologyModel:
 
     def save_state_dict(self, proto_models):
         """Save model state to protobuf message."""
-        from genteval.compressors.simple_gent.proto import simple_gent_pb2
 
         # Group data by time buckets
         time_bucket_data = {}
