@@ -11,7 +11,7 @@ class DurationEvaluator(Evaluator):
         # [group] = [..durations]
         duration = defaultdict(list)
 
-        # [group][time_buckett] = [..durations]
+        # [group][time_bucket] = [..durations]
         duration_by_time = defaultdict(lambda: defaultdict(list))
 
         # [group][time_bucket][percentile] = value

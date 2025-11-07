@@ -277,7 +277,7 @@ def export_comparison_diagram(
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10))
     fig.suptitle(
-        f"Graph Comparison - Timestamp: {timestamp}",
+        f"Graph Comparison - Timebucket: {timestamp}",
         fontsize=22,
         fontweight="bold",
         y=0.98,
@@ -369,9 +369,9 @@ def compare_graphs(
     graphs2 = graph2_data.get("service_graph_by_time", {})
 
     if timestamp not in graphs1:
-        raise ValueError(f"Timestamp {timestamp} not found in {graph1_path}")
+        raise ValueError(f"Timebucket {timestamp} not found in {graph1_path}")
     if timestamp not in graphs2:
-        raise ValueError(f"Timestamp {timestamp} not found in {graph2_path}")
+        raise ValueError(f"Timebucket {timestamp} not found in {graph2_path}")
 
     graph1_timestamp_data = graphs1[timestamp]
     graph2_timestamp_data = graphs2[timestamp]
@@ -601,7 +601,7 @@ def main():
     print(f"{'=' * 70}")
     print(f"\nGraph 1: {graph1_path}")
     print(f"Graph 2: {graph2_path}")
-    print(f"Timestamp: {args.timestamp}")
+    print(f"Timebucket: {args.timestamp}")
     print(f"Output directory: {output_dir}")
 
     try:

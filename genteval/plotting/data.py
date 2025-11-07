@@ -31,8 +31,6 @@ class ExperimentData:
     child_parent_depth4_fidelity: float
     tracerca_avg5_fidelity: float
     microrank_avg5_fidelity: float
-    count_over_time_mape_fidelity: float
-    count_over_time_cosine_fidelity: float
     graph_fidelity: float
     size_kb: float
     cpu_time_seconds: float
@@ -100,9 +98,6 @@ class ReportParser:
             report_data, compressor_name
         )
         rca_data = self._extract_rca_data(report_data, compressor_name)
-        count_over_time_data = self._extract_count_over_time_data(
-            report_data, compressor_name
-        )
         graph_data = self._extract_graph_data(report_data, compressor_name)
 
         # Parse compressor name to extract metadata (pass time_data for compute type detection)
@@ -110,9 +105,12 @@ class ReportParser:
         if not name_parts:
             return None
 
-        if not all([size_data, time_data, fidelity_data]):
-            print(f"Warning: Missing data for {compressor_name}")
+        if not all([size_data, time_data]):
+            print(f"Warning: Missing size or time data for {compressor_name}")
             return None
+
+        if not fidelity_data:
+            fidelity_data = {"mape": 0.0, "cosine": 0.0}
 
         if not operation_data:
             operation_data = {"operation_f1": 0.0, "operation_pair_f1": 0.0}
@@ -131,12 +129,6 @@ class ReportParser:
             rca_data = {
                 "tracerca_avg5": 0.0,
                 "microrank_avg5": 0.0,
-            }
-
-        if not count_over_time_data:
-            count_over_time_data = {
-                "count_over_time_mape_fidelity": 0.0,
-                "count_over_time_cosine_fidelity": 0.0,
             }
 
         if not graph_data:
@@ -184,12 +176,6 @@ class ReportParser:
             ),
             tracerca_avg5_fidelity=rca_data["tracerca_avg5"] * 100,
             microrank_avg5_fidelity=rca_data["microrank_avg5"] * 100,
-            count_over_time_mape_fidelity=count_over_time_data[
-                "count_over_time_mape_fidelity"
-            ],
-            count_over_time_cosine_fidelity=count_over_time_data[
-                "count_over_time_cosine_fidelity"
-            ],
             graph_fidelity=graph_data["graph_fidelity"],
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
@@ -508,40 +494,6 @@ class ReportParser:
                     result["microrank_avg5"] = 0.0
             else:
                 result["microrank_avg5"] = 0.0
-
-        except KeyError:
-            return None
-        else:
-            return result
-
-    def _extract_count_over_time_data(
-        self, report_data: dict, compressor_name: str
-    ) -> dict | None:
-        """Extract count over time fidelity data from the JSON report."""
-        try:
-            result = {}
-
-            # Extract count over time data
-            if "count_over_time" in report_data.get("reports", {}):
-                count_over_time_report = report_data["reports"]["count_over_time"]
-                if compressor_name in count_over_time_report:
-                    compressor_data = count_over_time_report[compressor_name]
-
-                    # Extract MAPE fidelity score
-                    result["count_over_time_mape_fidelity"] = compressor_data.get(
-                        "count_over_time_mape_fidelity_score", 0.0
-                    )
-
-                    # Extract Cosine fidelity score
-                    result["count_over_time_cosine_fidelity"] = compressor_data.get(
-                        "count_over_time_cosine_fidelity_score", 0.0
-                    )
-                else:
-                    result["count_over_time_mape_fidelity"] = 0.0
-                    result["count_over_time_cosine_fidelity"] = 0.0
-            else:
-                result["count_over_time_mape_fidelity"] = 0.0
-                result["count_over_time_cosine_fidelity"] = 0.0
 
         except KeyError:
             return None

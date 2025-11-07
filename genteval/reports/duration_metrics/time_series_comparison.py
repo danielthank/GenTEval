@@ -142,12 +142,12 @@ class TimeSeriesComparisonMetric:
         self, original_data, results_data, group_key, compressor_name=None
     ):
         """
-        Process count over time data - new method for count evaluation.
+        Process rate over time data - method for rate evaluation.
 
         Args:
-            original_data: Original dataset with span_count_by_time structure
-            results_data: Compressed dataset with span_count_by_time structure
-            group_key: The group key (e.g., "depth_0", "depth_1", "all")
+            original_data: Original dataset with span_rate_by_time structure
+            results_data: Compressed dataset with span_rate_by_time structure
+            group_key: The group key (e.g., "all", "http.status_code:200")
             compressor_name: Name of the compressor to determine scaling factor
 
         Returns:
@@ -155,10 +155,10 @@ class TimeSeriesComparisonMetric:
         """
         try:
             # Extract time series for the specific group
-            original_count_data = original_data.get("span_count_by_time", {}).get(
+            original_count_data = original_data.get("span_rate_by_time", {}).get(
                 group_key, {}
             )
-            results_count_data = results_data.get("span_count_by_time", {}).get(
+            results_count_data = results_data.get("span_rate_by_time", {}).get(
                 group_key, {}
             )
 

@@ -1,4 +1,4 @@
-"""Count over time report generator with MAPE and Cosine similarity analysis."""
+"""Rate over time report generator with MAPE and Cosine similarity analysis."""
 
 from typing import Any
 
@@ -10,16 +10,16 @@ from .base_report import BaseReport
 from .duration_metrics import TimeSeriesComparisonMetric
 
 
-class CountOverTimeReport(BaseReport):
-    """Report generator for count over time evaluation with MAPE and Cosine similarity."""
+class RateOverTimeReport(BaseReport):
+    """Report generator for rate over time evaluation with MAPE and Cosine similarity."""
 
     def __init__(self, compressors, root_dir, plot=True):
-        """Initialize the count over time report generator."""
+        """Initialize the rate over time report generator."""
         super().__init__(compressors, root_dir)
         self.plot = plot
         self.time_series_metric = TimeSeriesComparisonMetric()
 
-    def _calculate_count_over_time_fidelity(
+    def _calculate_rate_over_time_fidelity(
         self, original_data, compressed_data, group_key, compressor_name
     ):
         """Calculate MAPE and Cosine similarity using the generic metric class with correct formula."""
@@ -28,14 +28,14 @@ class CountOverTimeReport(BaseReport):
         )
 
     def generate(self, run_dirs) -> dict[str, Any]:
-        """Generate count over time report with MAPE and Cosine similarity calculations."""
+        """Generate rate over time report with MAPE and Cosine similarity calculations."""
         results = {}
 
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
                 if compressor in {"original", "head_sampling_1"}:
                     self.print_skip_message(
-                        f"Compressor {compressor} is not supported for count over time evaluation, "
+                        f"Compressor {compressor} is not supported for rate over time evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."
                     )
                     continue
@@ -45,12 +45,12 @@ class CountOverTimeReport(BaseReport):
                     get_dir_with_root(self.root_dir, app_name, service, fault, run)
                     / "head_sampling_1"
                     / "evaluated"
-                    / "count_over_time_results.json"
+                    / "rate_over_time_results.json"
                 )
 
                 if not original_results_file.exists():
                     self.print_skip_message(
-                        f"Missing original count over time results for {app_name}_{service}_{fault}_{run}"
+                        f"Missing original rate over time results for {app_name}_{service}_{fault}_{run}"
                     )
                     continue
 
@@ -59,12 +59,12 @@ class CountOverTimeReport(BaseReport):
                     get_dir_with_root(self.root_dir, app_name, service, fault, run)
                     / compressor
                     / "evaluated"
-                    / "count_over_time_results.json"
+                    / "rate_over_time_results.json"
                 )
 
                 if not compressed_results_file.exists():
                     self.print_skip_message(
-                        f"Missing compressed count over time results for {compressor} in {app_name}_{service}_{fault}_{run}"
+                        f"Missing compressed rate over time results for {compressor} in {app_name}_{service}_{fault}_{run}"
                     )
                     continue
 
@@ -79,33 +79,24 @@ class CountOverTimeReport(BaseReport):
                 if compressor_key not in results:
                     results[compressor_key] = {}
 
-                # Calculate fidelity for each depth level (0-4) and "all"
-                depth_mape_scores = []
-                depth_cosine_scores = []
+                # Get all groups from original data's span_rate_by_time
+                original_span_rate = original_data.get("span_rate_by_time", {})
+                original_total_spans = original_data.get("total_spans_by_group", {})
 
-                for depth in range(5):
-                    group_key = f"depth_{depth}"
-                    fidelity_result = self._calculate_count_over_time_fidelity(
+                for group_key in original_span_rate:
+                    fidelity_result = self._calculate_rate_over_time_fidelity(
                         original_data, compressed_data, group_key, compressor
                     )
 
-                    if not np.isinf(fidelity_result["mape"]):
-                        depth_mape_scores.append(max(0, 100 - fidelity_result["mape"]))
-                    depth_cosine_scores.append(fidelity_result["cosine_sim"] * 100)
+                    # Calculate fidelity scores for this group
+                    mape_fidelity = max(0, 100 - fidelity_result["mape"]) if not np.isinf(fidelity_result["mape"]) else 0.0
+                    cosine_fidelity = fidelity_result["cosine_sim"] * 100
 
-                # Calculate overall fidelity scores
-                overall_mape_fidelity = (
-                    np.mean(depth_mape_scores) if depth_mape_scores else 0.0
-                )
-                overall_cosine_fidelity = (
-                    np.mean(depth_cosine_scores) if depth_cosine_scores else 0.0
-                )
-
-                results[compressor_key]["count_over_time_mape_fidelity_score"] = (
-                    overall_mape_fidelity
-                )
-                results[compressor_key]["count_over_time_cosine_fidelity_score"] = (
-                    overall_cosine_fidelity
-                )
+                    # Store per-group scores with count from original data
+                    results[compressor_key][group_key] = {
+                        "mape_fidelity": mape_fidelity,
+                        "cosine_fidelity": cosine_fidelity,
+                        "count": original_total_spans.get(group_key, 0),
+                    }
 
         return results

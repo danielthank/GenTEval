@@ -3,10 +3,10 @@ import json
 import pathlib
 
 from genteval.reports import (
-    CountOverTimeReport,
     DurationReport,
     GraphReport,
     OperationReport,
+    RateOverTimeReport,
     RCAReport,
     SizeReport,
     SpanCountReport,
@@ -62,7 +62,7 @@ def main():
         nargs="*",
         default=[
             "duration",
-            "count_over_time",
+            "rate_over_time",
             "operation",
             "trace_rca",
             "micro_rank",
@@ -110,12 +110,12 @@ def main():
         report = report_generator.generate(run_dirs_func)
         all_reports["duration"] = report
 
-    if "count_over_time" in args.evaluators:
-        report_generator = CountOverTimeReport(
+    if "rate_over_time" in args.evaluators:
+        report_generator = RateOverTimeReport(
             args.compressors, root_dir, plot=args.plot
         )
         report = report_generator.generate(run_dirs_func)
-        all_reports["count_over_time"] = report
+        all_reports["rate_over_time"] = report
 
     if "operation" in args.evaluators:
         report_generator = OperationReport(args.compressors, root_dir)

@@ -7,6 +7,7 @@ import numpy as np
 import seaborn as sns
 
 from genteval.plotting.data import ReportParser
+from genteval.plotting.rate_over_time_plot import generate_all_rate_plots
 
 
 # Hardcoded data arrays removed - now using JSON data source
@@ -552,9 +553,15 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["scatter", "scatter_graph", "heatmap", "heatmap_status_code"],
+        choices=[
+            "scatter",
+            "scatter_graph",
+            "heatmap",
+            "heatmap_status_code",
+            "rate_over_time",
+        ],
         default="scatter",
-        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), scatter_graph (graph fidelity scatter plot), heatmap (depth heatmap), or heatmap_status_code (HTTP status code heatmap)",
+        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), scatter_graph (graph fidelity scatter plot), heatmap (depth heatmap), heatmap_status_code (HTTP status code heatmap), or rate_over_time (rate over time fidelity vs cost)",
     )
     parser.add_argument(
         "--input",
@@ -645,6 +652,12 @@ def main():
     elif args.mode == "scatter_graph":
         # Graph fidelity scatter plot mode
         return _create_graph_fidelity_scatter_plot(args.input, args.output_dir)
+
+    elif args.mode == "rate_over_time":
+        # Rate over time scatter plots mode
+        generate_all_rate_plots(args.input, output_dir=args.output_dir, weighted=True)
+        print(f"Rate over time scatter plots generated in {args.output_dir}")
+        return 0
 
     else:
         # Default scatter plot mode: GenT CPU vs head sampling
@@ -956,12 +969,6 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
         microrank_avg5_fidelity = [
             exp.microrank_avg5_fidelity for exp in all_experiments
         ]
-        count_over_time_mape_fidelity = [
-            exp.count_over_time_mape_fidelity for exp in all_experiments
-        ]
-        count_over_time_cosine_fidelity = [
-            exp.count_over_time_cosine_fidelity for exp in all_experiments
-        ]
         cost_per_million_spans = [
             exp.total_cost_per_million_spans for exp in all_experiments
         ]
@@ -1234,24 +1241,6 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             y_title="MicroRank Avg@5 Fidelity Score (%)",
             plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - MicroRank Avg@5 Fidelity Score",
             out_fname="gent_vs_head_sampling_microrank_avg5.png",
-        )
-
-        draw_and_save_enhanced(
-            x_values=cost_per_million_spans,
-            x_title="Total Cost per Million Spans (log scale)",
-            y_values=count_over_time_mape_fidelity,
-            y_title="Count Over Time MAPE Fidelity (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Count Over Time MAPE Fidelity",
-            out_fname="gent_vs_head_sampling_count_over_time_mape.png",
-        )
-
-        draw_and_save_enhanced(
-            x_values=cost_per_million_spans,
-            x_title="Total Cost per Million Spans (log scale)",
-            y_values=count_over_time_cosine_fidelity,
-            y_title="Count Over Time Cosine Similarity Fidelity (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Count Over Time Cosine Similarity",
-            out_fname="gent_vs_head_sampling_count_over_time_cosine.png",
         )
 
         draw_and_save_enhanced(
