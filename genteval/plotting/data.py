@@ -17,9 +17,6 @@ class ExperimentData:
     compressor_key: str
     compute_type: str
     duration: str
-    operation_f1_fidelity: float
-    operation_pair_f1_fidelity: float
-    graph_fidelity: float
     size_kb: float
     cpu_time_seconds: float
     gpu_time_seconds: float
@@ -77,8 +74,6 @@ class ReportParser:
         # Extract data from different report sections first (needed for compute type detection)
         size_data = self._extract_size_data(report_data, compressor_name)
         time_data = self._extract_time_data(report_data, compressor_name)
-        operation_data = self._extract_operation_data(report_data, compressor_name)
-        graph_data = self._extract_graph_data(report_data, compressor_name)
 
         # Parse compressor name to extract metadata (pass time_data for compute type detection)
         name_parts = self._parse_compressor_name(compressor_name, time_data)
@@ -88,12 +83,6 @@ class ReportParser:
         if not all([size_data, time_data]):
             print(f"Warning: Missing size or time data for {compressor_name}")
             return None
-
-        if not operation_data:
-            operation_data = {"operation_f1": 0.0, "operation_pair_f1": 0.0}
-
-        if not graph_data:
-            graph_data = {"graph_fidelity": 0.0}
 
         # Calculate costs
         cost_data = self._calculate_costs(
@@ -105,9 +94,6 @@ class ReportParser:
             compressor_key=compressor_name,
             compute_type=name_parts["compute_type"],
             duration=name_parts["duration"],
-            operation_f1_fidelity=operation_data["operation_f1"] * 100,
-            operation_pair_f1_fidelity=operation_data["operation_pair_f1"] * 100,
-            graph_fidelity=graph_data["graph_fidelity"],
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
             gpu_time_seconds=time_data["gpu_seconds"],
@@ -203,31 +189,6 @@ class ReportParser:
 
         return None
 
-    def _extract_operation_data(
-        self, report_data: dict, compressor_name: str
-    ) -> dict | None:
-        try:
-            operation_report = report_data["reports"]["operation"]
-            if compressor_name in operation_report:
-                operation_f1 = (
-                    operation_report[compressor_name]
-                    .get("operation_f1", {})
-                    .get("avg", 0.0)
-                )
-                operation_pair_f1 = (
-                    operation_report[compressor_name]
-                    .get("operation_pair_f1", {})
-                    .get("avg", 0.0)
-                )
-                return {
-                    "operation_f1": operation_f1,
-                    "operation_pair_f1": operation_pair_f1,
-                }
-        except KeyError:
-            pass
-
-        return None
-
     def _calculate_costs(
         self, size_bytes: float, cpu_seconds: float, gpu_seconds: float
     ) -> dict:
@@ -261,39 +222,3 @@ class ReportParser:
             "cost_per_minute": cost_per_minute,
         }
 
-    def _extract_graph_data(
-        self, report_data: dict, compressor_name: str
-    ) -> dict | None:
-        """Extract graph fidelity data from the JSON report by averaging time bucket fidelities."""
-        try:
-            result = {}
-
-            # Extract from graph report
-            if "graph" in report_data.get("reports", {}):
-                graph_report = report_data["reports"]["graph"]
-                if compressor_name in graph_report:
-                    compressor_data = graph_report[compressor_name]
-
-                    # Collect fidelity scores from all time buckets
-                    fidelity_scores = []
-                    for key, value in compressor_data.items():
-                        if key.startswith("time_") and isinstance(value, dict):
-                            if "fidelity" in value:
-                                fidelity_scores.append(value["fidelity"])
-
-                    # Calculate average fidelity
-                    if fidelity_scores:
-                        result["graph_fidelity"] = sum(fidelity_scores) / len(
-                            fidelity_scores
-                        )
-                    else:
-                        result["graph_fidelity"] = 0.0
-                else:
-                    result["graph_fidelity"] = 0.0
-            else:
-                result["graph_fidelity"] = 0.0
-
-        except KeyError:
-            return None
-        else:
-            return result
