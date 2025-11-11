@@ -1,4 +1,4 @@
-"""Rate over time visualization module."""
+"""Duration over time visualization module."""
 
 import json
 from pathlib import Path
@@ -16,9 +16,11 @@ from genteval.plotting.scatter_plot_utils import (
 )
 
 
-def extract_rate_data_by_filter(report_data, experiments, filter_level, weighted=False):
+def extract_duration_data_by_filter(
+    report_data, experiments, filter_level, weighted=False
+):
     """
-    Extract rate over time data for specific filter level.
+    Extract duration over time data for specific filter level.
 
     Args:
         report_data: Full report JSON data
@@ -36,10 +38,13 @@ def extract_rate_data_by_filter(report_data, experiments, filter_level, weighted
             'cost_per_million': float
         }]
     """
-    if "reports" not in report_data or "rate_over_time" not in report_data["reports"]:
+    if (
+        "reports" not in report_data
+        or "duration_over_time" not in report_data["reports"]
+    ):
         return []
 
-    rate_data = report_data["reports"]["rate_over_time"]
+    duration_data = report_data["reports"]["duration_over_time"]
 
     # Create lookup for cost by compressor key
     cost_lookup = {}
@@ -47,9 +52,9 @@ def extract_rate_data_by_filter(report_data, experiments, filter_level, weighted
         cost_lookup[exp.compressor_key] = exp.total_cost_per_million_spans
 
     if filter_level == 0:
-        # For filter level 0, just use "all" group as before
+        # For filter level 0, just use "all" group
         data_points = []
-        for compressor_key, groups in rate_data.items():
+        for compressor_key, groups in duration_data.items():
             cost = cost_lookup.get(compressor_key, 0)
             if "all" in groups:
                 metrics = groups["all"]
@@ -67,7 +72,7 @@ def extract_rate_data_by_filter(report_data, experiments, filter_level, weighted
 
     # For filter levels 1 and 2, compute average across all groups
     data_points = []
-    for compressor_key, groups in rate_data.items():
+    for compressor_key, groups in duration_data.items():
         cost = cost_lookup.get(compressor_key, 0)
 
         mape_values = []
@@ -117,12 +122,12 @@ def extract_rate_data_by_filter(report_data, experiments, filter_level, weighted
     return data_points
 
 
-def plot_rate_scatter(data_points, metric, filter_level, output_dir):
+def plot_duration_scatter(data_points, metric, filter_level, output_dir):
     """
     Create scatter plot of fidelity vs cost.
 
     Args:
-        data_points: List of data points from extract_rate_data_by_filter
+        data_points: List of data points from extract_duration_data_by_filter
         metric: 'mape_fidelity' or 'cosine_fidelity'
         filter_level: 0, 1, or 2
         output_dir: Directory to save plot
@@ -144,7 +149,7 @@ def plot_rate_scatter(data_points, metric, filter_level, output_dir):
     plot_head_sampling_points(head_sampling_points)
 
     # Format axes, title, labels, and grid
-    format_plot_axes("Rate Over Time", metric, filter_level)
+    format_plot_axes("Duration Over Time", metric, filter_level)
 
     # Save
     output_path = Path(output_dir)
@@ -152,7 +157,7 @@ def plot_rate_scatter(data_points, metric, filter_level, output_dir):
 
     metric_short = "mape" if metric == "mape_fidelity" else "cosine"
     filter_suffix = {0: "0_filter", 1: "1_filter", 2: "2_filters"}
-    filename = f"rate_over_time_{filter_suffix[filter_level]}_{metric_short}.png"
+    filename = f"duration_over_time_{filter_suffix[filter_level]}_{metric_short}.png"
 
     plt.tight_layout()
     plt.savefig(output_path / filename, dpi=300, bbox_inches="tight")
@@ -161,9 +166,9 @@ def plot_rate_scatter(data_points, metric, filter_level, output_dir):
     print(f"Saved: {output_path / filename}")
 
 
-def generate_all_rate_plots(report_path, output_dir="./plots", weighted=False):
+def generate_all_duration_plots(report_path, output_dir="./plots", weighted=False):
     """
-    Generate all 6 rate over time scatter plots.
+    Generate all 6 duration over time scatter plots.
 
     Args:
         report_path: Path to the report JSON file
@@ -186,12 +191,12 @@ def generate_all_rate_plots(report_path, output_dir="./plots", weighted=False):
 
     # Generate plots for each filter level and metric
     for filter_level in [0, 1, 2]:
-        data_points = extract_rate_data_by_filter(
+        data_points = extract_duration_data_by_filter(
             report_data, experiments, filter_level, weighted=weighted
         )
         print(f"Filter level {filter_level}: {len(data_points)} data points")
 
         for metric in ["mape_fidelity", "cosine_fidelity"]:
-            plot_rate_scatter(data_points, metric, filter_level, output_dir)
+            plot_duration_scatter(data_points, metric, filter_level, output_dir)
 
-    print(f"All rate over time plots generated in {output_dir}")
+    print(f"All duration over time plots generated in {output_dir}")

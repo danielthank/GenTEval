@@ -5,7 +5,7 @@ import pickle
 
 from genteval.dataset import RCAEvalDataset
 from genteval.evaluators import (
-    DurationEvaluator,
+    DurationOverTimeEvaluator,
     GraphEvaluator,
     MicroRankEvaluator,
     OperationEvaluator,
@@ -38,7 +38,7 @@ def main():
     argparser.add_argument(
         "--evaluator",
         type=str,
-        help="Single evaluator to run (duration, operation, trace_rca, micro_rank, span_count, rate_over_time, graph)",
+        help="Single evaluator to run (duration_over_time, operation, trace_rca, micro_rank, span_count, rate_over_time, graph)",
     )
     argparser.add_argument(
         "--evaluated_dir",
@@ -56,11 +56,11 @@ def main():
     labels = pickle.load(open(labels_path, "rb"))
 
     evaluated_dir.mkdir(parents=True, exist_ok=True)
-    if args.evaluator == "duration":
-        results = DurationEvaluator().evaluate(dataset, labels)
+    if args.evaluator == "duration_over_time":
+        results = DurationOverTimeEvaluator().evaluate(dataset, labels)
         json.dump(
             results,
-            open(evaluated_dir / "duration_results.json", "w"),
+            open(evaluated_dir / "duration_over_time_results.json", "w"),
         )
     elif args.evaluator == "operation":
         results = OperationEvaluator().evaluate(dataset, labels)

@@ -17,18 +17,8 @@ class ExperimentData:
     compressor_key: str
     compute_type: str
     duration: str
-    mape_fidelity: float
-    cos_fidelity: float
-    mape_fidelity_by_status_code: float
-    cos_fidelity_by_status_code: float
     operation_f1_fidelity: float
     operation_pair_f1_fidelity: float
-    child_parent_ratio_fidelity: float
-    child_parent_overall_fidelity: float
-    child_parent_depth1_fidelity: float
-    child_parent_depth2_fidelity: float
-    child_parent_depth3_fidelity: float
-    child_parent_depth4_fidelity: float
     tracerca_avg5_fidelity: float
     microrank_avg5_fidelity: float
     graph_fidelity: float
@@ -89,14 +79,7 @@ class ReportParser:
         # Extract data from different report sections first (needed for compute type detection)
         size_data = self._extract_size_data(report_data, compressor_name)
         time_data = self._extract_time_data(report_data, compressor_name)
-        fidelity_data = self._extract_fidelity_data(report_data, compressor_name)
-        fidelity_data_by_status_code = self._extract_fidelity_data_by_status_code(
-            report_data, compressor_name
-        )
         operation_data = self._extract_operation_data(report_data, compressor_name)
-        child_parent_ratio_data = self._extract_child_parent_ratio_data(
-            report_data, compressor_name
-        )
         rca_data = self._extract_rca_data(report_data, compressor_name)
         graph_data = self._extract_graph_data(report_data, compressor_name)
 
@@ -109,21 +92,8 @@ class ReportParser:
             print(f"Warning: Missing size or time data for {compressor_name}")
             return None
 
-        if not fidelity_data:
-            fidelity_data = {"mape": 0.0, "cosine": 0.0}
-
         if not operation_data:
             operation_data = {"operation_f1": 0.0, "operation_pair_f1": 0.0}
-
-        if not child_parent_ratio_data:
-            child_parent_ratio_data = {
-                "child_parent_ratio_wdist": 0.0,
-                "child_parent_overall_wdist": 0.0,
-                "child_parent_depth1_wdist": 0.0,
-                "child_parent_depth2_wdist": 0.0,
-                "child_parent_depth3_wdist": 0.0,
-                "child_parent_depth4_wdist": 0.0,
-            }
 
         if not rca_data:
             rca_data = {
@@ -133,12 +103,6 @@ class ReportParser:
 
         if not graph_data:
             graph_data = {"graph_fidelity": 0.0}
-
-        if not fidelity_data_by_status_code:
-            fidelity_data_by_status_code = {
-                "mape": 0.0,
-                "cosine": 0.0,
-            }
 
         # Calculate costs
         cost_data = self._calculate_costs(
@@ -150,30 +114,8 @@ class ReportParser:
             compressor_key=compressor_name,
             compute_type=name_parts["compute_type"],
             duration=name_parts["duration"],
-            mape_fidelity=fidelity_data["mape"],
-            cos_fidelity=fidelity_data["cosine"],
-            mape_fidelity_by_status_code=fidelity_data_by_status_code["mape"],
-            cos_fidelity_by_status_code=fidelity_data_by_status_code["cosine"],
             operation_f1_fidelity=operation_data["operation_f1"] * 100,
             operation_pair_f1_fidelity=operation_data["operation_pair_f1"] * 100,
-            child_parent_ratio_fidelity=max(
-                0, 100 - child_parent_ratio_data["child_parent_ratio_wdist"] * 1000
-            ),
-            child_parent_overall_fidelity=max(
-                0, 100 - child_parent_ratio_data["child_parent_overall_wdist"] * 1000
-            ),
-            child_parent_depth1_fidelity=max(
-                0, 100 - child_parent_ratio_data["child_parent_depth1_wdist"] * 1000
-            ),
-            child_parent_depth2_fidelity=max(
-                0, 100 - child_parent_ratio_data["child_parent_depth2_wdist"] * 1000
-            ),
-            child_parent_depth3_fidelity=max(
-                0, 100 - child_parent_ratio_data["child_parent_depth3_wdist"] * 1000
-            ),
-            child_parent_depth4_fidelity=max(
-                0, 100 - child_parent_ratio_data["child_parent_depth4_wdist"] * 1000
-            ),
             tracerca_avg5_fidelity=rca_data["tracerca_avg5"] * 100,
             microrank_avg5_fidelity=rca_data["microrank_avg5"] * 100,
             graph_fidelity=graph_data["graph_fidelity"],
@@ -272,70 +214,6 @@ class ReportParser:
 
         return None
 
-    def _extract_fidelity_data_by_status_code(
-        self, report_data: dict, compressor_name: str
-    ) -> dict | None:
-        try:
-            # Extract from metadata.fidelity_scores
-            if (
-                "metadata" in report_data
-                and "fidelity_scores" in report_data["metadata"]
-            ):
-                fidelity_scores = report_data["metadata"]["fidelity_scores"]
-
-                mape_by_status_code = fidelity_scores.get(
-                    "mape_fidelity_scores_by_status_code", {}
-                ).get(compressor_name, 0)
-                cosine_by_status_code = fidelity_scores.get(
-                    "cosine_similarity_fidelity_scores_by_status_code", {}
-                ).get(compressor_name, 0)
-
-                return {"mape": mape_by_status_code, "cosine": cosine_by_status_code}
-        except KeyError:
-            pass
-
-        return None
-
-    def _extract_fidelity_data(
-        self, report_data: dict, compressor_name: str
-    ) -> dict | None:
-        try:
-            # Extract from metadata.fidelity_scores (new location after enhanced_report fix)
-            if (
-                "metadata" in report_data
-                and "fidelity_scores" in report_data["metadata"]
-            ):
-                fidelity_scores = report_data["metadata"]["fidelity_scores"]
-
-                mape = fidelity_scores.get("mape_fidelity_scores", {}).get(
-                    compressor_name, 0
-                )
-                cosine = fidelity_scores.get(
-                    "cosine_similarity_fidelity_scores", {}
-                ).get(compressor_name, 0)
-
-                return {"mape": mape, "cosine": cosine}
-
-            # Fallback: Try legacy locations in duration report (for backward compatibility)
-            duration_report = report_data["reports"]["duration"]
-
-            # Try separate mape and cosine fields in duration report (legacy)
-            mape = 0
-            cosine = 0
-
-            if "mape_fidelity_scores" in duration_report:
-                mape = duration_report["mape_fidelity_scores"].get(compressor_name, 0)
-
-            if "cosine_similarity_fidelity_scores" in duration_report:
-                cosine = duration_report["cosine_similarity_fidelity_scores"].get(
-                    compressor_name, 0
-                )
-
-        except KeyError:
-            return None
-        else:
-            return {"mape": mape, "cosine": cosine}
-
     def _extract_operation_data(
         self, report_data: dict, compressor_name: str
     ) -> dict | None:
@@ -356,64 +234,6 @@ class ReportParser:
                     "operation_f1": operation_f1,
                     "operation_pair_f1": operation_pair_f1,
                 }
-        except KeyError:
-            pass
-
-        return None
-
-    def _extract_child_parent_ratio_data(
-        self, report_data: dict, compressor_name: str
-    ) -> dict | None:
-        try:
-            duration_report = report_data["reports"]["duration"]
-            if compressor_name in duration_report:
-                result = {}
-
-                # Calculate average child/parent ratio W-dist across all depths
-                wdist_values = []
-                for depth in range(5):  # depths 0-4
-                    key = f"pair_depth_{depth}_wdist"
-                    if key in duration_report[compressor_name]:
-                        wdist_values.append(
-                            duration_report[compressor_name][key]["avg"]
-                        )
-
-                if wdist_values:
-                    avg_wdist = sum(wdist_values) / len(wdist_values)
-                    result["child_parent_ratio_wdist"] = avg_wdist
-
-                # Get individual depth W-dist values
-                for depth in range(1, 5):  # depths 1-4
-                    key = f"pair_depth_{depth}_wdist"
-                    if key in duration_report[compressor_name]:
-                        result[f"child_parent_depth{depth}_wdist"] = duration_report[
-                            compressor_name
-                        ][key]["avg"]
-
-                # Get overall child/parent ratio W-dist from pair_all_wdist
-                if "pair_all_wdist" in duration_report[compressor_name]:
-                    result["child_parent_overall_wdist"] = duration_report[
-                        compressor_name
-                    ]["pair_all_wdist"]["avg"]
-
-                # Return result if we have either averaged or overall data
-                if result:
-                    return result
-
-                # Fallback: use pair_all_wdist for all if depth-specific data not available
-                if "pair_all_wdist" in duration_report[compressor_name]:
-                    pair_all_wdist = duration_report[compressor_name]["pair_all_wdist"][
-                        "avg"
-                    ]
-                    return {
-                        "child_parent_ratio_wdist": pair_all_wdist,
-                        "child_parent_overall_wdist": pair_all_wdist,
-                        "child_parent_depth1_wdist": pair_all_wdist,
-                        "child_parent_depth2_wdist": pair_all_wdist,
-                        "child_parent_depth3_wdist": pair_all_wdist,
-                        "child_parent_depth4_wdist": pair_all_wdist,
-                    }
-
         except KeyError:
             pass
 

@@ -104,7 +104,7 @@ async def evaluate_all():
         type=str,
         nargs="*",
         default=[
-            "duration",
+            "duration_over_time",
             "operation",
             "trace_rca",
             "micro_rank",
