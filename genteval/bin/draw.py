@@ -9,6 +9,7 @@ import seaborn as sns
 from genteval.plotting.data import ReportParser
 from genteval.plotting.duration_over_time_plot import generate_all_duration_plots
 from genteval.plotting.rate_over_time_plot import generate_all_rate_plots
+from genteval.plotting.rca_plot import generate_all_rca_plots
 
 
 # Hardcoded data arrays removed - now using JSON data source
@@ -266,9 +267,10 @@ def main():
             "heatmap_status_code",
             "rate_over_time",
             "duration_over_time",
+            "rca",
         ],
         default="scatter",
-        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), scatter_graph (graph fidelity scatter plot), heatmap (depth heatmap), heatmap_status_code (HTTP status code heatmap), rate_over_time (rate over time fidelity vs cost), or duration_over_time (duration over time fidelity vs cost)",
+        help="Visualization mode: scatter (GenT CPU 1min/5min/10min vs head sampling, default), scatter_graph (graph fidelity scatter plot), heatmap (depth heatmap), heatmap_status_code (HTTP status code heatmap), rate_over_time (rate over time fidelity vs cost), duration_over_time (duration over time fidelity vs cost), or rca (TraceRCA and MicroRank fidelity vs cost)",
     )
     parser.add_argument(
         "--input",
@@ -372,6 +374,12 @@ def main():
             args.input, output_dir=args.output_dir, weighted=True
         )
         print(f"Duration over time scatter plots generated in {args.output_dir}")
+        return 0
+
+    elif args.mode == "rca":
+        # RCA scatter plots mode (TraceRCA and MicroRank)
+        generate_all_rca_plots(args.input, output_dir=args.output_dir)
+        print(f"RCA scatter plots generated in {args.output_dir}")
         return 0
 
     else:
@@ -601,10 +609,6 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
         operation_pair_f1_fidelity = [
             exp.operation_pair_f1_fidelity for exp in all_experiments
         ]
-        tracerca_avg5_fidelity = [exp.tracerca_avg5_fidelity for exp in all_experiments]
-        microrank_avg5_fidelity = [
-            exp.microrank_avg5_fidelity for exp in all_experiments
-        ]
         cost_per_million_spans = [
             exp.total_cost_per_million_spans for exp in all_experiments
         ]
@@ -787,24 +791,6 @@ def _create_gent_vs_head_sampling_plot(input_file, output_dir):
             y_title="Operation Pair F1 Fidelity (%)",
             plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - Operation Pair F1 Fidelity",
             out_fname="gent_vs_head_sampling_operation_pair_f1.png",
-        )
-
-        draw_and_save_enhanced(
-            x_values=cost_per_million_spans,
-            x_title="Total Cost per Million Spans (log scale)",
-            y_values=tracerca_avg5_fidelity,
-            y_title="TraceRCA Avg@5 Fidelity Score (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - TraceRCA Avg@5 Fidelity Score",
-            out_fname="gent_vs_head_sampling_tracerca_avg5.png",
-        )
-
-        draw_and_save_enhanced(
-            x_values=cost_per_million_spans,
-            x_title="Total Cost per Million Spans (log scale)",
-            y_values=microrank_avg5_fidelity,
-            y_title="MicroRank Avg@5 Fidelity Score (%)",
-            plot_title="GenT CPU (1min/5min/10min) vs Head Sampling - MicroRank Avg@5 Fidelity Score",
-            out_fname="gent_vs_head_sampling_microrank_avg5.png",
         )
 
     except FileNotFoundError:

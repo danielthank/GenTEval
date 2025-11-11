@@ -8,6 +8,7 @@ import numpy as np
 
 from genteval.plotting.data import ReportParser
 from genteval.plotting.scatter_plot_utils import (
+    build_filter_title,
     format_plot_axes,
     group_experiments_by_duration,
     plot_duration_groups,
@@ -144,7 +145,10 @@ def plot_rate_scatter(data_points, metric, filter_level, output_dir):
     plot_head_sampling_points(head_sampling_points)
 
     # Format axes, title, labels, and grid
-    format_plot_axes("Rate Over Time", metric, filter_level)
+    metric_name = "MAPE" if metric == "mape_fidelity" else "Cosine Similarity"
+    title = build_filter_title("Rate Over Time", metric, filter_level)
+    y_label = f"{metric_name} Fidelity (%)"
+    format_plot_axes(title, y_label)
 
     # Save
     output_path = Path(output_dir)

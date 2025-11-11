@@ -19,8 +19,6 @@ class ExperimentData:
     duration: str
     operation_f1_fidelity: float
     operation_pair_f1_fidelity: float
-    tracerca_avg5_fidelity: float
-    microrank_avg5_fidelity: float
     graph_fidelity: float
     size_kb: float
     cpu_time_seconds: float
@@ -80,7 +78,6 @@ class ReportParser:
         size_data = self._extract_size_data(report_data, compressor_name)
         time_data = self._extract_time_data(report_data, compressor_name)
         operation_data = self._extract_operation_data(report_data, compressor_name)
-        rca_data = self._extract_rca_data(report_data, compressor_name)
         graph_data = self._extract_graph_data(report_data, compressor_name)
 
         # Parse compressor name to extract metadata (pass time_data for compute type detection)
@@ -94,12 +91,6 @@ class ReportParser:
 
         if not operation_data:
             operation_data = {"operation_f1": 0.0, "operation_pair_f1": 0.0}
-
-        if not rca_data:
-            rca_data = {
-                "tracerca_avg5": 0.0,
-                "microrank_avg5": 0.0,
-            }
 
         if not graph_data:
             graph_data = {"graph_fidelity": 0.0}
@@ -116,8 +107,6 @@ class ReportParser:
             duration=name_parts["duration"],
             operation_f1_fidelity=operation_data["operation_f1"] * 100,
             operation_pair_f1_fidelity=operation_data["operation_pair_f1"] * 100,
-            tracerca_avg5_fidelity=rca_data["tracerca_avg5"] * 100,
-            microrank_avg5_fidelity=rca_data["microrank_avg5"] * 100,
             graph_fidelity=graph_data["graph_fidelity"],
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
@@ -271,54 +260,6 @@ class ReportParser:
             "total_cost_per_million": total_cost_per_million,
             "cost_per_minute": cost_per_minute,
         }
-
-    def _extract_rca_data(self, report_data: dict, compressor_name: str) -> dict | None:
-        """Extract TraceRCA and MicroRank avg5 data from the JSON report."""
-        try:
-            result = {}
-
-            # Extract TraceRCA avg5
-            if "trace_rca" in report_data.get("reports", {}):
-                trace_rca_report = report_data["reports"]["trace_rca"]
-                if compressor_name in trace_rca_report:
-                    avg5_data = trace_rca_report[compressor_name].get("avg5", {})
-                    if "avg" in avg5_data:
-                        result["tracerca_avg5"] = avg5_data["avg"]
-                    elif "values" in avg5_data:
-                        values = avg5_data["values"]
-                        result["tracerca_avg5"] = (
-                            sum(values) / len(values) if values else 0.0
-                        )
-                    else:
-                        result["tracerca_avg5"] = 0.0
-                else:
-                    result["tracerca_avg5"] = 0.0
-            else:
-                result["tracerca_avg5"] = 0.0
-
-            # Extract MicroRank avg5
-            if "micro_rank" in report_data.get("reports", {}):
-                micro_rank_report = report_data["reports"]["micro_rank"]
-                if compressor_name in micro_rank_report:
-                    avg5_data = micro_rank_report[compressor_name].get("avg5", {})
-                    if "avg" in avg5_data:
-                        result["microrank_avg5"] = avg5_data["avg"]
-                    elif "values" in avg5_data:
-                        values = avg5_data["values"]
-                        result["microrank_avg5"] = (
-                            sum(values) / len(values) if values else 0.0
-                        )
-                    else:
-                        result["microrank_avg5"] = 0.0
-                else:
-                    result["microrank_avg5"] = 0.0
-            else:
-                result["microrank_avg5"] = 0.0
-
-        except KeyError:
-            return None
-        else:
-            return result
 
     def _extract_graph_data(
         self, report_data: dict, compressor_name: str

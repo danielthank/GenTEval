@@ -81,7 +81,7 @@ class SpanCountReport(BaseReport):
         """Generate span count report with Wasserstein distance calculations and visualizations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
-                if compressor in {"original", "head_sampling_1"}:
+                if compressor in {"original"}:
                     self.print_skip_message(
                         f"Compressor {compressor} is not supported for span count evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."

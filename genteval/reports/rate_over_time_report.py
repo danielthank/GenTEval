@@ -33,7 +33,7 @@ class RateOverTimeReport(BaseReport):
 
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
-                if compressor in {"original", "head_sampling_1"}:
+                if compressor in {"original"}:
                     self.print_skip_message(
                         f"Compressor {compressor} is not supported for rate over time evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."
@@ -89,7 +89,11 @@ class RateOverTimeReport(BaseReport):
                     )
 
                     # Calculate fidelity scores for this group
-                    mape_fidelity = max(0, 100 - fidelity_result["mape"]) if not np.isinf(fidelity_result["mape"]) else 0.0
+                    mape_fidelity = (
+                        max(0, 100 - fidelity_result["mape"])
+                        if not np.isinf(fidelity_result["mape"])
+                        else 0.0
+                    )
                     cosine_fidelity = fidelity_result["cosine_sim"] * 100
 
                     # Store per-group scores with count from original data

@@ -46,7 +46,7 @@ class OperationReport(BaseReport):
         """Generate operation report with F1 score calculations."""
         for app_name, service, fault, run in run_dirs():
             for compressor in self.compressors:
-                if compressor in {"original", "head_sampling_1"}:
+                if compressor in {"original"}:
                     self.print_skip_message(
                         f"Compressor {compressor} is not supported for operation evaluation, "
                         f"skipping for {app_name}_{service}_{fault}_{run}."

@@ -163,30 +163,22 @@ def plot_head_sampling_points(head_sampling_points):
         )
 
 
-def format_plot_axes(title, metric, filter_level):
+def format_plot_axes(title, y_label):
     """
     Format plot axes, title, labels, and grid.
 
     Args:
-        title: Base title (e.g., "Rate Over Time", "Duration Over Time")
-        metric: Metric name ('mape_fidelity' or 'cosine_fidelity')
-        filter_level: Filter level (0, 1, or 2)
+        title: Full title for the plot (e.g., "Rate Over Time: MAPE vs Cost - 0 filters")
+        y_label: Y-axis label (e.g., "MAPE Fidelity (%)", "TraceRCA Avg@5 Fidelity (%)")
     """
-    metric_name = "MAPE" if metric == "mape_fidelity" else "Cosine Similarity"
-    filter_desc = {
-        0: "0 filters",
-        1: "1 filter",
-        2: "2 filters",
-    }
-
     plt.title(
-        f"{title}: {metric_name} vs Cost - {filter_desc[filter_level]}",
+        title,
         fontsize=18,
         fontweight="bold",
         pad=20,
     )
     plt.xlabel("Cost per Million Spans ($)", fontsize=14, fontweight="bold")
-    plt.ylabel(f"{metric_name} Fidelity (%)", fontsize=14, fontweight="bold")
+    plt.ylabel(y_label, fontsize=14, fontweight="bold")
     plt.xscale("log")
     plt.ylim(0, 100)
 
@@ -202,3 +194,24 @@ def format_plot_axes(title, metric, filter_level):
     # Grid
     plt.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
     plt.grid(True, which="minor", linestyle=":", linewidth=0.3, alpha=0.5)
+
+
+def build_filter_title(base_title, metric, filter_level):
+    """
+    Build title for rate/duration plots with filter levels.
+
+    Args:
+        base_title: Base title (e.g., "Rate Over Time", "Duration Over Time")
+        metric: Metric name ('mape_fidelity' or 'cosine_fidelity')
+        filter_level: Filter level (0, 1, or 2)
+
+    Returns:
+        Full formatted title string
+    """
+    metric_name = "MAPE" if metric == "mape_fidelity" else "Cosine Similarity"
+    filter_desc = {
+        0: "0 filters",
+        1: "1 filter",
+        2: "2 filters",
+    }
+    return f"{base_title}: {metric_name} vs Cost - {filter_desc[filter_level]}"
