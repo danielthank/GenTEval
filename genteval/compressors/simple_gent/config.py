@@ -62,9 +62,6 @@ class SimpleGenTConfig:
     # General parameters
     random_seed: int = 42
 
-    # Serialization options
-    save_detailed_stats: bool = True  # Save detailed statistics for debugging
-
     @classmethod
     def from_dict(cls, config_dict: dict) -> "SimpleGenTConfig":
         """Create config from dictionary, handling enum conversions."""

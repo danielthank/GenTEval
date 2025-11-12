@@ -25,7 +25,7 @@ class TimeSeriesComparisonMetric:
             Dict with {"mape": float, "cosine_sim": float}
         """
         if len(original_time_series) == 0 or len(results_time_series) == 0:
-            return {"mape": float("inf"), "cosine_sim": 0.0}
+            return {"mape": 100.0, "cosine_sim": 0.0}
 
         # Calculate MAPE using correct formula: abs((orig - res) / (orig + res)) * 100
         mape_values = []
@@ -33,12 +33,11 @@ class TimeSeriesComparisonMetric:
             if orig > 0:
                 mape = abs((orig - res) / (orig + res)) * 100
             else:
-                mape = 0 if res == 0 else float("inf")
+                mape = 0 if res == 0 else 100.0
             mape_values.append(mape)
 
-        # Calculate average MAPE (excluding inf values)
-        finite_mape_values = [m for m in mape_values if not np.isinf(m)]
-        avg_mape = np.mean(finite_mape_values) if finite_mape_values else float("inf")
+        # Calculate average MAPE
+        avg_mape = np.mean(mape_values)
 
         # Calculate cosine similarity
         if len(original_time_series) > 1:
@@ -69,7 +68,8 @@ class TimeSeriesComparisonMetric:
 
         Args:
             original_data: Duration percentile data from original dataset {time_bucket: {percentile: value}}
-            results_data: Duration percentile data from compressed dataset {time_bucket: {percentile: value}}
+            results_data: Duration percentile data from compressed dataset {time_bucket: {percentile: value}}.
+                         Can be empty dict {} if group is missing from results.
             group_key: The group key identifier (format: depth_{span_depth}_service_{service})
             compressor: Name of the compressor
             app_name: Application name
@@ -80,6 +80,8 @@ class TimeSeriesComparisonMetric:
 
         Returns:
             Dict with structure {percentile: {"mape": value, "cosine_sim": value}}
+            Returns empty dict {} if no common data between original and results, which results in
+            worst-case metrics (mape=100.0, cosine_sim=0.0) when averaged in the calling code.
         """
         # Define all percentiles to process
         percentiles = [
@@ -167,7 +169,7 @@ class TimeSeriesComparisonMetric:
             )
 
             if not common_time_buckets:
-                return {"mape": float("inf"), "cosine_sim": 0.0}
+                return {"mape": 100.0, "cosine_sim": 0.0}
 
             original_time_series = []
             results_time_series = []
@@ -194,7 +196,7 @@ class TimeSeriesComparisonMetric:
             )
 
         except (KeyError, ValueError, TypeError):
-            return {"mape": float("inf"), "cosine_sim": 0.0}
+            return {"mape": 100.0, "cosine_sim": 0.0}
 
     def _create_percentile_plots(
         self,

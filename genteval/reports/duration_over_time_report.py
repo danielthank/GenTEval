@@ -65,14 +65,11 @@ class DurationOverTimeReport(BaseReport):
                 original_totals = original.get("total_spans_by_group", {})
 
                 for group_key in original_percentiles:
-                    if group_key not in results_percentiles:
-                        continue
-
                     # Calculate MAPE and cosine similarity for each percentile
                     percentile_results = (
                         self.time_series_metric.process_duration_percentile_time_series(
                             original_percentiles[group_key],
-                            results_percentiles[group_key],
+                            results_percentiles.get(group_key, {}),
                             group_key,
                             compressor,
                             app_name,
@@ -91,17 +88,12 @@ class DurationOverTimeReport(BaseReport):
                         mape = percentile_data["mape"]
                         cosine_sim = percentile_data["cosine_sim"]
 
-                        # Filter out inf values
-                        if mape != float("inf"):
-                            mape_values.append(mape)
-                        if cosine_sim != float("inf"):
-                            cosine_values.append(cosine_sim)
+                        mape_values.append(mape)
+                        cosine_values.append(cosine_sim)
 
                     # Calculate averages
                     avg_mape = (
-                        sum(mape_values) / len(mape_values)
-                        if mape_values
-                        else float("inf")
+                        sum(mape_values) / len(mape_values) if mape_values else 100.0
                     )
                     avg_cosine = (
                         sum(cosine_values) / len(cosine_values)
@@ -110,9 +102,7 @@ class DurationOverTimeReport(BaseReport):
                     )
 
                     # Convert MAPE to fidelity (match rate_over_time naming)
-                    mape_fidelity = (
-                        max(0, 100 - avg_mape) if avg_mape != float("inf") else 0.0
-                    )
+                    mape_fidelity = max(0.0, 100 - avg_mape)
                     cosine_fidelity = avg_cosine * 100  # Convert to percentage
 
                     # Get span count for this group

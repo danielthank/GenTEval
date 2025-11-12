@@ -160,7 +160,7 @@ class GraphReport(BaseReport):
 
             for compressor in self.compressors:
                 # Skip unsupported compressors
-                if compressor in {"original", "head_sampling_1"}:
+                if compressor in {"original"}:
                     continue
 
                 # Load ground truth

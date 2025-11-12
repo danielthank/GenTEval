@@ -2,8 +2,6 @@
 
 from typing import Any
 
-import numpy as np
-
 from genteval.bin.utils import get_dir_with_root
 
 from .base_report import BaseReport
@@ -89,11 +87,7 @@ class ErrorOverTimeReport(BaseReport):
                     )
 
                     # Calculate fidelity scores for this group
-                    mape_fidelity = (
-                        max(0, 100 - fidelity_result["mape"])
-                        if not np.isinf(fidelity_result["mape"])
-                        else 0.0
-                    )
+                    mape_fidelity = max(0, 100 - fidelity_result["mape"])
                     cosine_fidelity = fidelity_result["cosine_sim"] * 100
 
                     # Store per-group scores with count from original data
