@@ -88,6 +88,7 @@ class RCAEvalDataset(Dataset):
             "duration": "int64",
             "parentSpanID": "string",
             "http.status_code": "string",
+            "status.code": "string",
         }
         self._spans = pd.read_csv(self.run_dir.joinpath("traces.csv"), dtype=dtypes)
         return self
@@ -99,9 +100,6 @@ class RCAEvalDataset(Dataset):
         filtered_df = self._spans.dropna(subset=["startTime", "duration"])
         self._traces = {}
         for trace_id, trace_group in filtered_df.groupby("traceID"):
-            # all_spans_set = set(trace_group["spanID"])
-            # valid_parent_mask = trace_group["parentSpanID"].isna() | trace_group["parentSpanID"].isin(all_spans_set)
-            # valid_trace_group = trace_group[valid_parent_mask]
             valid_trace_group = trace_group
             if valid_trace_group.empty:
                 continue
@@ -111,7 +109,7 @@ class RCAEvalDataset(Dataset):
                 valid_trace_group.set_index("spanID")
                 .apply(
                     lambda row: {
-                        "nodeName": f"{row['serviceName'] if pd.notna(row['serviceName']) else ''}!@#{row['methodName'] if pd.notna(row['methodName']) else ''}!@#{row['operationName'] if pd.notna(row['operationName']) else ''}",
+                        "nodeName": f"{row['serviceName'] if pd.notna(row['serviceName']) else ''}!@#{row['methodName'] if pd.notna(row['methodName']) else ''}!@#{row['operationName'] if pd.notna(row['operationName']) else ''}!@#{row['status.code'] if pd.notna(row['status.code']) else ''}",
                         "startTime": row["startTime"],
                         "duration": row["duration"],
                         "parentSpanId": None
@@ -120,6 +118,9 @@ class RCAEvalDataset(Dataset):
                         "http.status_code": None
                         if pd.isna(row.get("http.status_code"))
                         else row.get("http.status_code"),
+                        "status.code": None
+                        if pd.isna(row.get("status.code"))
+                        else row.get("status.code"),
                     },
                     axis=1,
                 )
@@ -140,8 +141,8 @@ class RCAEvalDataset(Dataset):
 
         for trace_id, trace in self.traces.items():
             for span_id, span in trace.items():
-                service_name, method_name, operation_name = parse_node_name(
-                    span["nodeName"]
+                service_name, method_name, operation_name, status_code = (
+                    parse_node_name(span["nodeName"])
                 )
                 rows.append(
                     {
@@ -154,6 +155,7 @@ class RCAEvalDataset(Dataset):
                         "duration": span["duration"],
                         "parentSpanID": span["parentSpanId"],
                         "http.status_code": span.get("http.status_code", ""),
+                        "status.code": status_code,
                     }
                 )
         dtypes = {
@@ -166,5 +168,6 @@ class RCAEvalDataset(Dataset):
             "duration": "int64",
             "parentSpanID": "string",
             "http.status_code": "string",
+            "status.code": "string",
         }
         self._spans = pd.DataFrame(rows).astype(dtypes)

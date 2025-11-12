@@ -4,6 +4,7 @@ import pathlib
 
 from genteval.reports import (
     DurationOverTimeReport,
+    ErrorOverTimeReport,
     GraphReport,
     OperationReport,
     RateOverTimeReport,
@@ -62,6 +63,7 @@ def main():
         nargs="*",
         default=[
             "duration_over_time",
+            "error_over_time",
             "rate_over_time",
             "operation",
             "trace_rca",
@@ -118,6 +120,13 @@ def main():
         )
         report = report_generator.generate(run_dirs_func)
         all_reports["rate_over_time"] = report
+
+    if "error_over_time" in args.evaluators:
+        report_generator = ErrorOverTimeReport(
+            args.compressors, root_dir, plot=args.plot
+        )
+        report = report_generator.generate(run_dirs_func)
+        all_reports["error_over_time"] = report
 
     if "operation" in args.evaluators:
         report_generator = OperationReport(args.compressors, root_dir)

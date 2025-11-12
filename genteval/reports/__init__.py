@@ -2,6 +2,7 @@
 
 from .base_report import BaseReport
 from .duration_over_time_report import DurationOverTimeReport
+from .error_over_time_report import ErrorOverTimeReport
 from .graph_report import GraphReport
 from .operation_report import OperationReport
 from .rate_over_time_report import RateOverTimeReport
@@ -14,6 +15,7 @@ from .time_report import TimeReport
 __all__ = [
     "BaseReport",
     "DurationOverTimeReport",
+    "ErrorOverTimeReport",
     "GraphReport",
     "OperationReport",
     "RCAReport",

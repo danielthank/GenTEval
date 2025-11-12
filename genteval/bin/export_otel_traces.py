@@ -90,6 +90,10 @@ def extract_spans_for_csv(trace_data: dict[str, Any]) -> list[SpanData]:
                 # Extract http.status_code
                 http_status_code = get_span_attribute(span, "http.status_code") or ""
 
+                # Extract status code (0=UNSET, 1=OK, 2=ERROR)
+                status = span.get("status", {})
+                status_code = status.get("code", 0)
+
                 row = {
                     "time": time_str,
                     "traceID": trace_id,
@@ -102,6 +106,7 @@ def extract_spans_for_csv(trace_data: dict[str, Any]) -> list[SpanData]:
                     "duration": str(duration_micros),
                     "parentSpanID": parent_span_id,
                     "http.status_code": str(http_status_code) if http_status_code else "",
+                    "status.code": str(status_code),
                 }
 
                 span_data = SpanData(row)
@@ -204,6 +209,7 @@ def process_traces_to_csv(
             "duration",
             "parentSpanID",
             "http.status_code",
+            "status.code",
         ]
 
         if apply_duration_adjustment:

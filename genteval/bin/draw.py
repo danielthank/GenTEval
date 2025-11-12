@@ -7,6 +7,7 @@ import numpy as np
 import seaborn as sns
 
 from genteval.plotting.duration_over_time_plot import generate_all_duration_plots
+from genteval.plotting.error_over_time_plot import generate_all_error_plots
 from genteval.plotting.graph_plot import generate_all_graph_plots
 from genteval.plotting.operation_plot import generate_all_operation_plots
 from genteval.plotting.rate_over_time_plot import generate_all_rate_plots
@@ -267,11 +268,12 @@ def main():
             "graph",
             "heatmap",
             "heatmap_status_code",
+            "error_over_time",
             "rate_over_time",
             "duration_over_time",
             "rca",
         ],
-        help="Visualization mode: operation (Operation F1 fidelity), graph (Graph fidelity), heatmap (depth heatmap), heatmap_status_code (HTTP status code heatmap), rate_over_time (rate over time fidelity vs cost), duration_over_time (duration over time fidelity vs cost), or rca (TraceRCA and MicroRank fidelity vs cost)",
+        help="Visualization mode: operation (Operation F1 fidelity), graph (Graph fidelity), heatmap (depth heatmap), heatmap_status_code (HTTP status code heatmap), error_over_time (error over time fidelity vs cost), rate_over_time (rate over time fidelity vs cost), duration_over_time (duration over time fidelity vs cost), or rca (TraceRCA and MicroRank fidelity vs cost)",
     )
     parser.add_argument(
         "--input",
@@ -369,6 +371,12 @@ def main():
         # Graph fidelity scatter plot mode
         generate_all_graph_plots(args.input, output_dir=args.output_dir)
         print(f"Graph plot generated in {args.output_dir}")
+        return 0
+
+    elif args.mode == "error_over_time":
+        # Error over time scatter plots mode
+        generate_all_error_plots(args.input, output_dir=args.output_dir, weighted=True)
+        print(f"Error over time scatter plots generated in {args.output_dir}")
         return 0
 
     elif args.mode == "rate_over_time":

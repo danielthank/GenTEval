@@ -30,6 +30,11 @@ class AttributeAnalyzer:
         self.total_spans = 0
         self.total_resources = 0
 
+        # Status code tracking
+        self.status_code_count = defaultdict(int)
+        self.status_message_count = 0
+        self.status_message_values = set()
+
     def extract_attribute_value(self, attr_value: dict[str, Any]) -> Any:
         """Extract the actual value from an OpenTelemetry attribute value object."""
         if "stringValue" in attr_value:
@@ -61,6 +66,15 @@ class AttributeAnalyzer:
             # Convert value to string for set storage (to handle unhashable types)
             self.span_attr_values[key].add(str(value))
 
+        # Process status
+        status = span.get("status", {})
+        code = status.get("code", 0)  # Default is UNSET (0)
+        self.status_code_count[code] += 1
+
+        if "message" in status:
+            self.status_message_count += 1
+            self.status_message_values.add(str(status["message"]))
+
     def process_resource(self, resource: dict[str, Any]):
         """Process resource attributes."""
         self.total_resources += 1
@@ -89,6 +103,12 @@ class AttributeAnalyzer:
 
         for key, values in other.resource_attr_values.items():
             self.resource_attr_values[key].update(values)
+
+        for code, count in other.status_code_count.items():
+            self.status_code_count[code] += count
+
+        self.status_message_count += other.status_message_count
+        self.status_message_values.update(other.status_message_values)
 
     def print_report(self):
         """Print a formatted analysis report."""
@@ -145,6 +165,37 @@ class AttributeAnalyzer:
             print(
                 f"{key:<50} {count:>12,} {ratio:>9.1%} {cardinality:>12,}"
             )
+
+        # Status code section
+        print("\n" + "=" * 80)
+        print("SPAN STATUS")
+        print("=" * 80)
+        print(
+            "\n{:<50} {:>12} {:>10} {:>12}".format(
+                "Status", "Count", "Ratio", "Cardinality"
+            )
+        )
+        print("-" * 80)
+
+        # Status code mapping
+        status_names = {0: "UNSET", 1: "OK", 2: "ERROR"}
+
+        # Sort by code (0, 1, 2)
+        sorted_status_codes = sorted(self.status_code_count.items())
+
+        for code, count in sorted_status_codes:
+            ratio = count / self.total_spans if self.total_spans > 0 else 0
+            status_name = f"status.code={code} ({status_names.get(code, 'UNKNOWN')})"
+            print(
+                f"{status_name:<50} {count:>12,} {ratio:>9.1%} {1:>12,}"
+            )
+
+        # Status message
+        ratio = self.status_message_count / self.total_spans if self.total_spans > 0 else 0
+        cardinality = len(self.status_message_values)
+        print(
+            f"{'status.message':<50} {self.status_message_count:>12,} {ratio:>9.1%} {cardinality:>12,}"
+        )
 
         print("\n" + "=" * 80)
 
