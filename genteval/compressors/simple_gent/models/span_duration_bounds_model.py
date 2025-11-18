@@ -50,7 +50,7 @@ class SpanDurationBoundsModel:
                 child_count = child_counts[span_id]
 
                 node_idx = span_data["nodeIdx"]
-                span_feature = NodeFeature(node_idx=node_idx, child_count=child_count)
+                span_feature = NodeFeature(node_idx=node_idx, child_idx=0, child_count=child_count)
 
                 duration = span_data["duration"]
 
@@ -99,13 +99,13 @@ class SpanDurationBoundsModel:
                     bounds = self.duration_bounds[bucket_time][feature]
                     return bounds["min"], bounds["max"]
 
-        # Fallback 2: same node name with any child count in closest time bucket
+        # Fallback 2: same node index with any child count in closest time bucket
         if self.duration_bounds:
             for bucket_time in sorted(
                 self.duration_bounds.keys(), key=lambda t: abs(t - time_bucket)
             ):
                 for candidate_feature in self.duration_bounds[bucket_time]:
-                    if candidate_feature.name == feature.name:
+                    if candidate_feature.node_idx == feature.node_idx:
                         bounds = self.duration_bounds[bucket_time][candidate_feature]
                         return bounds["min"], bounds["max"]
 
@@ -122,20 +122,6 @@ class SpanDurationBoundsModel:
         # Final fallback: default wide bounds
         return (1.0, float("inf"))
 
-    def get_duration_bounds_batch(
-        self, time_buckets: list[int], features: list[NodeFeature]
-    ) -> list[tuple[float, float]]:
-        """Get duration bounds for multiple (time_bucket, feature) pairs."""
-        if len(time_buckets) != len(features):
-            raise ValueError("time_buckets and features must have the same length")
-
-        results = []
-        for time_bucket, feature in zip(time_buckets, features, strict=False):
-            bounds = self.get_duration_bounds(time_bucket, feature)
-            results.append(bounds)
-
-        return results
-
     def save_state_dict(self, proto_models):
         """Save model state to protobuf message."""
 
@@ -150,6 +136,7 @@ class SpanDurationBoundsModel:
                 max_dur = bounds_info["max"]
                 span_duration_bounds = simple_gent_pb2.SpanDurationBounds()
                 span_duration_bounds.feature.node_idx = feature.node_idx
+                span_duration_bounds.feature.child_idx = feature.child_idx
                 span_duration_bounds.feature.child_count = feature.child_count
                 span_duration_bounds.min_duration = min_dur
                 span_duration_bounds.max_duration = max_dur
@@ -186,6 +173,7 @@ class SpanDurationBoundsModel:
             for span_duration_bounds in time_bucket_models.span_duration_bounds:
                 feature = NodeFeature(
                     node_idx=span_duration_bounds.feature.node_idx,
+                    child_idx=span_duration_bounds.feature.child_idx,
                     child_count=span_duration_bounds.feature.child_count,
                 )
 

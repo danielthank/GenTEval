@@ -174,30 +174,34 @@ class MetadataVAEModel:
 
                     # Unpack model output
                     (
-                        recon,
-                        x_scale,
-                        mixture_weights,
-                        alphas,
-                        betas,
+                        gap_x_scale,
+                        gap_mixture_weights,
+                        gap_alphas,
+                        gap_betas,
+                        duration_x_scale,
+                        duration_mixture_weights,
+                        duration_alphas,
+                        duration_betas,
                         mu,
                         logvar,
                         z,
                         status_code_logits,
                     ) = model_output
-                    total_loss, recon_loss, kl_loss, status_code_loss = (
-                        model.loss_function(
-                            recon,
-                            targets_device,
-                            x_scale,
-                            mixture_weights,
-                            alphas,
-                            betas,
-                            mu,
-                            logvar,
-                            z,
-                            status_code_logits,
-                            current_beta,
-                        )
+                    total_loss, recon_loss, kl_loss = model.loss_function(
+                        targets_device,
+                        gap_x_scale,
+                        gap_mixture_weights,
+                        gap_alphas,
+                        gap_betas,
+                        duration_x_scale,
+                        duration_mixture_weights,
+                        duration_alphas,
+                        duration_betas,
+                        mu,
+                        logvar,
+                        z,
+                        status_code_logits,
+                        current_beta,
                     )
                     total_loss.backward()
                     self.optimizer.step()
@@ -410,23 +414,29 @@ class MetadataVAEModel:
 
                 # Unpack model output
                 (
-                    recon,
-                    x_scale,
-                    mixture_weights,
-                    alphas,
-                    betas,
+                    gap_x_scale,
+                    gap_mixture_weights,
+                    gap_alphas,
+                    gap_betas,
+                    duration_x_scale,
+                    duration_mixture_weights,
+                    duration_alphas,
+                    duration_betas,
                     mu,
                     logvar,
                     z,
                     status_code_logits,
                 ) = model_output
-                val_loss, _, _, _ = model.loss_function(
-                    recon,
+                val_loss, _, _ = model.loss_function(
                     targets_device,
-                    x_scale,
-                    mixture_weights,
-                    alphas,
-                    betas,
+                    gap_x_scale,
+                    gap_mixture_weights,
+                    gap_alphas,
+                    gap_betas,
+                    duration_x_scale,
+                    duration_mixture_weights,
+                    duration_alphas,
+                    duration_betas,
                     mu,
                     logvar,
                     z,

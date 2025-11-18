@@ -221,4 +221,3 @@ class ReportParser:
             "total_cost_per_million": total_cost_per_million,
             "cost_per_minute": cost_per_minute,
         }
-

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class NodeFeature:
     """
-    Represents a node feature as (node_idx, child_count) pair.
+    Represents a node feature as (node_idx, child_idx, child_count) tuple.
 
     This class is used throughout the Simple GenT algorithm to represent
     node characteristics. Uses node indices instead of string names for
@@ -12,23 +12,25 @@ class NodeFeature:
 
     Attributes:
         node_idx: The node index (from shared NodeEncoder)
+        child_idx: The index of this node among its parent's children (sorted by startTime)
         child_count: The number of children this node has
     """
 
     node_idx: int
+    child_idx: int
     child_count: int
 
-    def to_tuple(self) -> tuple[int, int]:
+    def to_tuple(self) -> tuple[int, int, int]:
         """Convert to tuple representation for use as dictionary keys."""
-        return (self.node_idx, self.child_count)
+        return (self.node_idx, self.child_idx, self.child_count)
 
     @classmethod
-    def from_tuple(cls, feature_tuple: tuple[int, int]) -> "NodeFeature":
+    def from_tuple(cls, feature_tuple: tuple[int, int, int]) -> "NodeFeature":
         """Create NodeFeature from tuple representation."""
-        return cls(node_idx=feature_tuple[0], child_count=feature_tuple[1])
+        return cls(node_idx=feature_tuple[0], child_idx=feature_tuple[1], child_count=feature_tuple[2])
 
     def __str__(self) -> str:
-        return f"({self.node_idx}, {self.child_count})"
+        return f"({self.node_idx}, {self.child_idx}, {self.child_count})"
 
     def __repr__(self) -> str:
-        return f"NodeFeature(node_idx={self.node_idx}, child_count={self.child_count})"
+        return f"NodeFeature(node_idx={self.node_idx}, child_idx={self.child_idx}, child_count={self.child_count})"

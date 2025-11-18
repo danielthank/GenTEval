@@ -33,7 +33,7 @@ class SimpleGenTConfig:
     metadata_vae_model: MetadataVAEModelType = MetadataVAEModelType.METADATA_VAE
 
     # MRF topology model parameters
-    max_depth: int = 10
+    max_depth: int = 100
     max_children: int = 5000
     mrf_smoothing: float = 1e-6  # Smoothing for MRF potentials
 

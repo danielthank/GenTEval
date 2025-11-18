@@ -37,7 +37,8 @@ message TimeBucketModels {
 // Node feature representation
 message NodeFeature {
   int32 node_idx = 1;  // Index into the shared node encoder vocabulary
-  int32 child_count = 2;
+  int32 child_idx = 2;  // Index of this node among its parent's children (sorted by startTime)
+  int32 child_count = 3;  // Number of children this node has
 }
 
 // Root count model: maps node feature to occurrence count

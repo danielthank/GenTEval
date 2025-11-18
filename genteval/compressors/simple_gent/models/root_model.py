@@ -63,7 +63,7 @@ class RootModel:
 
                     node_idx = span_data["nodeIdx"]
                     root_feature = NodeFeature(
-                        node_idx=node_idx, child_count=child_count
+                        node_idx=node_idx, child_idx=0, child_count=child_count
                     )
 
                     root_features_per_bucket[time_bucket].append(root_feature)
@@ -126,7 +126,7 @@ class RootModel:
             return [
                 (
                     default_time_bucket,
-                    NodeFeature(node_idx=fallback_node_idx, child_count=0),
+                    NodeFeature(node_idx=fallback_node_idx, child_idx=0, child_count=0),
                 )
                 for _ in range(count)
             ]
@@ -161,7 +161,7 @@ class RootModel:
             else:
                 # Fallback - use index 0
                 fallback_node_idx = 0
-                sampled_feature = NodeFeature(node_idx=fallback_node_idx, child_count=0)
+                sampled_feature = NodeFeature(node_idx=fallback_node_idx, child_idx=0, child_count=0)
 
             results.append((time_bucket, sampled_feature))
 
@@ -179,6 +179,7 @@ class RootModel:
             for feature, count in bucket_counts.items():
                 root_count_model = simple_gent_pb2.RootCountModel()
                 root_count_model.feature.node_idx = feature.node_idx
+                root_count_model.feature.child_idx = feature.child_idx
                 root_count_model.feature.child_count = feature.child_count
                 root_count_model.count = count
                 time_bucket_data[time_bucket].append(root_count_model)
@@ -211,6 +212,7 @@ class RootModel:
             for root_model in time_bucket_models.root_models:
                 feature = NodeFeature(
                     node_idx=root_model.feature.node_idx,
+                    child_idx=root_model.feature.child_idx,
                     child_count=root_model.feature.child_count,
                 )
                 self.root_counts[time_bucket][feature] = root_model.count

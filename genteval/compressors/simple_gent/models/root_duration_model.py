@@ -61,7 +61,7 @@ class RootDurationModel:
 
                     node_idx = span_data["nodeIdx"]
                     root_feature = NodeFeature(
-                        node_idx=node_idx, child_count=child_count
+                        node_idx=node_idx, child_idx=0, child_count=child_count
                     )
 
                     duration = span_data["duration"]
@@ -272,6 +272,7 @@ class RootDurationModel:
             for feature, (gmm, min_dur, max_dur) in bucket_models.items():
                 root_duration_model = simple_gent_pb2.RootDurationModel()
                 root_duration_model.feature.node_idx = feature.node_idx
+                root_duration_model.feature.child_idx = feature.child_idx
                 root_duration_model.feature.child_count = feature.child_count
                 root_duration_model.min_duration = min_dur
                 root_duration_model.max_duration = max_dur
@@ -314,6 +315,7 @@ class RootDurationModel:
             for root_duration_model in time_bucket_models.root_duration_models:
                 feature = NodeFeature(
                     node_idx=root_duration_model.feature.node_idx,
+                    child_idx=root_duration_model.feature.child_idx,
                     child_count=root_duration_model.feature.child_count,
                 )
 

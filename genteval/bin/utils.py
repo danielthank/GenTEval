@@ -63,7 +63,7 @@ def run_dirs(applications=None, services=None, faults=None, runs=None):
             [2],
         ),
         "uber-trace1-transformed": (["202502"], [None], [1]),
-        "otel-demo-transformed": (["202510"], [None], [1]),
+        "otel-demo-transformed": (["202510", "simple"], [None], [1]),
     }
 
     # Convert single values to lists

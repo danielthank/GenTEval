@@ -328,153 +328,6 @@ class SimpleGenTCompressor(Compressor):
 
         return dataset
 
-    def _generate_trace_timing(
-        self, root_tree, trace_start_time: int, root_duration: float, time_bucket: int
-    ) -> dict[str, dict]:
-        """Generate timing information for the tree using depth-based batch sampling."""
-        spans = {}
-
-        # Create root span with status code
-        root_span_id = _get_random_span_id()
-
-        # Generate status code for root span using NO_PARENT token
-        vocab_size = self.node_encoder.get_vocab_size()
-        root_status_request = [
-            (
-                time_bucket,
-                type("Feature", (), {"node_idx": vocab_size})(),  # NO_PARENT token
-                root_tree.feature,  # child is the root node
-                root_duration,  # parent_duration (use root_duration)
-                0.0,  # normalized_child_idx (0 for root)
-            )
-        ]
-
-        [(_, _, root_status_code_idx)] = self.metadata_vae_model.sample_ratios_batch(
-            root_status_request
-        )
-        root_status_code_str = STATUS_CODE_VOCAB[root_status_code_idx]
-
-        spans[root_span_id] = {
-            "nodeIdx": root_tree.feature.node_idx,
-            "startTime": int(trace_start_time),
-            "duration": int(root_duration),
-            "http.status_code": root_status_code_str,
-            "parentSpanId": None,
-        }
-
-        # Process tree level by level (depth-based batching)
-        # Each level: [(tree_node, span_id, start_time, duration)]
-        current_level = [(root_tree, root_span_id, trace_start_time, root_duration)]
-
-        while current_level:
-            next_level = []
-            batch_requests = []
-            child_infos = []
-
-            # Phase 1: Collect all children at this depth level
-            for (
-                parent_tree_node,
-                parent_span_id,
-                parent_start_time,
-                parent_duration,
-            ) in current_level:
-                children = parent_tree_node.children
-                child_count = len(children)
-
-                # Process each child of this parent
-                for child_idx, child_tree_node in enumerate(children):
-                    child_span_id = _get_random_span_id()
-
-                    # Calculate normalized child index: child_idx / child_count
-                    normalized_child_idx = (
-                        child_idx / child_count if child_count > 0 else 0.0
-                    )
-
-                    # Create batch request with actual conditioning values (removed parent_start_time)
-                    batch_requests.append(
-                        (
-                            time_bucket,
-                            parent_tree_node.feature,  # parent_feature
-                            child_tree_node.feature,  # child_feature
-                            parent_duration,  # actual parent duration
-                            normalized_child_idx,  # child_idx / child_count
-                        )
-                    )
-
-                    # Store child info for span creation
-                    child_infos.append(
-                        (
-                            child_tree_node,
-                            child_span_id,
-                            parent_span_id,
-                            parent_start_time,
-                            parent_duration,
-                        )
-                    )
-
-            # Phase 2: Batch sample all children at this depth level
-            if batch_requests:
-                # Get duration bounds for each child request
-                duration_bounds = []
-                for time_bucket, _, child_feature, _, _ in batch_requests:
-                    bounds = self.span_duration_bounds_model.get_duration_bounds(
-                        time_bucket, child_feature
-                    )
-                    duration_bounds.append(bounds)
-
-                batch_results = self.metadata_vae_model.sample_ratios_batch(
-                    batch_requests, duration_bounds
-                )
-
-                # Phase 3: Create child spans and prepare next level
-                for i, (
-                    (gap_ratio, duration_ratio, status_code_idx),
-                    child_info,
-                ) in enumerate(zip(batch_results, child_infos, strict=False)):
-                    (
-                        child_tree_node,
-                        child_span_id,
-                        parent_span_id,
-                        parent_start_time,
-                        parent_duration,
-                    ) = child_info
-
-                    # Calculate actual child timing
-                    gap_from_parent = gap_ratio * parent_duration
-                    child_start_time = parent_start_time + gap_from_parent
-                    child_duration = duration_ratio * parent_duration
-
-                    # Ensure reasonable bounds
-                    child_start_time = max(parent_start_time, child_start_time)
-                    child_duration = max(1.0, child_duration)
-
-                    # Decode status code
-                    status_code_str = STATUS_CODE_VOCAB[status_code_idx]
-
-                    # Create child span
-                    spans[child_span_id] = {
-                        "nodeIdx": child_tree_node.feature.node_idx,
-                        "startTime": int(child_start_time),
-                        "duration": int(child_duration),
-                        "http.status_code": status_code_str,
-                        "parentSpanId": parent_span_id,
-                    }
-
-                    # Add to next level for further processing
-                    next_level.append(
-                        (
-                            child_tree_node,
-                            child_span_id,
-                            child_start_time,
-                            child_duration,
-                        )
-                    )
-
-            # Move to next depth level
-            current_level = next_level
-
-        return spans
-
     def _generate_traces_batch(self, trace_infos: list) -> dict[str, dict[str, dict]]:
         """
         Generate multiple traces simultaneously using cross-trace batching for better GPU utilization.
@@ -623,13 +476,19 @@ class SimpleGenTCompressor(Compressor):
                 # Get duration bounds for each child request
                 mega_duration_bounds = []
                 for time_bucket, _, child_feature, _, _ in mega_batch_requests:
+                    lookup_feature = NodeFeature(
+                        node_idx=child_feature.node_idx,
+                        child_idx=0,  # Always use 0 to match training data
+                        child_count=child_feature.child_count,
+                    )
                     bounds = self.span_duration_bounds_model.get_duration_bounds(
-                        time_bucket, child_feature
+                        time_bucket, lookup_feature
                     )
                     mega_duration_bounds.append(bounds)
 
                 mega_batch_results = self.metadata_vae_model.sample_ratios_batch(
-                    mega_batch_requests, mega_duration_bounds
+                    mega_batch_requests,
+                    mega_duration_bounds,
                 )
 
                 # Phase 3: Apply batch results back to respective traces

@@ -47,6 +47,7 @@ convert_trajectory = "genteval.data_collection.ai_agent.cli:main"
 batch_convert_trajectory = "genteval.data_collection.ai_agent.batch_convert_cli:main"
 
 compare_graphs = "genteval.bin.compare_graphs:main"
+generate_synthetic_traces = "genteval.bin.generate_synthetic_traces:main"
 
 # Development tools
 generate-proto = "genteval.bin.generate_proto:main"

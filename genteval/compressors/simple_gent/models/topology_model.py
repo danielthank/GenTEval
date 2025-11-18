@@ -34,9 +34,6 @@ class TreeNode:
 class TopologyModel:
     """
     Topology model: (parent_node_idx, parent_child_cnt, child_node_idx, child_child_cnt) -> float (potential)
-
-    Uses an MRF-like approach to model the probability of parent-child relationships
-    based on the existing mrf_graph.py implementation.
     """
 
     def __init__(self, config):
@@ -51,10 +48,10 @@ class TopologyModel:
             lambda: defaultdict(Counter)
         )  # {time_bucket: {depth: Counter}}
 
-        # Cache for child candidates per parent feature
+        # Cache for child candidates per (parent_feature, child_idx)
         self.child_candidates_cache = defaultdict(
             dict
-        )  # {time_bucket: {parent_feature: [(child_feature, prob)]}}
+        )  # {time_bucket: {(parent_feature, child_idx): [(child_feature, prob)]}}
 
         # Max nodes per time bucket (loaded from protobuf)
         self.max_nodes_per_bucket = {}  # {time_bucket: max_nodes}
@@ -151,14 +148,17 @@ class TopologyModel:
 
             total_processed_buckets += 1
 
-            for (parent_feature, child_feature), count in bucket_edges.items():
+            for (
+                (parent_feature, child_idx),
+                child_feature,
+            ), count in bucket_edges.items():
                 # Use log potential with smoothing
                 potential = np.log(count + self.config.mrf_smoothing) - np.log(
                     total_edges + len(bucket_edges) * self.config.mrf_smoothing
                 )
-                self.edge_potentials[time_bucket][(parent_feature, child_feature)] = (
-                    potential
-                )
+                self.edge_potentials[time_bucket][
+                    ((parent_feature, child_idx), child_feature)
+                ] = potential
                 total_processed_edges += 1
 
         self.logger.info(
@@ -196,37 +196,51 @@ class TopologyModel:
             # Count node at this depth
             node_counts[time_bucket][depth][node_name_idx] += 1
 
-            # Get children
-            children = list(graph.successors(node_id))
-            parent_child_count = len(children)
+            # Get children and sort by startTime
+            children_data = []
+            for child_id in graph.successors(node_id):
+                if child_id not in visited:
+                    child_node_data = graph.nodes[child_id]
+                    children_data.append((child_id, child_node_data["startTime"]))
 
+            # Sort children by startTime to match MetadataVAE ordering
+            children_data.sort(key=lambda x: x[1])
+            parent_child_count = len(children_data)
+
+            # Create parent feature (child_idx=-1 indicates parent reference, not child position)
             parent_feature = NodeFeature(
-                node_idx=node_name_idx, child_count=parent_child_count
+                node_idx=node_name_idx,
+                child_idx=-1,  # N/A - this node is being used as parent
+                child_count=parent_child_count,
             )
 
-            # Process edges to children
-            for child_id in children:
-                if child_id not in visited:
-                    visited.add(child_id)
-                    child_data = graph.nodes[child_id]
-                    child_name_idx = child_data["nodeIdx"]
+            # Process edges to children with child_idx
+            for child_idx, (child_id, _) in enumerate(children_data):
+                visited.add(child_id)
+                child_data = graph.nodes[child_id]
+                child_name_idx = child_data["nodeIdx"]
 
-                    # Count grandchildren for child feature
-                    grandchildren = list(graph.successors(child_id))
-                    child_child_count = len(grandchildren)
+                # Count grandchildren for child feature
+                grandchildren = list(graph.successors(child_id))
+                child_child_count = len(grandchildren)
 
-                    child_feature = NodeFeature(
-                        node_idx=child_name_idx, child_count=child_child_count
-                    )
+                # Create child feature with actual child_idx position
+                child_feature = NodeFeature(
+                    node_idx=child_name_idx,
+                    child_idx=child_idx,
+                    child_count=child_child_count,
+                )
 
-                    # Record edge
-                    edge_counts[time_bucket][(parent_feature, child_feature)] += 1
+                # Record edge with tuple key: (parent_feature, child_idx)
+                edge_counts[time_bucket][
+                    ((parent_feature, child_idx), child_feature)
+                ] += 1
 
-                    # Continue BFS
-                    queue.append((child_id, depth + 1))
+                # Continue BFS
+                queue.append((child_id, depth + 1))
 
     def _build_child_candidates_cache(self):
-        """Build cache of possible children for each parent feature."""
+        """Build cache of possible children for each (parent_feature, child_idx) pair."""
         total_parent_features = 0
 
         for time_bucket, bucket_edges in tqdm(
@@ -234,12 +248,16 @@ class TopologyModel:
         ):
             parent_children = defaultdict(list)
 
-            # Group by parent feature
-            for (parent_feature, child_feature), potential in bucket_edges.items():
-                parent_children[parent_feature].append((child_feature, potential))
+            # Group by (parent_feature, child_idx) tuple
+            for (
+                (parent_feature, child_idx),
+                child_feature,
+            ), potential in bucket_edges.items():
+                parent_key = (parent_feature, child_idx)
+                parent_children[parent_key].append((child_feature, potential))
 
             # Convert to probabilities and cache
-            for parent_feature, children_list in parent_children.items():
+            for parent_key, children_list in parent_children.items():
                 # Convert log potentials to probabilities
                 potentials = np.array([pot for _, pot in children_list])
                 # Use softmax to convert to probabilities
@@ -253,13 +271,13 @@ class TopologyModel:
                     )
                 ]
 
-                self.child_candidates_cache[time_bucket][parent_feature] = (
+                self.child_candidates_cache[time_bucket][parent_key] = (
                     children_with_probs
                 )
                 total_parent_features += 1
 
         self.logger.info(
-            f"Built child candidates cache for {total_parent_features} unique parent features"
+            f"Built child candidates cache for {total_parent_features} unique (parent_feature, child_idx) pairs"
         )
 
     def generate_tree_structure(
@@ -284,12 +302,12 @@ class TopologyModel:
                 continue
 
             # Generate children for this node
-            for _ in range(min(expected_children, self.config.max_children)):
+            for child_idx in range(min(expected_children, self.config.max_children)):
                 if nodes_created >= max_nodes:
                     break
 
                 child_feature = self._sample_child_feature(
-                    current_node.feature, time_bucket, current_node.depth + 1
+                    current_node.feature, time_bucket, current_node.depth + 1, child_idx
                 )
                 if child_feature is None:
                     continue
@@ -306,15 +324,29 @@ class TopologyModel:
         return root_node
 
     def _sample_child_feature(
-        self, parent_feature: NodeFeature, time_bucket: int, child_depth: int
+        self,
+        parent_feature: NodeFeature,
+        time_bucket: int,
+        child_depth: int,
+        child_idx: int,
     ) -> NodeFeature | None:
-        """Sample a child feature given a parent feature."""
+        """Sample a child feature given a parent feature and child position."""
+        # Create parent reference with child_idx=-1
+        parent_ref = NodeFeature(
+            node_idx=parent_feature.node_idx,
+            child_idx=-1,  # N/A - parent reference
+            child_count=parent_feature.child_count,
+        )
+
+        # Create cache lookup key as tuple
+        cache_key = (parent_ref, child_idx)
+
         # Try to find cached candidates
         if (
             time_bucket in self.child_candidates_cache
-            and parent_feature in self.child_candidates_cache[time_bucket]
+            and cache_key in self.child_candidates_cache[time_bucket]
         ):
-            candidates = self.child_candidates_cache[time_bucket][parent_feature]
+            candidates = self.child_candidates_cache[time_bucket][cache_key]
             if candidates:
                 features, probabilities = zip(*candidates, strict=False)
                 chosen_feature = np.random.choice(features, p=probabilities)
@@ -343,7 +375,9 @@ class TopologyModel:
                 chosen_node_idx = 0
                 # Random child count (simplified)
                 child_count = np.random.poisson(2)  # Average of 2 children
-                return NodeFeature(node_idx=chosen_node_idx, child_count=child_count)
+                return NodeFeature(
+                    node_idx=chosen_node_idx, child_idx=0, child_count=child_count
+                )
 
         # Final fallback: use closest time bucket
         if self.node_name_idxs:
@@ -362,7 +396,7 @@ class TopologyModel:
                     chosen_node_idx = 0
                     child_count = np.random.poisson(2)
                     return NodeFeature(
-                        node_idx=chosen_node_idx, child_count=child_count
+                        node_idx=chosen_node_idx, child_idx=0, child_count=child_count
                     )
 
         return None
@@ -392,11 +426,18 @@ class TopologyModel:
             if time_bucket not in time_bucket_data:
                 time_bucket_data[time_bucket] = []
 
-            for (parent_feature, child_feature), potential in bucket_edges.items():
+            for (
+                (parent_feature, child_idx),
+                child_feature,
+            ), potential in bucket_edges.items():
                 topology_model = simple_gent_pb2.TopologyModel()
                 topology_model.parent_feature.node_idx = parent_feature.node_idx
+                topology_model.parent_feature.child_idx = (
+                    child_idx  # Save the position, not -1
+                )
                 topology_model.parent_feature.child_count = parent_feature.child_count
                 topology_model.child_feature.node_idx = child_feature.node_idx
+                topology_model.child_feature.child_idx = child_feature.child_idx
                 topology_model.child_feature.child_count = child_feature.child_count
                 topology_model.potential = potential
                 time_bucket_data[time_bucket].append(topology_model)
@@ -433,17 +474,24 @@ class TopologyModel:
             self.max_nodes_per_bucket[time_bucket] = time_bucket_models.max_nodes_count
 
             for topology_model in time_bucket_models.topology_models:
+                # Extract child_idx from parent_feature field (it was saved as the position)
+                child_idx = topology_model.parent_feature.child_idx
+
+                # Create parent_feature with child_idx=-1 (parent reference)
                 parent_feature = NodeFeature(
                     node_idx=topology_model.parent_feature.node_idx,
+                    child_idx=-1,  # N/A - parent reference
                     child_count=topology_model.parent_feature.child_count,
                 )
                 child_feature = NodeFeature(
                     node_idx=topology_model.child_feature.node_idx,
+                    child_idx=topology_model.child_feature.child_idx,
                     child_count=topology_model.child_feature.child_count,
                 )
-                self.edge_potentials[time_bucket][(parent_feature, child_feature)] = (
-                    topology_model.potential
-                )
+                # Reconstruct tuple key structure
+                self.edge_potentials[time_bucket][
+                    ((parent_feature, child_idx), child_feature)
+                ] = topology_model.potential
 
         # Note: node_names cache will be rebuilt during sampling as needed
         self.node_name_idxs = defaultdict(lambda: defaultdict(Counter))
