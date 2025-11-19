@@ -32,6 +32,9 @@ message TimeBucketModels {
 
   // Span duration bounds: min/max duration bounds for all spans
   repeated SpanDurationBounds span_duration_bounds = 7;
+
+  // Span gap bounds: min/max gap_from_parent bounds for all child spans
+  repeated SpanGapBounds span_gap_bounds = 8;
 }
 
 // Node feature representation
@@ -67,6 +70,13 @@ message SpanDurationBounds {
   NodeFeature feature = 1;
   double min_duration = 2;  // Minimum duration observed for this feature
   double max_duration = 3;  // Maximum duration observed for this feature
+}
+
+// Span gap bounds: maps node feature to min/max gap_from_parent bounds
+message SpanGapBounds {
+  NodeFeature feature = 1;
+  double min_gap = 2;  // Minimum gap_from_parent observed for this feature
+  double max_gap = 3;  // Maximum gap_from_parent observed for this feature
 }
 
 // MetadataVAE model: neural network that jointly models gap and duration ratios

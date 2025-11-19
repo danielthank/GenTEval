@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
+from genteval.compressors.simple_gent.proto import simple_gent_pb2
 from genteval.models import MetadataVAE
 
 from .node_feature import NodeFeature
@@ -172,35 +173,9 @@ class MetadataVAEModel:
                         child_node_idx,
                     )
 
-                    # Unpack model output
-                    (
-                        gap_x_scale,
-                        gap_mixture_weights,
-                        gap_alphas,
-                        gap_betas,
-                        duration_x_scale,
-                        duration_mixture_weights,
-                        duration_alphas,
-                        duration_betas,
-                        mu,
-                        logvar,
-                        z,
-                        status_code_logits,
-                    ) = model_output
                     total_loss, recon_loss, kl_loss = model.loss_function(
                         targets_device,
-                        gap_x_scale,
-                        gap_mixture_weights,
-                        gap_alphas,
-                        gap_betas,
-                        duration_x_scale,
-                        duration_mixture_weights,
-                        duration_alphas,
-                        duration_betas,
-                        mu,
-                        logvar,
-                        z,
-                        status_code_logits,
+                        model_output,
                         current_beta,
                     )
                     total_loss.backward()
@@ -412,35 +387,9 @@ class MetadataVAEModel:
                     child_node_idx,
                 )
 
-                # Unpack model output
-                (
-                    gap_x_scale,
-                    gap_mixture_weights,
-                    gap_alphas,
-                    gap_betas,
-                    duration_x_scale,
-                    duration_mixture_weights,
-                    duration_alphas,
-                    duration_betas,
-                    mu,
-                    logvar,
-                    z,
-                    status_code_logits,
-                ) = model_output
                 val_loss, _, _ = model.loss_function(
                     targets_device,
-                    gap_x_scale,
-                    gap_mixture_weights,
-                    gap_alphas,
-                    gap_betas,
-                    duration_x_scale,
-                    duration_mixture_weights,
-                    duration_alphas,
-                    duration_betas,
-                    mu,
-                    logvar,
-                    z,
-                    status_code_logits,
+                    model_output,
                     beta,
                 )
 
@@ -468,6 +417,7 @@ class MetadataVAEModel:
         self,
         requests: list[tuple[int, NodeFeature, NodeFeature, float, float]],
         duration_bounds: list[tuple[float, float]] = None,
+        gap_bounds: list[tuple[float, float]] = None,
     ) -> list[tuple[float, float]]:
         """
         Batch sample gap and duration ratios for multiple requests.
@@ -479,6 +429,8 @@ class MetadataVAEModel:
                      where normalized_child_idx = child_idx / child_count
             duration_bounds: Optional list of (min_duration, max_duration) tuples
                            for reject sampling. If provided, must match requests length.
+            gap_bounds: Optional list of (min_gap, max_gap) tuples
+                       for reject sampling. If provided, must match requests length.
 
         Returns:
             List of (gap_ratio, duration_ratio) tuples in same order as requests
@@ -492,6 +444,10 @@ class MetadataVAEModel:
         # Validate duration_bounds if provided
         if duration_bounds is not None and len(duration_bounds) != len(requests):
             raise ValueError("duration_bounds must have same length as requests")
+
+        # Validate gap_bounds if provided
+        if gap_bounds is not None and len(gap_bounds) != len(requests):
+            raise ValueError("gap_bounds must have same length as requests")
 
         # Group requests by time bucket
         requests_by_bucket = {}
@@ -565,9 +521,11 @@ class MetadataVAEModel:
 
                     results[original_idx] = (gap_ratio, duration_ratio, status_code_idx)
 
-        # Apply reject sampling if duration bounds are provided
-        if duration_bounds is not None:
-            results = self._apply_reject_sampling(requests, results, duration_bounds)
+        # Apply reject sampling if duration bounds or gap bounds are provided
+        if duration_bounds is not None or gap_bounds is not None:
+            results = self._apply_reject_sampling(
+                requests, results, duration_bounds, gap_bounds
+            )
 
         return results
 
@@ -575,9 +533,10 @@ class MetadataVAEModel:
         self,
         requests: list[tuple[int, NodeFeature, NodeFeature, float, float]],
         initial_results: list[tuple[float, float]],
-        duration_bounds: list[tuple[float, float]],
+        duration_bounds: list[tuple[float, float]] = None,
+        gap_bounds: list[tuple[float, float]] = None,
     ) -> list[tuple[float, float]]:
-        """Apply reject sampling to ensure generated durations fall within bounds."""
+        """Apply reject sampling to ensure generated durations and gaps fall within bounds."""
 
         # Import config parameters for reject sampling
         max_attempts = getattr(self.config, "reject_sampling_max_attempts", 10)
@@ -590,18 +549,29 @@ class MetadataVAEModel:
 
         # Find indices that need resampling
         indices_to_resample = []
-        for i, ((_, duration_ratio, _), (min_dur, max_dur)) in enumerate(
-            zip(results, duration_bounds, strict=False)
-        ):
-            if duration_bounds[i] is None:
-                continue
-
-            # Calculate actual child duration
+        for i, (gap_ratio, duration_ratio, _) in enumerate(results):
             parent_duration = requests[i][3]  # parent_duration is 4th element
-            child_duration = duration_ratio * parent_duration
+            needs_resample = False
 
-            # Check if within bounds
-            if not (min_dur <= child_duration <= max_dur):
+            # Check duration bounds if provided
+            if duration_bounds is not None and duration_bounds[i] is not None:
+                min_dur, max_dur = duration_bounds[i]
+                child_duration = duration_ratio * parent_duration
+                if not (min_dur <= child_duration <= max_dur):
+                    needs_resample = True
+
+            # Check gap bounds if provided
+            if gap_bounds is not None and gap_bounds[i] is not None:
+                min_gap, max_gap = gap_bounds[i]
+                gap_from_parent = gap_ratio * parent_duration
+                if not (min_gap <= gap_from_parent <= max_gap):
+                    needs_resample = True
+
+            # Check composition constraint (gap + duration <= 1.0)
+            if gap_ratio + duration_ratio > 1.0:
+                needs_resample = True
+
+            if needs_resample:
                 indices_to_resample.append(i)
 
         # Perform reject sampling for out-of-bounds samples
@@ -680,11 +650,28 @@ class MetadataVAEModel:
             new_indices_to_resample = []
             for i in indices_to_resample:
                 gap_ratio, duration_ratio, status_code_idx = results[i]
-                min_dur, max_dur = duration_bounds[i]
                 parent_duration = requests[i][3]
-                child_duration = duration_ratio * parent_duration
+                needs_resample = False
 
-                if not (min_dur <= child_duration <= max_dur):
+                # Check duration bounds if provided
+                if duration_bounds is not None and duration_bounds[i] is not None:
+                    min_dur, max_dur = duration_bounds[i]
+                    child_duration = duration_ratio * parent_duration
+                    if not (min_dur <= child_duration <= max_dur):
+                        needs_resample = True
+
+                # Check gap bounds if provided
+                if gap_bounds is not None and gap_bounds[i] is not None:
+                    min_gap, max_gap = gap_bounds[i]
+                    gap_from_parent = gap_ratio * parent_duration
+                    if not (min_gap <= gap_from_parent <= max_gap):
+                        needs_resample = True
+
+                # Check composition constraint (gap + duration <= 1.0)
+                if gap_ratio + duration_ratio > 1.0:
+                    needs_resample = True
+
+                if needs_resample:
                     new_indices_to_resample.append(i)
 
             indices_to_resample = new_indices_to_resample
@@ -692,25 +679,51 @@ class MetadataVAEModel:
         # Apply fallback clamping for any remaining out-of-bounds samples
         for i in indices_to_resample:
             gap_ratio, duration_ratio, status_code_idx = results[i]
-            min_dur, max_dur = duration_bounds[i]
             parent_duration = requests[i][3]
 
-            # Clamp duration ratio to respect bounds
-            min_ratio = min_dur / parent_duration if parent_duration > 0 else 0.0
-            max_ratio = max_dur / parent_duration if parent_duration > 0 else 1.0
+            # Clamp gap ratio if gap bounds are provided
+            if gap_bounds is not None and gap_bounds[i] is not None:
+                min_gap, max_gap = gap_bounds[i]
+                min_gap_ratio = (
+                    min_gap / parent_duration if parent_duration > 0 else 0.0
+                )
+                max_gap_ratio = (
+                    max_gap / parent_duration if parent_duration > 0 else 1.0
+                )
+                gap_ratio = float(
+                    np.clip(gap_ratio, max(0.0, min_gap_ratio), min(1.0, max_gap_ratio))
+                )
 
-            # Ensure ratios are within [0, 1] and respect bounds
-            clamped_duration_ratio = np.clip(
-                duration_ratio, max(0.0, min_ratio), min(1.0, max_ratio)
-            )
+            # Clamp duration ratio if duration bounds are provided
+            if duration_bounds is not None and duration_bounds[i] is not None:
+                min_dur, max_dur = duration_bounds[i]
+                min_duration_ratio = (
+                    min_dur / parent_duration if parent_duration > 0 else 0.0
+                )
+                max_duration_ratio = (
+                    max_dur / parent_duration if parent_duration > 0 else 1.0
+                )
+                duration_ratio = float(
+                    np.clip(
+                        duration_ratio,
+                        max(0.0, min_duration_ratio),
+                        min(1.0, max_duration_ratio),
+                    )
+                )
 
-            results[i] = (gap_ratio, float(clamped_duration_ratio), status_code_idx)
+            # Ensure composition constraint (gap + duration <= 1.0)
+            if gap_ratio + duration_ratio > 1.0:
+                # Scale both down proportionally to fit
+                total = gap_ratio + duration_ratio
+                gap_ratio = gap_ratio / total
+                duration_ratio = duration_ratio / total
+
+            results[i] = (gap_ratio, duration_ratio, status_code_idx)
 
         return results
 
     def save_state_dict(self, proto_models):
         """Save model state to protobuf message."""
-        from genteval.compressors.simple_gent.proto import simple_gent_pb2
 
         # Group data by time buckets
         time_bucket_data = {}

@@ -1,9 +1,36 @@
+from dataclasses import dataclass
+
 import torch
 from torch import nn
 from torch.distributions import Beta, Categorical, Normal
 from torch.nn import functional
 
 from .normalizing_flow import NormalizingFlow
+
+
+@dataclass
+class VAEOutput:
+    """Output structure for MetadataVAE forward and decode methods."""
+
+    # Final predictions
+    gap_ratio: torch.Tensor  # Final gap_from_parent_ratio
+    duration_ratio: torch.Tensor  # Final child_duration_ratio
+    status_code_logits: torch.Tensor  # Logits for status code classification
+
+    # Latent variables (for training)
+    mu: torch.Tensor  # Latent mean
+    logvar: torch.Tensor  # Latent log variance
+    z: torch.Tensor  # Latent sample
+
+    # Distribution parameters (for loss computation)
+    gap_x_scale: torch.Tensor  # Scaling factor for gap Beta distribution
+    gap_mixture_weights: torch.Tensor  # Mixture weights for gap Beta
+    gap_alphas: torch.Tensor  # Alpha parameters for gap Beta
+    gap_betas: torch.Tensor  # Beta parameters for gap Beta
+    duration_x_scale: torch.Tensor  # Scaling factor for duration Beta distribution
+    duration_mixture_weights: torch.Tensor  # Mixture weights for duration Beta
+    duration_alphas: torch.Tensor  # Alpha parameters for duration Beta
+    duration_betas: torch.Tensor  # Beta parameters for duration Beta
 
 
 class MetadataVAE(nn.Module):
@@ -169,8 +196,23 @@ class MetadataVAE(nn.Module):
         return -total_log_prob.sum()
 
     def decode(
-        self, z: torch.Tensor, conditioning: torch.Tensor
-    ) -> tuple[torch.Tensor, ...]:
+        self,
+        z: torch.Tensor,
+        conditioning: torch.Tensor,
+        mu: torch.Tensor = None,
+        logvar: torch.Tensor = None,
+    ) -> VAEOutput:
+        """Decode latent representation to predictions.
+
+        Args:
+            z: Latent vector
+            conditioning: Conditioning information
+            mu: Optional latent mean (for including in output)
+            logvar: Optional latent log variance (for including in output)
+
+        Returns:
+            VAEOutput with all distribution parameters and predictions
+        """
         # Concatenate latent vector with conditioning information
         decoder_input = torch.cat([z, conditioning], dim=1)
 
@@ -213,18 +255,21 @@ class MetadataVAE(nn.Module):
             duration_mixture_weights, duration_alphas, duration_betas, duration_x_scale
         )
 
-        return (
-            gap_from_parent_ratio,
-            gap_x_scale,
-            gap_mixture_weights,
-            gap_alphas,
-            gap_betas,
-            child_duration_ratio,
-            duration_x_scale,
-            duration_mixture_weights,
-            duration_alphas,
-            duration_betas,
-            status_code_logits,
+        return VAEOutput(
+            gap_ratio=gap_from_parent_ratio,
+            duration_ratio=child_duration_ratio,
+            status_code_logits=status_code_logits,
+            mu=mu,
+            logvar=logvar,
+            z=z,
+            gap_x_scale=gap_x_scale,
+            gap_mixture_weights=gap_mixture_weights,
+            gap_alphas=gap_alphas,
+            gap_betas=gap_betas,
+            duration_x_scale=duration_x_scale,
+            duration_mixture_weights=duration_mixture_weights,
+            duration_alphas=duration_alphas,
+            duration_betas=duration_betas,
         )
 
     def forward(
@@ -233,7 +278,7 @@ class MetadataVAE(nn.Module):
         child_idx: torch.Tensor,
         parent_node_idx: torch.Tensor,
         child_node_idx: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> VAEOutput:
         """
         Args:
             parent_duration: Tensor of shape (batch_size,)
@@ -242,11 +287,7 @@ class MetadataVAE(nn.Module):
             child_node_idx: Tensor of shape (batch_size,) - node name indices
 
         Returns:
-            Tuple of (reconstruction, x_scale, alpha, beta, mu, logvar, z)
-            reconstruction contains [gap_from_parent_ratio, child_duration_ratio] in [0,1]
-            x_scale is the scaling factor for the beta distribution
-            alpha, beta are the beta distribution parameters for child_duration_ratio
-            z is the latent sample
+            VAEOutput containing all predictions and distribution parameters
         """
         # Apply log transformation to duration to handle large values
         log_duration = torch.log(
@@ -271,53 +312,27 @@ class MetadataVAE(nn.Module):
         # VAE forward pass
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        decode_output = self.decode(z, x)
 
-        (
-            gap_from_parent_ratio,
-            gap_x_scale,
-            gap_mixture_weights,
-            gap_alphas,
-            gap_betas,
-            child_duration_ratio,
-            duration_x_scale,
-            duration_mixture_weights,
-            duration_alphas,
-            duration_betas,
-            status_code_logits,
-        ) = decode_output
-        return (
-            gap_x_scale,
-            gap_mixture_weights,
-            gap_alphas,
-            gap_betas,
-            duration_x_scale,
-            duration_mixture_weights,
-            duration_alphas,
-            duration_betas,
-            mu,
-            logvar,
-            z,
-            status_code_logits,
-        )
+        # Decode with mu and logvar included
+        return self.decode(z, x, mu=mu, logvar=logvar)
 
     def loss_function(
         self,
         x: torch.Tensor,
-        gap_x_scale: torch.Tensor,
-        gap_mixture_weights: torch.Tensor,
-        gap_alphas: torch.Tensor,
-        gap_betas: torch.Tensor,
-        duration_x_scale: torch.Tensor,
-        duration_mixture_weights: torch.Tensor,
-        duration_alphas: torch.Tensor,
-        duration_betas: torch.Tensor,
-        mu: torch.Tensor,
-        logvar: torch.Tensor,
-        z: torch.Tensor,
-        status_code_logits: torch.Tensor,
+        output: VAEOutput,
         beta: float = 1.0,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute loss given targets and model output.
+
+        Args:
+            x: Target tensor with shape (batch_size, 3) containing:
+               [gap_ratio, duration_ratio, status_code_idx]
+            output: VAEOutput from forward pass
+            beta: Weight for KL divergence term
+
+        Returns:
+            Tuple of (total_loss, recon_loss, kl_loss)
+        """
         # Split targets
         gap_target = x[:, 0]
         child_duration_target = x[:, 1]
@@ -326,24 +341,24 @@ class MetadataVAE(nn.Module):
         # Mixture Beta distribution negative log-likelihood for gap_from_parent_ratio
         gap_mixture_beta_nll = self._mixture_beta_log_prob(
             gap_target,
-            gap_mixture_weights,
-            gap_alphas,
-            gap_betas,
-            gap_x_scale,
+            output.gap_mixture_weights,
+            output.gap_alphas,
+            output.gap_betas,
+            output.gap_x_scale,
         )
 
         # Mixture Beta distribution negative log-likelihood for child_duration_ratio
         duration_mixture_beta_nll = self._mixture_beta_log_prob(
             child_duration_target,
-            duration_mixture_weights,
-            duration_alphas,
-            duration_betas,
-            duration_x_scale,
+            output.duration_mixture_weights,
+            output.duration_alphas,
+            output.duration_betas,
+            output.duration_x_scale,
         )
 
         # Cross-entropy loss for status code classification
         status_code_loss = functional.cross_entropy(
-            status_code_logits, status_code_target, reduction="sum"
+            output.status_code_logits, status_code_target, reduction="sum"
         )
 
         # Total reconstruction loss
@@ -354,15 +369,19 @@ class MetadataVAE(nn.Module):
             # For flow-based prior: KL[q(z|x) || p_flow(z)]
             # q(z|x) log prob
             posterior_log_prob = (
-                Normal(mu, torch.exp(0.5 * logvar)).log_prob(z).sum(dim=-1)
+                Normal(output.mu, torch.exp(0.5 * output.logvar))
+                .log_prob(output.z)
+                .sum(dim=-1)
             )
             # p_flow(z) log prob
-            prior_log_prob = self.flow_prior.log_prob(z)
+            prior_log_prob = self.flow_prior.log_prob(output.z)
             # KL divergence
             kl_loss = (posterior_log_prob - prior_log_prob).sum()
         else:
             # Standard VAE KL divergence
-            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+            kl_loss = -0.5 * torch.sum(
+                1 + output.logvar - output.mu.pow(2) - output.logvar.exp()
+            )
 
         total_loss = recon_loss + kl_loss * beta
         return total_loss, recon_loss, kl_loss
@@ -384,7 +403,7 @@ class MetadataVAE(nn.Module):
             child_node_idx: Tensor of shape (batch_size,) - node name indices
 
         Returns:
-            Tensor of shape (batch_size, 2) containing sampled outputs
+            Tensor of shape (batch_size, 3) containing [gap_ratio, duration_ratio, status_code_idx]
         """
         batch_size = parent_duration.shape[0]
 
@@ -411,30 +430,16 @@ class MetadataVAE(nn.Module):
         else:
             z = torch.randn(batch_size, self.latent_dim, device=conditioning.device)
 
-        # Decode with conditioning
-        decode_output = self.decode(z, conditioning)
-
-        (
-            gap_from_parent_ratio,
-            _gap_x_scale,
-            _gap_mixture_weights,
-            _gap_alphas,
-            _gap_betas,
-            child_duration_ratio,
-            _duration_x_scale,
-            _duration_mixture_weights,
-            _duration_alphas,
-            _duration_betas,
-            status_code_logits,
-        ) = decode_output
+        # Decode with conditioning (no mu/logvar needed for sampling)
+        output = self.decode(z, conditioning)
 
         # Sample status code from categorical distribution
-        status_code_probs = functional.softmax(status_code_logits, dim=1)
+        status_code_probs = functional.softmax(output.status_code_logits, dim=1)
         status_code_dist = Categorical(status_code_probs)
         status_code_idx = status_code_dist.sample()  # (batch_size,)
 
         # Return combined output: [gap_ratio, duration_ratio, status_code_idx]
         return torch.stack(
-            [gap_from_parent_ratio, child_duration_ratio, status_code_idx.float()],
+            [output.gap_ratio, output.duration_ratio, status_code_idx.float()],
             dim=1,
         )

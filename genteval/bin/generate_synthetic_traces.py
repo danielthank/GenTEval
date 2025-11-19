@@ -180,6 +180,13 @@ Example:
     print(f"Loading template trace from {args.input}")
     template_df = pd.read_csv(args.input)
 
+    # Convert http.status_code to integer type (preserving empty values)
+    if "http.status_code" in template_df.columns:
+        # Convert to Int64 (nullable integer type) to preserve empty values
+        template_df["http.status_code"] = pd.to_numeric(
+            template_df["http.status_code"], errors="coerce"
+        ).astype("Int64")
+
     # Get unique trace IDs in the template
     template_trace_ids = template_df["traceID"].unique()
     print(
@@ -198,7 +205,10 @@ Example:
     # Save to CSV
     output_file = args.output / "traces.csv"
     print(f"Saving synthetic traces to {output_file}")
-    synthetic_df.to_csv(output_file, index=False)
+
+    # Ensure http.status_code is saved as integer (not float)
+    # Use na_rep='' to write NaN/empty values as empty strings
+    synthetic_df.to_csv(output_file, index=False, na_rep="")
 
     print("Done!")
     return 0
