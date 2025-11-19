@@ -8,7 +8,7 @@ class CostConfig:
     gpu_per_hour: float = 0.38
     cpu_per_hour: float = 0.16
     span_count: int = 1845349
-    time_duration_minutes: int = 48 * 30 * 24 * 60
+    time_duration_minutes: int = 35
 
 
 @dataclass

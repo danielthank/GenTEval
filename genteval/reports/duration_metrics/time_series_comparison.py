@@ -264,7 +264,7 @@ class TimeSeriesComparisonMetric:
                 metrics_data[percentile] = metrics
 
         # Create 11 subplots (one for each percentile)
-        fig, axes = plt.subplots(4, 3, figsize=(18, 20))
+        fig, axes = plt.subplots(3, 4, figsize=(20, 15))
         axes = axes.flatten()  # Make it easier to iterate
 
         for idx, percentile in enumerate(percentiles):
