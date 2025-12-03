@@ -218,9 +218,6 @@ class SimpleGenTCompressor(Compressor):
                 simple_gent_pb2.SimpleGenTModels,
             )
 
-            # Save number of trees (root nodes) for reconstruction
-            compressed_data.add("num_traces", total_trees, SerializationFormat.MSGPACK)
-
         # Save timing information
         cpu_time, gpu_time = timer.get_times()
         compressed_data.add(
@@ -246,11 +243,8 @@ class SimpleGenTCompressor(Compressor):
         # Load models
         self._load_models(compressed_dataset)
 
-        # Generate traces
-        num_traces = compressed_dataset["num_traces"]
-        self.logger.info(f"Generating {num_traces} traces")
-
-        generated_dataset = self._generate_traces(num_traces)
+        # Generate traces using exact counts from training data
+        generated_dataset = self._generate_traces()
 
         self.logger.info(f"Generated {len(generated_dataset.traces)} traces")
         return generated_dataset
@@ -287,24 +281,28 @@ class SimpleGenTCompressor(Compressor):
         self.metadata_vae_model = MetadataVAEModel(self.config, vocab_size)
         self.metadata_vae_model.load_state_dict(proto_models)
 
-    def _generate_traces(self, num_traces: int) -> Dataset:
-        """Generate traces using the trained models."""
+    def _generate_traces(self) -> Dataset:
+        """Generate traces using exact counts from training data."""
         dataset = Dataset()
         dataset.traces = {}
 
-        # Step 1: Sample root features with their time buckets directly
-        root_features_with_buckets = self.root_model.sample_root_features(num_traces)
+        # Step 1: Get all root features with exact counts from training data
+        # This guarantees faithful reproduction of time bucket and trace type distribution
+        root_features_with_buckets = self.root_model.sample_root_features_stratified()
+        self.logger.info(
+            f"Generating {len(root_features_with_buckets)} traces (exact count from training)"
+        )
 
         # Step 2-3: Collect all trace info for batch processing
         trace_infos = []
-        for time_bucket, root_feature in tqdm(
+        for time_bucket, root_feature, trace_type in tqdm(
             root_features_with_buckets, desc="Preparing traces for batch generation"
         ):
             trace_id = _get_random_trace_id()
 
-            # Generate topology using topology model
+            # Generate topology using trace_type-specific model
             root_tree = self.topology_model.generate_tree_structure(
-                root_feature, time_bucket
+                root_feature, time_bucket, trace_type
             )
 
             if root_tree is None:

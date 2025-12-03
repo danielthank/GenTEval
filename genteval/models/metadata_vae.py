@@ -33,6 +33,8 @@ class MetadataVAE(nn.Module):
         prior_flow_layers: int = 4,
         prior_flow_hidden_dim: int = 64,
         num_beta_components: int = 3,
+        use_focal_loss: bool = False,
+        focal_loss_gamma: float = 2.0,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -41,6 +43,8 @@ class MetadataVAE(nn.Module):
         self.embed_dim = self.hidden_dim
         self.use_flow_prior = use_flow_prior
         self.num_beta_components = num_beta_components
+        self.use_focal_loss = use_focal_loss
+        self.focal_loss_gamma = focal_loss_gamma
 
         # Embedding for node names (+1 for NO_PARENT token at index vocab_size)
         self.node_embedding = nn.Embedding(vocab_size + 1, self.embed_dim)
@@ -178,6 +182,27 @@ class MetadataVAE(nn.Module):
         # Decode with mu and logvar included
         return self.decode(z, x, mu=mu, logvar=logvar)
 
+    def focal_loss(
+        self, logits: torch.Tensor, targets: torch.Tensor, gamma: float
+    ) -> torch.Tensor:
+        """Focal loss for multi-class classification.
+
+        Focal loss down-weights easy/well-classified examples and focuses on hard examples.
+        FL(p_t) = -(1 - p_t)^gamma * log(p_t)
+
+        Args:
+            logits: Predicted logits of shape (batch_size, num_classes)
+            targets: Target class indices of shape (batch_size,)
+            gamma: Focusing parameter (typically 2.0)
+
+        Returns:
+            Sum of focal loss over the batch
+        """
+        ce_loss = functional.cross_entropy(logits, targets, reduction="none")
+        p_t = torch.exp(-ce_loss)  # probability of correct class
+        focal_weight = (1 - p_t) ** gamma
+        return (focal_weight * ce_loss).sum()
+
     def loss_function(
         self,
         x: torch.Tensor,
@@ -206,10 +231,15 @@ class MetadataVAE(nn.Module):
             output.duration_ratio, child_duration_target, reduction="sum"
         )
 
-        # Cross-entropy loss for status code classification
-        status_code_loss = functional.cross_entropy(
-            output.status_code_logits, status_code_target, reduction="sum"
-        )
+        # Status code classification loss
+        if self.use_focal_loss:
+            status_code_loss = self.focal_loss(
+                output.status_code_logits, status_code_target, self.focal_loss_gamma
+            )
+        else:
+            status_code_loss = functional.cross_entropy(
+                output.status_code_logits, status_code_target, reduction="sum"
+            )
 
         # Total reconstruction loss
         recon_loss = gap_loss + duration_loss + status_code_loss

@@ -55,7 +55,7 @@ class OperationReport(BaseReport):
 
                 original_results_path = (
                     get_dir_with_root(self.root_dir, app_name, service, fault, run)
-                    / "head_sampling_1"
+                    / "head_1_1"
                     / "evaluated"
                     / "operation_results.json"
                 )

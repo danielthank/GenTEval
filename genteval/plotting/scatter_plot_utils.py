@@ -4,9 +4,31 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-# Color scheme for different durations (matching draw.py)
-DURATION_COLORS = {"1min": "red", "5min": "blue", "10min": "green"}
-DURATION_MARKERS = {"1min": "o", "5min": "s", "10min": "^"}
+# Experiment name to display name mapping
+EXPERIMENT_DISPLAY_NAMES = {
+    "rootcount-stratified": "Root Count + Stratified",
+    "rootcount-focal": "Root Count + Focal Loss",
+    "rootcount": "Root Count",
+    "prev": "GenT (Previous)",
+}
+
+# Color scheme for GenT experiments
+EXPERIMENT_COLORS = {
+    "rootcount-stratified": "red",
+    "rootcount-focal": "green",
+    "rootcount": "blue",
+    "prev": "orange",
+}
+EXPERIMENT_MARKERS = {
+    "rootcount-stratified": "o",
+    "rootcount-focal": "^",
+    "rootcount": "s",
+    "prev": "p",
+}
+
+# Head sampling style (consistent color for all rates)
+HEAD_SAMPLING_MARKER = "D"
+HEAD_SAMPLING_COLOR = "purple"
 
 
 def setup_plot_style():
@@ -18,52 +40,63 @@ def setup_plot_style():
     plt.rcParams["axes.titlesize"] = 14
 
 
-def group_experiments_by_duration(data_points, metric):
+def get_display_name(experiment_name: str) -> str:
+    """Get display name for an experiment, using mapping or the raw name."""
+    return EXPERIMENT_DISPLAY_NAMES.get(experiment_name, experiment_name)
+
+
+def group_experiments_by_name(data_points, metric):
     """
-    Group experiments by duration for GenT and separate head sampling.
+    Group experiments by experiment name for GenT and by sampling rate for head sampling.
 
     Args:
         data_points: List of data points with 'compressor', 'cost_per_million', and metric field
         metric: Name of the metric field to extract (e.g., 'mape_fidelity')
 
     Returns:
-        Tuple of (duration_groups, head_sampling_points)
-        - duration_groups: dict {duration: [(cost, fidelity, compressor), ...]}
-        - head_sampling_points: list [(cost, fidelity, compressor), ...]
+        Tuple of (experiment_groups, head_sampling_groups)
+        - experiment_groups: dict {experiment_name: [(cost, fidelity, compressor), ...]}
+        - head_sampling_groups: dict {sampling_rate: [(cost, fidelity, compressor), ...]}
     """
-    duration_groups = {}
-    head_sampling_points = []
+    experiment_groups = {}
+    head_sampling_groups = {}
 
     for point in data_points:
         compressor = point["compressor"]
         cost = point["cost_per_million"]
         fidelity = point[metric]
 
-        if "gent" in compressor:
-            # Extract duration (e.g., "gent_1_1" -> "1min", "gent_5_2" -> "5min")
-            parts = compressor.split("_")
-            if "gent" in parts:
-                gent_idx = parts.index("gent")
-                if gent_idx + 1 < len(parts):
-                    duration = f"{parts[gent_idx + 1]}min"
-                    if duration not in duration_groups:
-                        duration_groups[duration] = []
-                    duration_groups[duration].append((cost, fidelity, compressor))
-        elif "head_sampling" in compressor:
-            head_sampling_points.append((cost, fidelity, compressor))
+        parts = compressor.split("_")
 
-    return duration_groups, head_sampling_points
+        # Format: {prefix}_gent_{experiment_name}_{iteration}
+        # or: {prefix}_head_{sampling_rate}_{iteration}
+        if "gent" in parts:
+            gent_idx = parts.index("gent")
+            if gent_idx + 2 < len(parts):
+                experiment_name = parts[gent_idx + 1]
+                if experiment_name not in experiment_groups:
+                    experiment_groups[experiment_name] = []
+                experiment_groups[experiment_name].append((cost, fidelity, compressor))
+        elif "head" in parts:
+            head_idx = parts.index("head")
+            if head_idx + 2 < len(parts):
+                sampling_rate = parts[head_idx + 1]
+                if sampling_rate not in head_sampling_groups:
+                    head_sampling_groups[sampling_rate] = []
+                head_sampling_groups[sampling_rate].append((cost, fidelity, compressor))
+
+    return experiment_groups, head_sampling_groups
 
 
-def plot_duration_groups(duration_groups):
+def plot_experiment_groups(experiment_groups):
     """
-    Plot GenT duration groups with mean ± std error bars.
+    Plot GenT experiment groups with mean ± std error bars.
 
     Args:
-        duration_groups: dict {duration: [(cost, fidelity, compressor), ...]}
+        experiment_groups: dict {experiment_name: [(cost, fidelity, compressor), ...]}
     """
-    for duration in sorted(duration_groups.keys()):
-        group_data = duration_groups[duration]
+    for experiment_name in sorted(experiment_groups.keys()):
+        group_data = experiment_groups[experiment_name]
         group_costs = [d[0] for d in group_data]
         group_fidelities = [d[1] for d in group_data]
 
@@ -72,8 +105,9 @@ def plot_duration_groups(duration_groups):
         std_cost = np.std(group_costs)
         std_fidelity = np.std(group_fidelities)
 
-        color = DURATION_COLORS.get(duration, "black")
-        marker = DURATION_MARKERS.get(duration, "o")
+        color = EXPERIMENT_COLORS.get(experiment_name, "black")
+        marker = EXPERIMENT_MARKERS.get(experiment_name, "o")
+        display_name = get_display_name(experiment_name)
 
         # Plot error bars (mean ± std)
         plt.errorbar(
@@ -83,7 +117,7 @@ def plot_duration_groups(duration_groups):
             yerr=std_fidelity,
             marker=marker,
             markersize=5,
-            label=f"GenT {duration} CPU (mean ± std)",
+            label=f"{display_name} (mean ± std)",
             color=color,
             alpha=0.8,
             capsize=5,
@@ -105,7 +139,7 @@ def plot_duration_groups(duration_groups):
 
         # Annotate mean
         plt.annotate(
-            f"GenT {duration} CPU",
+            display_name,
             (mean_cost, mean_fidelity),
             xytext=(8, 8),
             textcoords="offset points",
@@ -120,36 +154,65 @@ def plot_duration_groups(duration_groups):
         )
 
 
-def plot_head_sampling_points(head_sampling_points):
+def plot_head_sampling_points(head_sampling_groups):
     """
-    Plot head sampling points with diamond markers.
+    Plot head sampling groups with mean ± std error bars.
 
     Args:
-        head_sampling_points: list [(cost, fidelity, compressor), ...]
+        head_sampling_groups: dict {sampling_rate: [(cost, fidelity, compressor), ...]}
     """
-    if not head_sampling_points:
+    if not head_sampling_groups:
         return
 
-    hs_costs = [d[0] for d in head_sampling_points]
-    hs_fidelities = [d[1] for d in head_sampling_points]
-    hs_names = [d[2].split("_")[-1] for d in head_sampling_points]  # Extract ratio
+    # Sort by sampling rate (as int for proper ordering)
+    sorted_rates = sorted(head_sampling_groups.keys(), key=lambda x: int(x))
+    first_rate = True
 
-    plt.scatter(
-        x=hs_costs,
-        y=hs_fidelities,
-        marker="D",
-        s=120,
-        label="Head Sampling",
-        alpha=0.8,
-        edgecolors="black",
-        linewidth=1,
-    )
+    for rate in sorted_rates:
+        group_data = head_sampling_groups[rate]
+        group_costs = [d[0] for d in group_data]
+        group_fidelities = [d[1] for d in group_data]
 
-    # Annotate each head sampling point
-    for cost, fidelity, name in zip(hs_costs, hs_fidelities, hs_names, strict=False):
+        mean_cost = np.mean(group_costs)
+        mean_fidelity = np.mean(group_fidelities)
+        std_cost = np.std(group_costs)
+        std_fidelity = np.std(group_fidelities)
+
+        display_name = f"1:{rate}"
+
+        # Plot error bars (mean ± std)
+        # Only add legend label for the first rate to avoid duplicate "Head Sampling" entries
+        plt.errorbar(
+            x=mean_cost,
+            y=mean_fidelity,
+            xerr=std_cost,
+            yerr=std_fidelity,
+            marker=HEAD_SAMPLING_MARKER,
+            markersize=5,
+            label="Head Sampling (mean ± std)" if first_rate else None,
+            color=HEAD_SAMPLING_COLOR,
+            alpha=0.8,
+            capsize=5,
+            capthick=2,
+            linewidth=2,
+        )
+
+        # Plot individual points
+        plt.scatter(
+            x=group_costs,
+            y=group_fidelities,
+            marker=HEAD_SAMPLING_MARKER,
+            s=25,
+            color=HEAD_SAMPLING_COLOR,
+            alpha=0.4,
+            edgecolors="black",
+            linewidth=1,
+        )
+
+        # Annotate mean
         plt.annotate(
-            f"1:{name}",
-            (cost, fidelity),
+            display_name,
+            (mean_cost, mean_fidelity),
             xytext=(8, 8),
             textcoords="offset points",
             fontsize=9,
@@ -161,6 +224,8 @@ def plot_head_sampling_points(head_sampling_points):
             },
             arrowprops={"arrowstyle": "->", "color": "gray", "alpha": 0.5},
         )
+
+        first_rate = False
 
 
 def format_plot_axes(title, y_label):

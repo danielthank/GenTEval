@@ -118,3 +118,44 @@ def get_dir_with_root(
     if fault is not None:
         return root_dir / app_name / f"{service}_{fault}" / str(run)
     return root_dir / app_name / service / str(run)
+
+
+def expand_compressor_prefixes(
+    compressor_prefixes: list[str],
+    root_dir: pathlib.Path,
+    run_dirs_iter,
+) -> list[str]:
+    """
+    Expand compressor prefixes to actual compressor directory names.
+
+    Args:
+        compressor_prefixes: List of compressor prefixes (e.g., ["head_2", "gent_focal"])
+        root_dir: Root directory containing experiment outputs
+        run_dirs_iter: Iterator/iterable of (app_name, service, fault, run) tuples
+
+    Returns:
+        List of expanded compressor names that match the prefixes
+    """
+    expanded = set()
+
+    # Collect all matching directories from the first run_dir
+    for app_name, service, fault, run in run_dirs_iter:
+        base_dir = get_dir_with_root(root_dir, app_name, service, fault, run)
+        if not base_dir.exists():
+            continue
+
+        # List all subdirectories
+        for subdir in base_dir.iterdir():
+            if not subdir.is_dir():
+                continue
+            dir_name = subdir.name
+
+            # Check if any prefix matches
+            for prefix in compressor_prefixes:
+                if dir_name == prefix or dir_name.startswith(prefix + "_"):
+                    expanded.add(dir_name)
+
+        # Only need to check one directory to find all compressor names
+        break
+
+    return sorted(expanded)

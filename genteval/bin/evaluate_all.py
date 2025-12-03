@@ -12,7 +12,7 @@ from .all_utils import (
     create_standard_parser,
     display_configuration,
 )
-from .utils import get_dir_with_root
+from .utils import expand_compressor_prefixes, get_dir_with_root, run_dirs
 
 
 async def evaluate_task(
@@ -127,29 +127,30 @@ async def evaluate_all():
         args.runs,
     )
 
-    # Display configuration with custom fields
-    extra_config = {"Compressors": args.compressors, "Evaluators": args.evaluators}
-    display_configuration(applications, services, faults, runs, extra_config)
-
     # Custom processing logic
     root_dir = pathlib.Path(args.root_dir)
+
+    # Expand compressor prefixes to actual directory names
+    expanded_compressors = expand_compressor_prefixes(
+        args.compressors,
+        root_dir,
+        run_dirs(applications, services, faults, runs),
+    )
+
+    if not expanded_compressors:
+        print(f"No compressors found matching prefixes: {args.compressors}")
+        return
+
+    # Display configuration with custom fields
+    extra_config = {"Compressors": expanded_compressors, "Evaluators": args.evaluators}
+    display_configuration(applications, services, faults, runs, extra_config)
+
     semaphore = asyncio.Semaphore(args.max_workers)
     tasks = []
 
     # Generate all combinations including compressors and evaluators
-    from .utils import run_dirs
-
     for app_name, service, fault, run in run_dirs(applications, services, faults, runs):
-        for compressor in args.compressors:
-            # Filter valid compressors
-            if (
-                compressor not in ["original"]
-                and not compressor.startswith("head_sampling")
-                and not compressor.startswith("gent")
-                and not compressor.startswith("markov_gent")
-                and not compressor.startswith("simple_gent")
-            ):
-                continue
+        for compressor in expanded_compressors:
 
             labels_path = (
                 get_dir_with_root(root_dir, app_name, service, fault, run)

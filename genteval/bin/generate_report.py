@@ -14,7 +14,7 @@ from genteval.reports import (
     TimeReport,
 )
 
-from .utils import run_dirs
+from .utils import expand_compressor_prefixes, run_dirs
 
 
 def main():
@@ -104,66 +104,79 @@ def main():
             runs=args.runs,
         )
 
+    # Expand compressor prefixes to actual directory names
+    expanded_compressors = expand_compressor_prefixes(
+        args.compressors,
+        root_dir,
+        run_dirs_func(),
+    )
+
+    if not expanded_compressors:
+        print(f"No compressors found matching prefixes: {args.compressors}")
+        return
+
+    print(f"Expanded compressors: {expanded_compressors}")
+
     # Collect all reports
     all_reports = {}
 
     if "duration_over_time" in args.evaluators:
         report_generator = DurationOverTimeReport(
-            args.compressors, root_dir, plot=args.plot
+            expanded_compressors, root_dir, plot=args.plot
         )
         report = report_generator.generate(run_dirs_func)
         all_reports["duration_over_time"] = report
 
     if "rate_over_time" in args.evaluators:
         report_generator = RateOverTimeReport(
-            args.compressors, root_dir, plot=args.plot
+            expanded_compressors, root_dir, plot=args.plot
         )
         report = report_generator.generate(run_dirs_func)
         all_reports["rate_over_time"] = report
 
     if "error_over_time" in args.evaluators:
         report_generator = ErrorOverTimeReport(
-            args.compressors, root_dir, plot=args.plot
+            expanded_compressors, root_dir, plot=args.plot
         )
         report = report_generator.generate(run_dirs_func)
         all_reports["error_over_time"] = report
 
     if "operation" in args.evaluators:
-        report_generator = OperationReport(args.compressors, root_dir)
+        report_generator = OperationReport(expanded_compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["operation"] = report
 
     if "trace_rca" in args.evaluators:
         report_generator = RCAReport(
-            args.compressors, root_dir, "trace_rca_results.json"
+            expanded_compressors, root_dir, "trace_rca_results.json"
         )
         report = report_generator.generate(run_dirs_func)
         all_reports["trace_rca"] = report
 
     if "micro_rank" in args.evaluators:
         report_generator = RCAReport(
-            args.compressors, root_dir, "micro_rank_results.json"
+            expanded_compressors, root_dir, "micro_rank_results.json"
         )
         report = report_generator.generate(run_dirs_func)
         all_reports["micro_rank"] = report
 
     if "size" in args.evaluators:
-        report_generator = SizeReport(args.compressors, root_dir)
+        report_generator = SizeReport(expanded_compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["size"] = report
 
     if "span_count" in args.evaluators:
-        report_generator = SpanCountReport(args.compressors, root_dir)
+        report_generator = SpanCountReport(expanded_compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["span_count"] = report
 
     if "time" in args.evaluators:
-        report_generator = TimeReport(args.compressors, root_dir)
+        report_generator = TimeReport(expanded_compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["time"] = report
 
     if "graph" in args.evaluators:
-        report_generator = GraphReport(args.compressors, root_dir)
+        report_generator = GraphReport(expanded_compressors, root_dir)
         report = report_generator.generate(run_dirs_func)
         all_reports["graph"] = report
 

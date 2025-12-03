@@ -10,8 +10,8 @@ from genteval.plotting.data import ReportParser
 from genteval.plotting.scatter_plot_utils import (
     build_filter_title,
     format_plot_axes,
-    group_experiments_by_duration,
-    plot_duration_groups,
+    group_experiments_by_name,
+    plot_experiment_groups,
     plot_head_sampling_points,
     setup_plot_style,
 )
@@ -136,12 +136,12 @@ def plot_rate_scatter(data_points, metric, filter_level, output_dir):
     setup_plot_style()
 
     # Group data by duration for GenT experiments
-    duration_groups, head_sampling_points = group_experiments_by_duration(
+    experiment_groups, head_sampling_points = group_experiments_by_name(
         data_points, metric
     )
 
     # Plot GenT duration groups and head sampling
-    plot_duration_groups(duration_groups)
+    plot_experiment_groups(experiment_groups)
     plot_head_sampling_points(head_sampling_points)
 
     # Format axes, title, labels, and grid

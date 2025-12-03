@@ -1,5 +1,5 @@
 import logging
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import networkx as nx
 import numpy as np
@@ -9,6 +9,7 @@ from genteval.compressors.simple_gent.proto import simple_gent_pb2
 from genteval.utils.data_structures import count_spans_per_tree
 
 from .node_feature import NodeFeature
+from .trace_type import TraceType
 
 
 class TreeNode:
@@ -34,24 +35,26 @@ class TreeNode:
 class TopologyModel:
     """
     Topology model: (parent_node_idx, parent_child_cnt, child_node_idx, child_child_cnt) -> float (potential)
+
+    Stratified by trace type (normal vs error) to ensure correct error pattern generation.
     """
 
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
 
-        # Edge potentials: {time_bucket: {(parent_feature, child_feature): potential}}
-        self.edge_potentials = defaultdict(lambda: defaultdict(float))
-
-        # Node name frequencies for fallback sampling
-        self.node_name_idxs = defaultdict(
-            lambda: defaultdict(Counter)
-        )  # {time_bucket: {depth: Counter}}
+        # Edge potentials: {trace_type: {time_bucket: {((parent_feature, child_idx), child_feature): potential}}}
+        self.edge_potentials = {
+            TraceType.NORMAL: defaultdict(lambda: defaultdict(float)),
+            TraceType.ERROR: defaultdict(lambda: defaultdict(float)),
+        }
 
         # Cache for child candidates per (parent_feature, child_idx)
-        self.child_candidates_cache = defaultdict(
-            dict
-        )  # {time_bucket: {(parent_feature, child_idx): [(child_feature, prob)]}}
+        # {trace_type: {time_bucket: {(parent_feature, child_idx): [(child_feature, prob)]}}}
+        self.child_candidates_cache = {
+            TraceType.NORMAL: defaultdict(dict),
+            TraceType.ERROR: defaultdict(dict),
+        }
 
         # Max nodes per time bucket (loaded from protobuf)
         self.max_nodes_per_bucket = {}  # {time_bucket: max_nodes}
@@ -80,26 +83,35 @@ class TopologyModel:
         return dict(max_nodes_per_bucket)
 
     def fit(self, traces):
-        """Learn topology potentials from traces."""
+        """Learn topology potentials from traces, stratified by trace type."""
         self.logger.info(f"Training topology model on {len(traces)} traces")
 
         # Calculate max_nodes_count per time bucket
         self.max_nodes_per_bucket = self._calculate_max_nodes_per_bucket(traces)
 
-        edge_counts = defaultdict(
-            lambda: defaultdict(int)
-        )  # {time_bucket: {(parent_feature, child_feature): count}}
-        node_counts = defaultdict(
-            lambda: defaultdict(Counter)
-        )  # {time_bucket: {depth: Counter}}
+        # {trace_type: {time_bucket: {((parent_feature, child_idx), child_feature): count}}}
+        edge_counts = {
+            TraceType.NORMAL: defaultdict(lambda: defaultdict(int)),
+            TraceType.ERROR: defaultdict(lambda: defaultdict(int)),
+        }
 
-        self.logger.info("Extracting topology features from traces")
+        self.logger.info(
+            "Extracting topology features from traces (stratified by trace type)"
+        )
         total_root_spans = 0
         total_edges_extracted = 0
+        normal_trace_count = 0
+        error_trace_count = 0
 
         for trace in tqdm(traces, desc="Processing traces"):
             trace_start_time = trace.start_time
             time_bucket = int(trace_start_time // self.config.time_bucket_duration_us)
+
+            trace_type = TraceType.from_trace(trace, self.config.stratified_sampling)
+            if trace_type == TraceType.ERROR:
+                error_trace_count += 1
+            else:
+                normal_trace_count += 1
 
             # Build graph from trace
             graph = nx.DiGraph()
@@ -123,15 +135,25 @@ class TopologyModel:
 
             # Extract features from each tree
             for root in root_spans:
-                edges_before = sum(len(bucket) for bucket in edge_counts.values())
-                self._extract_tree_features(
-                    graph, root, time_bucket, edge_counts, node_counts
+                edges_before = sum(
+                    len(bucket) for bucket in edge_counts[trace_type].values()
                 )
-                edges_after = sum(len(bucket) for bucket in edge_counts.values())
+                self._extract_tree_features(
+                    graph,
+                    root,
+                    time_bucket,
+                    edge_counts[trace_type],
+                )
+                edges_after = sum(
+                    len(bucket) for bucket in edge_counts[trace_type].values()
+                )
                 total_edges_extracted += edges_after - edges_before
 
         self.logger.info(
             f"Extracted features from {total_root_spans} trees, {total_edges_extracted} edges total"
+        )
+        self.logger.info(
+            f"Trace type distribution: {normal_trace_count} normal, {error_trace_count} error"
         )
 
         # Convert counts to potentials using log-likelihood
@@ -139,52 +161,52 @@ class TopologyModel:
         total_processed_buckets = 0
         total_processed_edges = 0
 
-        for time_bucket, bucket_edges in tqdm(
-            edge_counts.items(), desc="Processing time buckets"
-        ):
-            total_edges = sum(bucket_edges.values())
-            if total_edges == 0:
-                continue
+        for trace_type in [TraceType.NORMAL, TraceType.ERROR]:
+            for time_bucket, bucket_edges in tqdm(
+                edge_counts[trace_type].items(),
+                desc=f"Processing {trace_type} time buckets",
+            ):
+                total_edges = sum(bucket_edges.values())
+                if total_edges == 0:
+                    continue
 
-            total_processed_buckets += 1
+                total_processed_buckets += 1
 
-            for (
-                (parent_feature, child_idx),
-                child_feature,
-            ), count in bucket_edges.items():
-                # Use log potential with smoothing
-                potential = np.log(count + self.config.mrf_smoothing) - np.log(
-                    total_edges + len(bucket_edges) * self.config.mrf_smoothing
-                )
-                self.edge_potentials[time_bucket][
-                    ((parent_feature, child_idx), child_feature)
-                ] = potential
-                total_processed_edges += 1
+                for (
+                    (parent_feature, child_idx),
+                    child_feature,
+                ), count in bucket_edges.items():
+                    potential = np.log(count) - np.log(total_edges)
+                    self.edge_potentials[trace_type][time_bucket][
+                        ((parent_feature, child_idx), child_feature)
+                    ] = potential
+                    total_processed_edges += 1
 
         self.logger.info(
             f"Processed {total_processed_buckets} time buckets with {total_processed_edges} edge potentials"
-        )
-
-        # Store node name frequencies for fallback
-        self.node_name_idxs = node_counts
-        self.logger.info(
-            f"Stored node frequency data for {len(node_counts)} time buckets"
         )
 
         # Build child candidates cache
         self.logger.info("Building child candidates cache")
         self._build_child_candidates_cache()
 
+        normal_edges = sum(
+            len(bucket) for bucket in self.edge_potentials[TraceType.NORMAL].values()
+        )
+        error_edges = sum(
+            len(bucket) for bucket in self.edge_potentials[TraceType.ERROR].values()
+        )
         self.logger.info(
-            f"Topology model training complete: {len(self.edge_potentials)} time buckets, "
-            f"{sum(len(bucket) for bucket in self.edge_potentials.values())} total edges"
+            f"Topology model training complete: "
+            f"normal={len(self.edge_potentials[TraceType.NORMAL])} buckets/{normal_edges} edges, "
+            f"error={len(self.edge_potentials[TraceType.ERROR])} buckets/{error_edges} edges"
         )
 
     def _extract_tree_features(
-        self, graph: nx.DiGraph, root: str, time_bucket: int, edge_counts, node_counts
+        self, graph: nx.DiGraph, root: str, time_bucket: int, edge_counts
     ):
         """Extract parent-child feature pairs from a tree."""
-        # BFS to assign depths and extract features
+        # BFS to extract features
         queue = [(root, 0)]
         visited = {root}
 
@@ -192,9 +214,6 @@ class TopologyModel:
             node_id, depth = queue.pop(0)
             node_data = graph.nodes[node_id]
             node_name_idx = node_data["nodeIdx"]
-
-            # Count node at this depth
-            node_counts[time_bucket][depth][node_name_idx] += 1
 
             # Get children and sort by startTime
             children_data = []
@@ -243,47 +262,61 @@ class TopologyModel:
         """Build cache of possible children for each (parent_feature, child_idx) pair."""
         total_parent_features = 0
 
-        for time_bucket, bucket_edges in tqdm(
-            self.edge_potentials.items(), desc="Building cache"
-        ):
-            parent_children = defaultdict(list)
+        for trace_type in [TraceType.NORMAL, TraceType.ERROR]:
+            for time_bucket, bucket_edges in tqdm(
+                self.edge_potentials[trace_type].items(),
+                desc=f"Building cache for {trace_type}",
+            ):
+                parent_children = defaultdict(list)
 
-            # Group by (parent_feature, child_idx) tuple
-            for (
-                (parent_feature, child_idx),
-                child_feature,
-            ), potential in bucket_edges.items():
-                parent_key = (parent_feature, child_idx)
-                parent_children[parent_key].append((child_feature, potential))
+                # Group by (parent_feature, child_idx) tuple
+                for (
+                    (parent_feature, child_idx),
+                    child_feature,
+                ), potential in bucket_edges.items():
+                    parent_key = (parent_feature, child_idx)
+                    parent_children[parent_key].append((child_feature, potential))
 
-            # Convert to probabilities and cache
-            for parent_key, children_list in parent_children.items():
-                # Convert log potentials to probabilities
-                potentials = np.array([pot for _, pot in children_list])
-                # Use softmax to convert to probabilities
-                probabilities = np.exp(potentials - np.max(potentials))
-                probabilities = probabilities / probabilities.sum()
+                # Convert to probabilities and cache
+                for parent_key, children_list in parent_children.items():
+                    # Convert log potentials to probabilities
+                    potentials = np.array([pot for _, pot in children_list])
+                    # Use softmax to convert to probabilities
+                    probabilities = np.exp(potentials - np.max(potentials))
+                    probabilities = probabilities / probabilities.sum()
 
-                children_with_probs = [
-                    (child_feature, prob)
-                    for (child_feature, _), prob in zip(
-                        children_list, probabilities, strict=False
+                    children_with_probs = [
+                        (child_feature, prob)
+                        for (child_feature, _), prob in zip(
+                            children_list, probabilities, strict=False
+                        )
+                    ]
+
+                    self.child_candidates_cache[trace_type][time_bucket][parent_key] = (
+                        children_with_probs
                     )
-                ]
-
-                self.child_candidates_cache[time_bucket][parent_key] = (
-                    children_with_probs
-                )
-                total_parent_features += 1
+                    total_parent_features += 1
 
         self.logger.info(
             f"Built child candidates cache for {total_parent_features} unique (parent_feature, child_idx) pairs"
         )
 
     def generate_tree_structure(
-        self, root_feature: NodeFeature, time_bucket: int
+        self,
+        root_feature: NodeFeature,
+        time_bucket: int,
+        trace_type: str = TraceType.NORMAL,
     ) -> TreeNode | None:
-        """Generate a tree structure starting from a root feature."""
+        """Generate a tree structure starting from a root feature.
+
+        Args:
+            root_feature: Root node feature
+            time_bucket: Time bucket for this tree
+            trace_type: Type of trace to generate ("normal" or "error")
+
+        Returns:
+            TreeNode representing the root of the generated tree
+        """
         # Get max_nodes from stored protobuf data
         max_nodes = self._get_max_nodes_for_bucket(time_bucket)
         if max_nodes <= 0:
@@ -307,7 +340,10 @@ class TopologyModel:
                     break
 
                 child_feature = self._sample_child_feature(
-                    current_node.feature, time_bucket, current_node.depth + 1, child_idx
+                    current_node.feature,
+                    time_bucket,
+                    child_idx,
+                    trace_type,
                 )
                 if child_feature is None:
                     continue
@@ -327,79 +363,23 @@ class TopologyModel:
         self,
         parent_feature: NodeFeature,
         time_bucket: int,
-        child_depth: int,
         child_idx: int,
+        trace_type: TraceType,
     ) -> NodeFeature | None:
         """Sample a child feature given a parent feature and child position."""
-        # Create parent reference with child_idx=-1
         parent_ref = NodeFeature(
             node_idx=parent_feature.node_idx,
-            child_idx=-1,  # N/A - parent reference
+            child_idx=-1,
             child_count=parent_feature.child_count,
         )
-
-        # Create cache lookup key as tuple
         cache_key = (parent_ref, child_idx)
 
-        # Try to find cached candidates
-        if (
-            time_bucket in self.child_candidates_cache
-            and cache_key in self.child_candidates_cache[time_bucket]
-        ):
-            candidates = self.child_candidates_cache[time_bucket][cache_key]
-            if candidates:
-                features, probabilities = zip(*candidates, strict=False)
-                chosen_feature = np.random.choice(features, p=probabilities)
-                return chosen_feature
+        candidates = self.child_candidates_cache[trace_type][time_bucket].get(cache_key)
+        if not candidates:
+            return None
 
-        # Fallback: sample from node names at this depth
-        return self._fallback_sample_child(time_bucket, child_depth)
-
-    def _fallback_sample_child(
-        self, time_bucket: int, depth: int
-    ) -> NodeFeature | None:
-        """Fallback sampling when no cached candidates exist."""
-        # Try current time bucket first
-        if (
-            time_bucket in self.node_name_idxs
-            and depth in self.node_name_idxs[time_bucket]
-        ):
-            node_counter = self.node_name_idxs[time_bucket][depth]
-            if node_counter:
-                names = list(node_counter.keys())
-                counts = list(node_counter.values())
-                probabilities = np.array(counts, dtype=float)
-                probabilities = probabilities / probabilities.sum()
-
-                # Use first node index as fallback
-                chosen_node_idx = 0
-                # Random child count (simplified)
-                child_count = np.random.poisson(2)  # Average of 2 children
-                return NodeFeature(
-                    node_idx=chosen_node_idx, child_idx=0, child_count=child_count
-                )
-
-        # Final fallback: use closest time bucket
-        if self.node_name_idxs:
-            closest_bucket = min(
-                self.node_name_idxs.keys(), key=lambda b: abs(b - time_bucket)
-            )
-            if depth in self.node_name_idxs[closest_bucket]:
-                node_counter = self.node_name_idxs[closest_bucket][depth]
-                if node_counter:
-                    names = list(node_counter.keys())
-                    counts = list(node_counter.values())
-                    probabilities = np.array(counts, dtype=float)
-                    probabilities = probabilities / probabilities.sum()
-
-                    # Use first node index as fallback
-                    chosen_node_idx = 0
-                    child_count = np.random.poisson(2)
-                    return NodeFeature(
-                        node_idx=chosen_node_idx, child_idx=0, child_count=child_count
-                    )
-
-        return None
+        features, probabilities = zip(*candidates, strict=False)
+        return np.random.choice(features, p=probabilities)
 
     def _get_max_nodes_for_bucket(self, time_bucket: int) -> int:
         """Get max nodes limit for a time bucket with fallbacks."""
@@ -422,25 +402,32 @@ class TopologyModel:
 
         # Group data by time buckets
         time_bucket_data = {}
-        for time_bucket, bucket_edges in self.edge_potentials.items():
-            if time_bucket not in time_bucket_data:
-                time_bucket_data[time_bucket] = []
 
-            for (
-                (parent_feature, child_idx),
-                child_feature,
-            ), potential in bucket_edges.items():
-                topology_model = simple_gent_pb2.TopologyModel()
-                topology_model.parent_feature.node_idx = parent_feature.node_idx
-                topology_model.parent_feature.child_idx = (
-                    child_idx  # Save the position, not -1
-                )
-                topology_model.parent_feature.child_count = parent_feature.child_count
-                topology_model.child_feature.node_idx = child_feature.node_idx
-                topology_model.child_feature.child_idx = child_feature.child_idx
-                topology_model.child_feature.child_count = child_feature.child_count
-                topology_model.potential = potential
-                time_bucket_data[time_bucket].append(topology_model)
+        for trace_type in [TraceType.NORMAL, TraceType.ERROR]:
+            proto_trace_type = trace_type.to_proto()
+
+            for time_bucket, bucket_edges in self.edge_potentials[trace_type].items():
+                if time_bucket not in time_bucket_data:
+                    time_bucket_data[time_bucket] = []
+
+                for (
+                    (parent_feature, child_idx),
+                    child_feature,
+                ), potential in bucket_edges.items():
+                    topology_model = simple_gent_pb2.TopologyModel()
+                    topology_model.parent_feature.node_idx = parent_feature.node_idx
+                    topology_model.parent_feature.child_idx = (
+                        child_idx  # Save the position, not -1
+                    )
+                    topology_model.parent_feature.child_count = (
+                        parent_feature.child_count
+                    )
+                    topology_model.child_feature.node_idx = child_feature.node_idx
+                    topology_model.child_feature.child_idx = child_feature.child_idx
+                    topology_model.child_feature.child_count = child_feature.child_count
+                    topology_model.potential = potential
+                    topology_model.trace_type = proto_trace_type
+                    time_bucket_data[time_bucket].append(topology_model)
 
         # Add to protobuf message
         for time_bucket, topology_models in time_bucket_data.items():
@@ -464,7 +451,10 @@ class TopologyModel:
 
     def load_state_dict(self, proto_models):
         """Load model state from protobuf message."""
-        self.edge_potentials = defaultdict(lambda: defaultdict(float))
+        self.edge_potentials = {
+            TraceType.NORMAL: defaultdict(lambda: defaultdict(float)),
+            TraceType.ERROR: defaultdict(lambda: defaultdict(float)),
+        }
 
         # Load from protobuf message
         for time_bucket_models in proto_models.time_buckets:
@@ -488,17 +478,26 @@ class TopologyModel:
                     child_idx=topology_model.child_feature.child_idx,
                     child_count=topology_model.child_feature.child_count,
                 )
+
+                trace_type = TraceType.from_proto(topology_model.trace_type)
+
                 # Reconstruct tuple key structure
-                self.edge_potentials[time_bucket][
+                self.edge_potentials[trace_type][time_bucket][
                     ((parent_feature, child_idx), child_feature)
                 ] = topology_model.potential
 
-        # Note: node_names cache will be rebuilt during sampling as needed
-        self.node_name_idxs = defaultdict(lambda: defaultdict(Counter))
+        # Reset cache before rebuilding
+        self.child_candidates_cache = {
+            TraceType.NORMAL: defaultdict(dict),
+            TraceType.ERROR: defaultdict(dict),
+        }
 
         # Rebuild cache
         self._build_child_candidates_cache()
 
+        normal_buckets = len(self.edge_potentials[TraceType.NORMAL])
+        error_buckets = len(self.edge_potentials[TraceType.ERROR])
         self.logger.info(
-            f"Loaded topology model with {len(self.edge_potentials)} time buckets"
+            f"Loaded topology model with {normal_buckets} normal buckets, "
+            f"{error_buckets} error buckets"
         )

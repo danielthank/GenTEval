@@ -15,8 +15,8 @@ class CostConfig:
 class ExperimentData:
     name: str
     compressor_key: str
-    compute_type: str
-    duration: str
+    experiment_name: str
+    iteration: str
     size_kb: float
     cpu_time_seconds: float
     gpu_time_seconds: float
@@ -71,12 +71,10 @@ class ReportParser:
     def _parse_compressor(
         self, report_data: dict, compressor_name: str
     ) -> ExperimentData | None:
-        # Extract data from different report sections first (needed for compute type detection)
         size_data = self._extract_size_data(report_data, compressor_name)
         time_data = self._extract_time_data(report_data, compressor_name)
 
-        # Parse compressor name to extract metadata (pass time_data for compute type detection)
-        name_parts = self._parse_compressor_name(compressor_name, time_data)
+        name_parts = self._parse_compressor_name(compressor_name)
         if not name_parts:
             return None
 
@@ -92,8 +90,8 @@ class ReportParser:
         return ExperimentData(
             name=name_parts["display_name"],
             compressor_key=compressor_name,
-            compute_type=name_parts["compute_type"],
-            duration=name_parts["duration"],
+            experiment_name=name_parts["experiment_name"],
+            iteration=name_parts["iteration"],
             size_kb=size_data["size_bytes"] / 1024,
             cpu_time_seconds=time_data["cpu_seconds"],
             gpu_time_seconds=time_data["gpu_seconds"],
@@ -111,49 +109,35 @@ class ReportParser:
             is_head_sampling=name_parts["is_head_sampling"],
         )
 
-    def _parse_compressor_name(
-        self, compressor_name: str, time_data: dict | None = None
-    ) -> dict | None:
-        if "head_sampling" in compressor_name:
-            ratio = compressor_name.split("_")[-1]
-            return {
-                "display_name": f"1:{ratio}",
-                "compute_type": "",
-                "duration": "",
-                "is_head_sampling": True,
-            }
+    def _parse_compressor_name(self, compressor_name: str) -> dict | None:
+        parts = compressor_name.split("_")
 
-        if "gent" in compressor_name:
-            parts = compressor_name.split("_")
-            try:
-                duration_idx = parts.index("gent") + 1
-                if duration_idx < len(parts):
-                    duration_num = parts[duration_idx]
-                    duration = f"{duration_num}min"
+        # Find "head" or "gent" in parts (may have prefix like "otel-demo-transformed")
+        # Format: head_{sampling_rate}_{iteration} -> display as "1:{rate}"
+        if "head" in parts:
+            head_idx = parts.index("head")
+            if head_idx + 2 < len(parts):
+                sampling_rate = parts[head_idx + 1]
+                iteration = parts[head_idx + 2]
+                return {
+                    "display_name": f"1:{sampling_rate}",
+                    "experiment_name": sampling_rate,
+                    "iteration": iteration,
+                    "is_head_sampling": True,
+                }
 
-                    # Determine compute type from time data if available
-                    compute_type = "CPU"  # Default
-                    if time_data:
-                        gpu_seconds = time_data.get("gpu_seconds", 0)
-                        cpu_seconds = time_data.get("cpu_seconds", 0)
-                        if gpu_seconds > 0:
-                            compute_type = "GPU"
-                        elif cpu_seconds > 0:
-                            compute_type = "CPU"
-
-                    # Also check name suffix if time data doesn't help
-                    last_part = parts[-1].lower()
-                    if last_part in ["cpu", "gpu"]:
-                        compute_type = last_part.upper()
-
-                    return {
-                        "display_name": f"GenT {duration}",
-                        "compute_type": compute_type,
-                        "duration": duration,
-                        "is_head_sampling": False,
-                    }
-            except (ValueError, IndexError):
-                pass
+        if "gent" in parts:
+            gent_idx = parts.index("gent")
+            # Expect: gent_{experiment_name}_{iteration}
+            if gent_idx + 2 < len(parts):
+                experiment_name = parts[gent_idx + 1]
+                iteration = parts[gent_idx + 2]
+                return {
+                    "display_name": f"GenT {experiment_name}",
+                    "experiment_name": experiment_name,
+                    "iteration": iteration,
+                    "is_head_sampling": False,
+                }
 
         return None
 
@@ -184,7 +168,7 @@ class ReportParser:
             pass
 
         # For head sampling, no computation time (0 for both CPU and GPU)
-        if "head_sampling" in compressor_name:
+        if "_head_" in compressor_name:
             return {"cpu_seconds": 0, "gpu_seconds": 0}
 
         return None

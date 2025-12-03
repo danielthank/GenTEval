@@ -32,10 +32,9 @@ class SimpleGenTConfig:
     root_duration_model: RootDurationModelType = RootDurationModelType.GMM
     metadata_vae_model: MetadataVAEModelType = MetadataVAEModelType.METADATA_VAE
 
-    # MRF topology model parameters
+    # Topology model parameters
     max_depth: int = 100
     max_children: int = 5000
-    mrf_smoothing: float = 1e-6  # Smoothing for MRF potentials
 
     # GMM parameters for root duration
     max_gmm_components: int = 3
@@ -55,9 +54,16 @@ class SimpleGenTConfig:
     early_stopping_patience: int = 10
     sequential_training_lr_factor: float = 0.5  # LR reduction for sequential training
 
+    # Focal loss for status code classification (experimental)
+    use_focal_loss: bool = True
+    focal_loss_gamma: float = 2.0
+
     # Reject sampling parameters
     reject_sampling_max_attempts: int = 10
     reject_sampling_enabled: bool = True
+
+    # Stratified sampling (separate normal/error trace generation)
+    stratified_sampling: bool = False
 
     # General parameters
     random_seed: int = 42

@@ -25,32 +25,40 @@ class HeadSamplingProcessor(ScriptProcessor):
         dataset_dir = (
             self.get_dir(app_name, service, fault, run) / "original" / "dataset"
         )
-        output_dir = (
-            self.get_dir(app_name, service, fault, run)
-            / f"head_sampling_{args.sampling_rate}"
-        )
 
-        # Skip if already processed unless forced
-        if (
-            not args.force
-            and (output_dir / "compressed").exists()
-            and (output_dir / "dataset").exists()
-        ):
-            print(f"Skipping {dataset_dir} as it is already processed.")
-            return True
+        # Process all iterations
+        all_success = True
+        for iteration in range(1, args.iterations + 1):
+            output_dir = (
+                self.get_dir(app_name, service, fault, run)
+                / f"head_{args.sampling_rate}_{iteration}"
+            )
 
-        # Prepare script arguments
-        script_args = [
-            "--dataset_dir",
-            str(dataset_dir),
-            "--sampling_rate",
-            str(args.sampling_rate),
-            "-o",
-            str(output_dir),
-        ]
+            # Skip if already processed unless forced
+            if (
+                not args.force
+                and (output_dir / "compressed").exists()
+                and (output_dir / "dataset").exists()
+            ):
+                print(f"Skipping {output_dir} as it is already processed.")
+                continue
 
-        print(f"Processing {dataset_dir}...")
-        return await self.run_script(script_args, semaphore)
+            # Prepare script arguments
+            script_args = [
+                "--dataset_dir",
+                str(dataset_dir),
+                "--sampling_rate",
+                str(args.sampling_rate),
+                "-o",
+                str(output_dir),
+            ]
+
+            print(f"Processing {output_dir}...")
+            success = await self.run_script(script_args, semaphore)
+            if not success:
+                all_success = False
+
+        return all_success
 
 
 def add_head_sampling_arguments(parser: argparse.ArgumentParser):
@@ -61,11 +69,17 @@ def add_head_sampling_arguments(parser: argparse.ArgumentParser):
         required=True,
         help="Sampling rate for head sampling",
     )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=3,
+        help="Number of iterations to run for each sampling rate (default: 3)",
+    )
 
 
 def get_head_sampling_config(args):
     """Get head sampling-specific configuration for display."""
-    return {"Sampling Rate": args.sampling_rate}
+    return {"Sampling Rate": args.sampling_rate, "Iterations": args.iterations}
 
 
 async def head_sampling_task_factory(

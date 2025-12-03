@@ -2,13 +2,19 @@ syntax = "proto3";
 
 package simple_gent;
 
+// Trace type for stratified sampling
+enum TraceType {
+  NORMAL = 0;  // Normal trace (no ERROR spans)
+  ERROR = 1;   // Error trace (contains at least one span with status.code=2)
+}
+
 // Main message containing all SimpleGenT models
 message SimpleGenTModels {
   int64 time_bucket_duration = 1;  // Duration of each time bucket (e.g., 60 seconds in microseconds)
-  
+
   // Models per time bucket
   repeated TimeBucketModels time_buckets = 2;
-  
+
   // Shared node encoder for all models and time buckets
   bytes node_encoder = 3;  // LabelEncoder (serialized)
 }
@@ -48,6 +54,7 @@ message NodeFeature {
 message RootCountModel {
   NodeFeature feature = 1;
   int32 count = 2;
+  TraceType trace_type = 3;  // Normal or Error trace
 }
 
 // Topology model: maps parent-child feature pair to potential/probability
@@ -55,6 +62,7 @@ message TopologyModel {
   NodeFeature parent_feature = 1;
   NodeFeature child_feature = 2;
   double potential = 3;
+  TraceType trace_type = 4;  // Normal or Error trace
 }
 
 // Root duration model: maps node feature to Gaussian mixture

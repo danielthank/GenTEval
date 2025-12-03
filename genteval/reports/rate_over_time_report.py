@@ -41,7 +41,7 @@ class RateOverTimeReport(BaseReport):
                 # Get original data
                 original_results_file = (
                     get_dir_with_root(self.root_dir, app_name, service, fault, run)
-                    / "head_sampling_1"
+                    / "head_1_1"
                     / "evaluated"
                     / "rate_over_time_results.json"
                 )

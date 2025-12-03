@@ -24,45 +24,63 @@ class SimpleGentProcessor(ScriptProcessor):
         dataset_dir = (
             self.get_dir(app_name, service, fault, run) / "original" / "dataset"
         )
-        output_dir = self.get_dir(app_name, service, fault, run) / args.output_dir_name
 
-        # Skip if already processed (unless forced)
-        if (
-            not args.force
-            and (output_dir / "compressed").exists()
-            and (output_dir / "dataset").exists()
-        ):
-            print(f"Skipping {dataset_dir} as it is already processed.")
-            return True
+        # Process all iterations
+        all_success = True
+        for iteration in range(1, args.iterations + 1):
+            output_dir = (
+                self.get_dir(app_name, service, fault, run)
+                / f"{args.output_dir_prefix}_{iteration}"
+            )
 
-        # Prepare script arguments
-        script_args = [
-            "--dataset_dir",
-            str(dataset_dir),
-            "-o",
-            str(output_dir),
-            "--num_processes",
-            "12",
-        ]
+            # Skip if already processed (unless forced)
+            if (
+                not args.force
+                and (output_dir / "compressed").exists()
+                and (output_dir / "dataset").exists()
+            ):
+                print(f"Skipping {output_dir} as it is already processed.")
+                continue
 
-        print(f"Processing {dataset_dir}...")
-        return await self.run_script(script_args, semaphore)
+            # Prepare script arguments
+            script_args = [
+                "--dataset_dir",
+                str(dataset_dir),
+                "-o",
+                str(output_dir),
+                "--num_processes",
+                "12",
+            ]
+
+            print(f"Processing {output_dir}...")
+            success = await self.run_script(script_args, semaphore)
+            if not success:
+                all_success = False
+
+        return all_success
 
 
 def add_simple_gent_arguments(parser: argparse.ArgumentParser):
     """Add SimpleGenT-specific arguments."""
     parser.add_argument(
-        "--output_dir_name",
+        "--output_dir_prefix",
         type=str,
-        default="simple_gent",
-        help="Output directory name (default: simple_gent)",
+        default="gent_experiment",
+        help="Output directory prefix (default: gent_experiment)",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=3,
+        help="Number of iterations to run (default: 3)",
     )
 
 
 def get_simple_gent_config(args):
     """Get SimpleGenT-specific configuration for display."""
     config = {
-        "Output Directory": args.output_dir_name,
+        "Output Directory Prefix": args.output_dir_prefix,
+        "Iterations": args.iterations,
     }
     return config
 

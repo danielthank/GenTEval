@@ -64,6 +64,8 @@ class MetadataVAEModel:
             self.config.prior_flow_layers,
             self.config.prior_flow_hidden_dim,
             self.config.num_beta_components,
+            self.config.use_focal_loss,
+            self.config.focal_loss_gamma,
         )
         self.shared_model.to(self.device)
 
@@ -783,7 +785,7 @@ class MetadataVAEModel:
             # Note: node encoder is loaded at the global level by SimpleGenTCompressor
 
             for metadata_vae_model in time_bucket_models.metadata_vae_models:
-                # Initialize model
+                # Initialize model (focal loss not needed for inference, use defaults)
                 model = MetadataVAE(
                     metadata_vae_model.vocab_size,
                     metadata_vae_model.hidden_dim,
